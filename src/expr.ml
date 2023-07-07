@@ -28,15 +28,20 @@ let xp_expr
   Xprint.bracket ("{","}") aux
     print e
 
+(* expression evaluation *)
 
 let eval
+      ~(eval_unbound_path : 'dconstr path -> 'value result) (* ex: return some null value, or fail *)
       ~(eval_func : 'func -> 'value array -> 'value result)
       ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
-      (lookup : 'dconstr path -> 'value result)
-      (e : ('dconstr,'func) expr) : 'value result =
+      (e : ('dconstr,'func) expr) (bindings : ('value,'dconstr) bindings)
+    : 'value result =
   let rec aux e =
     match e with
-    | Ref p -> lookup p
+    | Ref p ->
+       (match List.assoc_opt p bindings with (* TODO: use sth more efficient *)
+        | Some v -> Result.Ok v
+        | None -> eval_unbound_path p)
     | Apply (f,args) ->
        let| lv = list_map_result aux (Array.to_list args) in
        eval_func f (Array.of_list lv)
@@ -140,7 +145,7 @@ module Index =
       | Some exprs -> exprs
   end
            
-let index_add_bindings index (bindings : ('dconstr path * 'value) list) : ('value,'dconstr,'func) Index.t =
+let index_add_bindings index (bindings : ('value,'dconstr) bindings) : ('value,'dconstr,'func) Index.t =
   List.fold_left
     (fun res (p,v) -> Index.bind v (SRef p) res)
     index bindings

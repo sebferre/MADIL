@@ -1,8 +1,6 @@
 
 open Madil_common
 
-type constr = string
-   
 type ('value,'dconstr) data =
   | DVal of 'value * ('value,'dconstr) pattern
   | DSeq of int * ('value,'dconstr) data list (* inv: <int> = List.length <data list> *)

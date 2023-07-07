@@ -76,8 +76,68 @@ let compile (* compiling a model into a non-deterministic program *)
 
 (* model evaluation *)
 
-(* TODO: bindings *)
+let get_bindings
+      ~(constr_value_opt : 'dconstr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
+      ~(seq_value_opt : 'value list -> 'value option)
+      (m : ('constr,'func) model) (d : ('value,'dconstr) data) : ('value,'dconstr) bindings =
+  let rec aux ctx m d acc =
+    match m, d with
+    | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
+       let n = Array.length args in
+       assert (Array.length dargs = n);
+       let p = ctx This in
+       let v_opt = constr_value_opt p v dc in
+       let ref_acc = ref acc in
+       Option.iter
+         (fun v -> ref_acc := (p,v) :: !ref_acc)
+         v_opt;
+       for i = 0 to n - 1 do
+         let vi_opt, acc = aux (fun pi -> ctx (Field (dc,i,pi))) args.(i) dargs.(i) !ref_acc in
+         ref_acc := acc
+       done;
+       v_opt, !ref_acc
+    | Expr _, _ -> None, acc (* expressions only in task output *)
+    | Seq (n,lm), DSeq (dn,ld) ->
+       assert (n = dn);
+       let _, lv_opt, acc =
+         List.fold_right2
+           (fun mi di (i,lv_opt,acc) ->
+             let ctx_i = (fun pi -> ctx (Item (i,pi))) in
+             let v_opt, acc = aux ctx_i mi di acc in
+             match v_opt, lv_opt with
+             | Some v, Some lv -> i-1, Some (v::lv), acc
+             | _ -> i-1, None, acc)
+           lm ld (n-1, Some [], acc) in
+       (match lv_opt with
+        | Some lv -> seq_value_opt lv, acc
+        | None -> None, acc)
+    | Cst _, _ -> raise TODO
+    | _ -> assert false
+  in
+  let v_opt, acc = aux ctx0 m d [] in
+  acc
 
+let eval
+      ~eval_unbound_path ~eval_func ~eval_arg
+      ~(model_of_value : 'value -> ('constr,'func) model result)
+      (m : ('constr,'func) model) (bindings : ('value,'dconstr) bindings)
+    : ('constr,'func) model result =
+  let eval_expr = Expr.eval ~eval_unbound_path ~eval_func ~eval_arg in
+  let rec aux = function
+    | Pat (c,args) ->
+       let| l_args' = list_map_result aux (Array.to_list args) in
+       let args' = Array.of_list l_args' in
+       Result.Ok (Pat (c,args'))
+    | Expr e ->
+       let| v = eval_expr e bindings in
+       model_of_value v
+    | Seq (n,lm1) ->
+       let| lm1' = list_map_result aux lm1 in
+       Result.Ok (Seq (n,lm1'))
+    | Cst m1 -> raise TODO
+  in
+  aux m
+  
 (* model-based generation *)
   
 type ('value,'dconstr) generator = unit -> ('value,'dconstr) data Myseq.t
