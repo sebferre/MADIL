@@ -106,3 +106,65 @@ let rec exprset_inter_list (esl1 : ('dconstr,'func) exprset list) (esl2 : ('dcon
           | es -> es::res)
         res esl2)
     [] esl1
+
+
+(* indexes : idea inspired from FlashMeta *)
+
+module Index =
+  struct
+    type ('value,'dconstr,'func) t = ('value, ('dconstr,'func) exprset) Mymap.t
+
+    let empty = Mymap.empty
+                
+    let bind (v : 'value) (item : ('dconstr,'func) expritem) (index : ('value,'dconstr,'func) t) : ('value,'dconstr,'func) t =
+      Mymap.update v
+        (function
+         | None -> Some [item]
+         | Some exprs -> Some (item :: exprs))
+        index
+
+    let bind_set (v : 'value) (es : ('dconstr,'func) exprset) (index : ('value,'dconstr,'func) t) : ('value,'dconstr,'func) t =
+      Mymap.update v
+        (function
+         | None -> Some es
+         | Some exprs -> Some (List.rev_append es exprs))
+        index
+
+    let find_opt = Mymap.find_opt
+
+    let fold = Mymap.fold
+                
+    let lookup (v : 'value) (index : ('value,'dconstr,'func) t) : ('dconstr,'func) exprset =
+      match find_opt v index with
+      | None -> []
+      | Some exprs -> exprs
+  end
+           
+let index_add_bindings index (bindings : ('dconstr path * 'value) list) : ('value,'dconstr,'func) Index.t =
+  List.fold_left
+    (fun res (p,v) -> Index.bind v (SRef p) res)
+    index bindings
+
+let index_apply_functions
+      index (max_arity : int) (get_functions : 'value array -> ('func * 'value) list)
+    : ('value,'dconstr,'func) Index.t =
+  let rec aux k lv_k les_k args_k es_args_k res =
+    let res =
+      get_functions args_k
+      |> List.fold_left
+           (fun res (f,v) ->
+             Index.bind v (SApply (f, es_args_k)) res)
+           res in
+    if k >= max_arity
+    then res
+    else
+      Index.fold
+        (fun v es res ->
+          let lv = v::lv_k in
+          let les = es::les_k in
+          let args = Array.of_list lv in
+          let es_args = Array.of_list les in
+          aux (k+1) lv les args es_args res)
+        index res
+  in
+  aux 0 [] [] [||] [||] index
