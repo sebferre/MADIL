@@ -6,7 +6,8 @@ open Path
 type ('dconstr,'func) expr =
   | Ref of 'dconstr path
   | Apply of 'func * ('dconstr,'func) expr array
-
+  | Arg (* implicit unique argument of functions *)
+  | Fun of ('dconstr,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
 
 let xp_expr
       (print_field : ('dconstr * int) Xprint.xp)
@@ -20,6 +21,8 @@ let xp_expr
        Xprint.bracket ("(",")")
          (Xprint.sep_array ", " aux)
          print args
+    | Arg -> print#string "_"
+    | Fun e1 -> print#string "fun { "; aux print e1; print#string " }"
   in
   fun print e ->
   Xprint.bracket ("{","}") aux
@@ -28,6 +31,7 @@ let xp_expr
 
 let eval
       ~(eval_func : 'func -> 'value array -> 'value result)
+      ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
       (lookup : 'dconstr path -> 'value result)
       (e : ('dconstr,'func) expr) : 'value result =
   let rec aux e =
@@ -36,6 +40,8 @@ let eval
     | Apply (f,args) ->
        let| lv = list_map_result aux (Array.to_list args) in
        eval_func f (Array.of_list lv)
+    | Arg -> eval_arg ()
+    | Fun e1 -> aux e1
   in
   aux e
 
@@ -46,6 +52,8 @@ type ('dconstr,'func) exprset = ('dconstr,'func) expritem list
 and ('dconstr,'func) expritem =
   | SRef of 'dconstr path
   | SApply of 'func * ('dconstr,'func) exprset array
+  | SArg
+  | SFun of ('dconstr,'func) exprset
 
 let rec exprset_to_seq (es : ('dconstr,'func) exprset) : ('dconstr,'func) expr Myseq.t =
   let* item = Myseq.from_list es in
@@ -58,7 +66,11 @@ and expritem_to_seq : ('dconstr,'func) expritem -> ('dconstr,'func) expr Myseq.t
      let* l_args = Myseq.product (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
      let args = Array.of_list l_args in
      Myseq.return (Apply (f,args))
-     
+  | SArg -> Myseq.return Arg
+  | SFun es1 ->
+     let* e1 = exprset_to_seq es1 in
+     Myseq.return (Fun e1)
+
 let rec exprset_inter (es1 : ('dconstr,'func) exprset) (es2 : ('dconstr,'func) exprset) : ('dconstr,'func) exprset =
   List.fold_left
     (fun res item1 ->
@@ -77,11 +89,11 @@ and expritem_inter (item1 : ('dconstr,'func) expritem) (item2 : ('dconstr,'func)
      if Array.exists (fun es -> es = []) es_args
      then None
      else Some (SApply (f1, es_args))
-(*  | `Arg, `Arg -> Some (`Arg)
-  | `Fun e1, `Fun e2 ->
-     (match exprset_inter e1 e2 with
+  | SArg, SArg -> Some SArg
+  | SFun es1, SFun es2 ->
+     (match exprset_inter es1 es2 with
       | [] -> None
-      | e -> Some (`Fun e)) *)
+      | es -> Some (SFun es))
   | _ -> None
 
 let rec exprset_inter_list (esl1 : ('dconstr,'func) exprset list) (esl2 : ('dconstr,'func) exprset list) : ('dconstr,'func) exprset list =
