@@ -24,3 +24,17 @@ let xp_expr
   fun print e ->
   Xprint.bracket ("{","}") aux
     print e
+
+
+let eval
+      ~(eval_func : 'func -> 'value array -> 'value result)
+      (lookup : 'dconstr path -> 'value result)
+      (e : ('dconstr,'func) expr) : 'value result =
+  let rec aux e =
+    match e with
+    | Ref p -> lookup p
+    | Apply (f,args) ->
+       let| lv = list_map_result aux (Array.to_list args) in
+       eval_func f (Array.of_list lv)
+  in
+  aux e
