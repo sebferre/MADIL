@@ -37,7 +37,7 @@ let xp_model
   aux print m
 
 
-let compile
+let compile (* compiling a model into a non-deterministic program *)
       ~(x_constr : 'a -> 'constr -> 'a Myseq.t) (* input preparation for constr *)
       ~(x_field : 'a -> 'constr -> int -> 'a) (* dispatch pattern input to each field *)
       ~(y_constr : 'a -> 'constr -> 'b array -> 'b Myseq.t) (* pattern output from input, and argument outputs *)
@@ -65,26 +65,21 @@ let compile
                let* x_next = x_next xi yi in
                Myseq.return (yi,x_next)))
            lm1 in
-       (*let g_lm1 = List.map aux lm1 in*)
        (fun x ->
          let* x1 = x_first x in
          let* ly, xN = Myseq.product_dependent_fair g_lm1 x1 in
-(*         let xN, rev_ly =
-           List.fold_left
-             (fun (xi, rev_ly) gi ->
-               let yi = gi xi in
-               x_next xi yi, yi::rev_ly)
-             (x1,[]) g_lm1 in
-         let ly = List.rev rev_ly in *)
          y_seq x ly xN)
     | Cst m1 -> raise TODO
-(*       let g_m1 = aux m1 in
-       (fun x ->
-         let x1 = x_first x in
- *)       
   in
   aux m
 
+
+(* model evaluation *)
+
+(* TODO: bindings *)
+
+(* model-based generation *)
+  
 type ('value,'dconstr) generator = unit -> ('value,'dconstr) data Myseq.t
   
 let generator (* naive *)
@@ -98,7 +93,8 @@ let generator (* naive *)
     ~x_next:(fun () _ -> Myseq.return ())
     ~y_seq:(fun () ld () -> Myseq.return (DSeq (List.length ld, ld)))
 
-
+(* model-based parsing *)
+  
 type ('input,'value,'dconstr) parseur = 'input -> ('value,'dconstr) data Myseq.t
   
 let parseur
@@ -117,7 +113,10 @@ let parseur
     ~x_next:input_next
     ~y_seq:output_seq
 
+(* model-based encoding of data *)
 
+  (* TODO: model encoding *)
+  
 type ('value,'dconstr) encoder = ('value,'dconstr) data -> dl
 
 let encoder
