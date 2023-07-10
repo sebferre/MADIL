@@ -40,7 +40,6 @@ let xp_model
 let compile (* compiling a model into a non-deterministic program *)
       ~(x_constr : 'a -> 'constr -> 'a Myseq.t) (* input preparation for constr *)
       ~(x_field : 'a -> 'constr -> int -> 'a) (* dispatch pattern input to each field *)
-      (* TODO: merge x_constr and x_field to return a seq of 'a array *)
       ~(y_constr : 'a -> 'constr -> 'b array -> 'b Myseq.t) (* pattern output from input, and argument outputs *)
       ~(x_first : 'a -> 'a Myseq.t) (* initial input for sequence *)
       ~(x_next : 'a -> 'b -> 'a Myseq.t) (* next input in sequence, from previous item input and output *)
@@ -166,7 +165,7 @@ type ('input,'value,'dconstr) parseur = 'input -> ('value,'dconstr) data Myseq.t
 let parseur
       ~(input_constr : 'input -> 'constr -> 'input Myseq.t)
       ~(input_field : 'input -> 'constr -> int -> 'input)
-      ~(output_constr : 'input -> 'constr -> ('value,'dconstr) data array -> ('value,'dconstr) data Myseq.t)
+      ~(output_constr : 'input -> 'constr -> ('value,'dconstr) data array -> ('value * 'dconstr) Myseq.t)
       ~(input_first : 'input -> 'input Myseq.t)
       ~(input_next : 'input -> ('value,'dconstr) data -> 'input Myseq.t)
       ~(output_seq : 'input -> ('value,'dconstr) data list -> 'input -> ('value,'dconstr) data Myseq.t)
@@ -174,7 +173,9 @@ let parseur
   compile
     ~x_constr:input_constr
     ~x_field:input_field
-    ~y_constr:output_constr
+    ~y_constr:(fun x c args ->
+      let* v, dc = output_constr x c args in
+      Myseq.return (DVal (v, DPat (dc, args))))
     ~x_first:input_first
     ~x_next:input_next
     ~y_seq:output_seq
