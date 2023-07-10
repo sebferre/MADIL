@@ -11,14 +11,14 @@ type ('value,'dconstr) bindings = ('dconstr path * 'value) list
 let bindings0 = []
 
 let xp_path
-      (print_field : ('dconstr * int) Xprint.xp)
+      (xp_field : ('dconstr * int) Xprint.xp)
     : 'dconstr path Xprint.xp =
   let rec aux print p =
     match p with
     | This -> ()
     | Field (dc,i,p1) ->
        print#string ".";
-       print_field print (dc,i);
+       xp_field print (dc,i);
        aux print p1
     | Item (i,p1) ->
        print#string "["; print#int i; print#string "]";

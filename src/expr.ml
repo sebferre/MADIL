@@ -10,14 +10,14 @@ type ('dconstr,'func) expr =
   | Fun of ('dconstr,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
 
 let xp_expr
-      (print_field : ('dconstr * int) Xprint.xp)
-      (print_func : 'func Xprint.xp)
+      (xp_field : ('dconstr * int) Xprint.xp)
+      (xp_func : 'func Xprint.xp)
     : ('dconstr,'func) expr Xprint.xp =
   let rec aux print e =
     match e with
-    | Ref p -> xp_path print_field print p
+    | Ref p -> xp_path xp_field print p
     | Apply (f,args) ->
-       print_func print f;
+       xp_func print f;
        Xprint.bracket ("(",")")
          (Xprint.sep_array ", " aux)
          print args

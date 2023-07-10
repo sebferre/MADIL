@@ -40,6 +40,7 @@ let xp_model
 let compile (* compiling a model into a non-deterministic program *)
       ~(x_constr : 'a -> 'constr -> 'a Myseq.t) (* input preparation for constr *)
       ~(x_field : 'a -> 'constr -> int -> 'a) (* dispatch pattern input to each field *)
+      (* TODO: merge x_constr and x_field to return a seq of 'a array *)
       ~(y_constr : 'a -> 'constr -> 'b array -> 'b Myseq.t) (* pattern output from input, and argument outputs *)
       ~(x_first : 'a -> 'a Myseq.t) (* initial input for sequence *)
       ~(x_next : 'a -> 'b -> 'a Myseq.t) (* next input in sequence, from previous item input and output *)
@@ -78,7 +79,7 @@ let compile (* compiling a model into a non-deterministic program *)
 
 let get_bindings
       ~(constr_value_opt : 'dconstr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
-      ~(seq_value_opt : 'value list -> 'value option)
+      ~(seq_value_opt : 'dconstr path -> 'value list -> 'value option)
       (m : ('constr,'func) model) (d : ('value,'dconstr) data) : ('value,'dconstr) bindings =
   let rec aux ctx m d acc =
     match m, d with
@@ -109,7 +110,9 @@ let get_bindings
              | _ -> i-1, None, acc)
            lm ld (n-1, Some [], acc) in
        (match lv_opt with
-        | Some lv -> seq_value_opt lv, acc
+        | Some lv ->
+           let p = ctx This in
+           seq_value_opt p lv, acc
         | None -> None, acc)
     | Cst _, _ -> raise TODO
     | _ -> assert false
@@ -140,18 +143,21 @@ let eval
   
 (* model-based generation *)
   
-type ('value,'dconstr) generator = unit -> ('value,'dconstr) data Myseq.t
+type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
   
-let generator (* naive *)
-      ~(output_constr : 'constr -> ('value,'dconstr) data array -> ('value,'dconstr) data)
-    : ('constr,'func) model -> ('value, 'dconstr) generator =
+let generator
+      ~(input_field : 'info -> 'constr -> int -> 'info)
+      ~(output_constr : 'info -> 'constr -> ('value,'dconstr) data array -> 'value * 'dconstr)
+    : ('constr,'func) model -> ('info,'value,'dconstr) generator =
   compile
-    ~x_constr:(fun () c -> Myseq.return ())
-    ~x_field:(fun () c i -> ())
-    ~y_constr:(fun () c args -> Myseq.return (output_constr c args))
-    ~x_first:(fun () -> Myseq.return ())
-    ~x_next:(fun () _ -> Myseq.return ())
-    ~y_seq:(fun () ld () -> Myseq.return (DSeq (List.length ld, ld)))
+    ~x_constr:(fun x c -> Myseq.return x)
+    ~x_field:input_field
+    ~y_constr:(fun x c args ->
+      let v, dc = output_constr x c args in
+      Myseq.return (DVal (v, DPat (dc, args))))
+    ~x_first:(fun x -> Myseq.return x)
+    ~x_next:(fun x _ -> Myseq.return x)
+    ~y_seq:(fun x ld x -> Myseq.return (DSeq (List.length ld, ld)))
 
 (* model-based parsing *)
   

@@ -10,14 +10,14 @@ and ('value,'dconstr) pattern =
 
 let xp_data
       (* TODO: html option *)
-      (print_value : 'value Xprint.xp)
-      (print_dconstr : 'dconstr Xprint.xp)
+      (xp_value : 'value Xprint.xp)
+      (xp_dconstr : 'dconstr Xprint.xp)
     : ('value,'dconstr) data Xprint.xp =
   let rec aux print d =
     match d with
-    | DVal (v, DNone) -> print_value print v
+    | DVal (v, DNone) -> xp_value print v
     | DVal (v, DPat (dc,args)) ->
-       print_dconstr print dc;
+       xp_dconstr print dc;
        Xprint.bracket ("[", "]")
          (Xprint.sep_array ", " aux)
          print args
