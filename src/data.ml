@@ -8,6 +8,9 @@ and ('value,'dconstr) pattern =
   | DNone
   | DPat of 'dconstr * ('value,'dconstr) data array
 
+let make_dval (v : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data array) : ('value,'dconstr) data =
+  DVal (v, DPat (dc, args))
+          
 let xp_data
       (* TODO: html option *)
       (xp_value : 'value Xprint.xp)
