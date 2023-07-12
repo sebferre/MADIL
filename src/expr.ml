@@ -3,16 +3,16 @@ open Madil_common
 open Data
 open Path
 
-type ('dconstr,'func) expr =
-  | Ref of 'dconstr path
-  | Apply of 'func * ('dconstr,'func) expr array
+type ('constr,'func) expr =
+  | Ref of 'constr path
+  | Apply of 'func * ('constr,'func) expr array
   | Arg (* implicit unique argument of functions *)
-  | Fun of ('dconstr,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
+  | Fun of ('constr,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
 
 let xp_expr
-      (xp_field : ('dconstr * int) Xprint.xp)
+      (xp_field : ('constr * int) Xprint.xp)
       (xp_func : 'func Xprint.xp)
-    : ('dconstr,'func) expr Xprint.xp =
+    : ('constr,'func) expr Xprint.xp =
   let rec aux print e =
     match e with
     | Ref p -> xp_path xp_field print p
@@ -31,10 +31,10 @@ let xp_expr
 (* expression evaluation *)
 
 let eval
-      ~(eval_unbound_path : 'dconstr path -> 'value result) (* ex: return some null value, or fail *)
+      ~(eval_unbound_path : 'constr path -> 'value result) (* ex: return some null value, or fail *)
       ~(eval_func : 'func -> 'value array -> 'value result)
       ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
-      (e : ('dconstr,'func) expr) (bindings : ('value,'dconstr) bindings)
+      (e : ('constr,'func) expr) (bindings : ('value,'constr) bindings)
     : 'value result =
   let rec aux e =
     match e with
@@ -53,17 +53,17 @@ let eval
   
 (* expression sets : idea taken from FlashMeta *)
     
-type ('dconstr,'func) exprset = ('dconstr,'func) expritem list
-and ('dconstr,'func) expritem =
-  | SRef of 'dconstr path
-  | SApply of 'func * ('dconstr,'func) exprset array
+type ('constr,'func) exprset = ('constr,'func) expritem list
+and ('constr,'func) expritem =
+  | SRef of 'constr path
+  | SApply of 'func * ('constr,'func) exprset array
   | SArg
-  | SFun of ('dconstr,'func) exprset
+  | SFun of ('constr,'func) exprset
 
-let rec exprset_to_seq (es : ('dconstr,'func) exprset) : ('dconstr,'func) expr Myseq.t =
+let rec exprset_to_seq (es : ('constr,'func) exprset) : ('constr,'func) expr Myseq.t =
   let* item = Myseq.from_list es in
   expritem_to_seq item
-and expritem_to_seq : ('dconstr,'func) expritem -> ('dconstr,'func) expr Myseq.t =
+and expritem_to_seq : ('constr,'func) expritem -> ('constr,'func) expr Myseq.t =
   function
   | SRef p -> Myseq.return (Ref p)
   | SApply (f,es_args) ->
@@ -76,7 +76,7 @@ and expritem_to_seq : ('dconstr,'func) expritem -> ('dconstr,'func) expr Myseq.t
      let* e1 = exprset_to_seq es1 in
      Myseq.return (Fun e1)
 
-let rec exprset_inter (es1 : ('dconstr,'func) exprset) (es2 : ('dconstr,'func) exprset) : ('dconstr,'func) exprset =
+let rec exprset_inter (es1 : ('constr,'func) exprset) (es2 : ('constr,'func) exprset) : ('constr,'func) exprset =
   List.fold_left
     (fun res item1 ->
       List.fold_left
@@ -86,7 +86,7 @@ let rec exprset_inter (es1 : ('dconstr,'func) exprset) (es2 : ('dconstr,'func) e
           | Some item -> item::res)
         res es2)
     [] es1
-and expritem_inter (item1 : ('dconstr,'func) expritem) (item2 : ('dconstr,'func) expritem) : ('dconstr,'func) expritem option =
+and expritem_inter (item1 : ('constr,'func) expritem) (item2 : ('constr,'func) expritem) : ('constr,'func) expritem option =
   match item1, item2 with
   | SRef p1, SRef p2 when p1 = p2 -> Some (SRef p1)
   | SApply (f1,es_args1), SApply (f2,es_args2) when f1 = f2 ->
@@ -101,7 +101,7 @@ and expritem_inter (item1 : ('dconstr,'func) expritem) (item2 : ('dconstr,'func)
       | es -> Some (SFun es))
   | _ -> None
 
-let rec exprset_inter_list (esl1 : ('dconstr,'func) exprset list) (esl2 : ('dconstr,'func) exprset list) : ('dconstr,'func) exprset list =
+let rec exprset_inter_list (esl1 : ('constr,'func) exprset list) (esl2 : ('constr,'func) exprset list) : ('constr,'func) exprset list =
   List.fold_left
     (fun res es1 ->
       List.fold_left
@@ -117,18 +117,18 @@ let rec exprset_inter_list (esl1 : ('dconstr,'func) exprset list) (esl2 : ('dcon
 
 module Index =
   struct
-    type ('value,'dconstr,'func) t = ('value, ('dconstr,'func) exprset) Mymap.t
+    type ('value,'constr,'func) t = ('value, ('constr,'func) exprset) Mymap.t
 
     let empty = Mymap.empty
                 
-    let bind (v : 'value) (item : ('dconstr,'func) expritem) (index : ('value,'dconstr,'func) t) : ('value,'dconstr,'func) t =
+    let bind (v : 'value) (item : ('constr,'func) expritem) (index : ('value,'constr,'func) t) : ('value,'constr,'func) t =
       Mymap.update v
         (function
          | None -> Some [item]
          | Some exprs -> Some (item :: exprs))
         index
 
-    let bind_set (v : 'value) (es : ('dconstr,'func) exprset) (index : ('value,'dconstr,'func) t) : ('value,'dconstr,'func) t =
+    let bind_set (v : 'value) (es : ('constr,'func) exprset) (index : ('value,'constr,'func) t) : ('value,'constr,'func) t =
       Mymap.update v
         (function
          | None -> Some es
@@ -139,20 +139,20 @@ module Index =
 
     let fold = Mymap.fold
                 
-    let lookup (v : 'value) (index : ('value,'dconstr,'func) t) : ('dconstr,'func) exprset =
+    let lookup (v : 'value) (index : ('value,'constr,'func) t) : ('constr,'func) exprset =
       match find_opt v index with
       | None -> []
       | Some exprs -> exprs
   end
            
-let index_add_bindings index (bindings : ('value,'dconstr) bindings) : ('value,'dconstr,'func) Index.t =
+let index_add_bindings index (bindings : ('value,'constr) bindings) : ('value,'constr,'func) Index.t =
   List.fold_left
     (fun res (p,v) -> Index.bind v (SRef p) res)
     index bindings
 
 let index_apply_functions
       index (max_arity : int) (get_functions : 'value array -> ('func * 'value) list)
-    : ('value,'dconstr,'func) Index.t =
+    : ('value,'constr,'func) Index.t =
   let rec aux k lv_k les_k args_k es_args_k res =
     let res =
       get_functions args_k
@@ -178,7 +178,7 @@ let index_apply_functions
 (* expr encoding *)
 
 let size (* for DL computing *)
-    : ('dconstr,'func) expr -> int =
+    : ('constr,'func) expr -> int =
   let rec aux = function
     | Ref p -> 1
     | Apply (f,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args

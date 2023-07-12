@@ -3,7 +3,7 @@ open Madil_common
 open Data
 open Path
 
-type 'dconstr ctx = 'dconstr path -> 'dconstr path
+type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
 
 type ('constr,'func) model =
@@ -11,16 +11,16 @@ type ('constr,'func) model =
   | Seq of int * ('constr,'func) model list
   | Cst of ('constr,'func) model
   | Expr of ('constr,'func) Expr.expr
-
+          
 let xp_model
-      (print_constr : 'constr Xprint.xp)
-      (print_field : ('dconstr * int) Xprint.xp)
-      (print_func : 'func Xprint.xp)
+      (xp_constr : 'constr Xprint.xp)
+      (xp_field : ('constr * int) Xprint.xp)
+      (xp_func : 'func Xprint.xp)
     : ('constr,'func) model Xprint.xp =
   let rec aux print m =
     match m with
     | Pat (c,args) ->
-       print_constr print c;
+       xp_constr print c;
        Xprint.bracket ("[","]")
          (Xprint.sep_array ", " aux)
          print args
@@ -31,18 +31,17 @@ let xp_model
     | Cst m1 ->
        Xprint.bracket ("<", " = >") aux
          print m1
-    | Expr e -> Expr.xp_expr print_field print_func print e
+    | Expr e -> Expr.xp_expr xp_field xp_func print e
   in
-  fun print m ->
-  aux print m
+  aux
 
 
 (* model evaluation *)
 
 let get_bindings
-      ~(constr_value_opt : 'dconstr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
-      ~(seq_value_opt : 'dconstr path -> 'value list -> 'value option)
-      (m : ('constr,'func) model) (d : ('value,'dconstr) data) : ('value,'dconstr) bindings =
+      ~(constr_value_opt : 'constr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
+      ~(seq_value_opt : 'constr path -> 'value list -> 'value option)
+      (m : ('constr,'func) model) (d : ('value,'dconstr) data) : ('value,'constr) bindings =
   let rec aux ctx m d acc =
     match m, d with
     | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
@@ -55,7 +54,7 @@ let get_bindings
          (fun v -> ref_acc := (p,v) :: !ref_acc)
          v_opt;
        for i = 0 to n - 1 do
-         let vi_opt, acc = aux (fun pi -> ctx (Field (dc,i,pi))) args.(i) dargs.(i) !ref_acc in
+         let vi_opt, acc = aux (fun pi -> ctx (Field (c,i,pi))) args.(i) dargs.(i) !ref_acc in
          ref_acc := acc
        done;
        v_opt, !ref_acc
@@ -85,7 +84,7 @@ let get_bindings
 let eval
       ~eval_unbound_path ~eval_func ~eval_arg
       ~(model_of_value : 'value -> ('constr,'func) model result)
-      (m : ('constr,'func) model) (bindings : ('value,'dconstr) bindings)
+      (m : ('constr,'func) model) (bindings : ('value,'constr) bindings)
     : ('constr,'func) model result =
   let eval_expr = Expr.eval ~eval_unbound_path ~eval_func ~eval_arg in
   let rec aux = function
