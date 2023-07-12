@@ -1,6 +1,7 @@
 
 open Madil_common
 open Data
+open Kind
    
 type 'dconstr path =
   | This
@@ -51,3 +52,18 @@ let rec find (p : 'dconstr path) (d : ('value,'dconstr) data) : ('value,'dconstr
           if i >=0 && i < n
           then find p1 (try List.nth items i with _ -> assert false)
           else Result.Error (Invalid_item i))
+
+let kind
+      ~(t_field : 't -> 'dconstr -> int -> 't)
+    : 't kind -> 'dconstr path -> 't kind =
+  let rec aux k p =
+    match k, p with
+    | _, This -> k
+    | KVal t, Field (dc,i,p1) ->
+       let t1 = t_field t dc i in
+       let k1 = KVal t1 in
+       aux k1 p1
+    | KSeq k1, Item (i,p1) -> aux k1 p1
+    | _ -> assert false
+  in
+  aux
