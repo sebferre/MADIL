@@ -173,3 +173,16 @@ let index_apply_functions
         index res
   in
   aux 0 [] [] [||] [||] index
+
+
+(* expr encoding *)
+
+let size (* for DL computing *)
+    : ('dconstr,'func) expr -> int =
+  let rec aux = function
+    | Ref p -> 1
+    | Apply (f,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
+    | Arg -> 1
+    | Fun e1 -> 1 + aux e1
+  in
+  aux

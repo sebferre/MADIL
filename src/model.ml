@@ -10,7 +10,7 @@ type ('constr,'func) model =
   | Pat of 'constr * ('constr,'func) model array (* constr type may be different from data constr *)
   | Seq of int * ('constr,'func) model list
   | Cst of ('constr,'func) model
-  | Expr of ('constr path,'func) Expr.expr
+  | Expr of ('constr,'func) Expr.expr
 
 let xp_model
       (print_constr : 'constr Xprint.xp)
@@ -149,8 +149,6 @@ let parseur
 
 (* model-based encoding of data *)
 
-  (* TODO: model encoding *)
-
 type ('info,'value,'dconstr) encoder = 'info -> ('value,'dconstr) data -> dl * 'info
 
 let encoder
@@ -176,3 +174,25 @@ let encoder
     | Cst m1 -> raise TODO
   in
   enc
+
+(* model encoding *)
+
+let size (* for DL computing *)
+    : ('constr,'func) model -> int =
+  let rec aux = function
+    | Pat (c,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
+    | Expr e -> 1 + Expr.size e
+    | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
+    | Cst m1 -> 1 + aux m1
+  in
+  aux
+  
+let dl
+    : ('constr,'func) model -> dl =
+  let rec aux = function
+    | Pat (c,args) -> raise TODO
+    | Expr e -> raise TODO
+    | Seq (n,lm1) -> raise TODO
+    | Cst m1 -> raise TODO
+  in
+  aux
