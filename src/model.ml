@@ -151,26 +151,28 @@ let parseur
 
   (* TODO: model encoding *)
 
-type ('value,'dconstr) encoder = ('value,'dconstr) data -> dl
+type ('info,'value,'dconstr) encoder = 'info -> ('value,'dconstr) data -> dl * 'info
 
 let encoder
       ~(encoder_pat : 'constr -> 'enc array -> 'enc)
-  : ('constr,'func) model -> (('value,'dconstr) encoder as 'enc) =
+  : ('constr,'func) model -> (('info,'value,'dconstr) encoder as 'enc) =
   let rec enc = function
     | Pat (c,args) ->
        let enc_args = Array.map enc args in
        encoder_pat c enc_args
     | Expr e ->
-       (fun d -> 0.)
+       (fun x d -> 0., x)
     | Seq (n,lm1) ->
        let enc_lm1 = List.map enc lm1 in
-       (function
-        | DSeq (dn, ld) when dn = n ->
-           List.fold_left2
-             (fun res enc_mi di -> res +. enc_mi di)
-             0. (* no need to encode 'dn', equal 'n' in model *)
-             enc_lm1 ld
-        | _ -> assert false)
+       (fun x -> function
+         | DSeq (dn, ld) when dn = n ->
+            List.fold_left2
+              (fun (dl,x) enc_mi di ->
+                let dli, x = enc_mi x di in
+                dl +. dli, x)
+              (0., x) (* no need to encode 'dn', equal 'n' in model *)
+              enc_lm1 ld
+         | _ -> assert false)
     | Cst m1 -> raise TODO
   in
   enc
