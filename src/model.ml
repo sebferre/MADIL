@@ -2,6 +2,7 @@
 open Madil_common
 open Data
 open Path
+open Kind
 
 type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
@@ -174,24 +175,163 @@ let encoder
   in
   enc
 
+(* ASD *)
+
+class virtual ['t,'constr,'func] asd =
+  object (self)
+    method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
+    method constr_args : 't -> 'constr -> 't kind array =
+      fun t c ->
+      let def_opt, others = self#default_and_other_pats t in
+      if def_opt = Some c then [||]
+      else
+        match List.assoc_opt c others with
+        | Some args -> args
+        | None -> failwith "Model.asd#constr_args: unexpected constr"
+    method virtual expr_opt : 't kind -> 't kind option
+    method virtual funcs : 't kind -> ('func * 't kind array) list (* None when expressions not allowed for this kind *)
+  end
+
+let make_asd
+      ~(all_constrs : ('t (* for each type *)
+                      * 'constr option (* is there a default constr? *)
+                      * ('constr * 't kind array) list (* other constrs and their arg kind *)
+                     ) list)
+      ~(all_funcs : ('t kind (* for each kind *)
+                     * 't kind option (* can it be an expr? *)
+                     * ('func * 't kind array) list (* funcs resulting in this kind, and their arg kind *)
+                    ) list) : ('t,'constr,'func) asd =
+  let map_constr =
+    List.fold_left
+      (fun m (t, default_constr_opt, other_constr_args) ->
+        Mymap.add t (default_constr_opt, other_constr_args) m)
+      Mymap.empty all_constrs in
+  let map_expr, map_funcs =
+    List.fold_left
+      (fun (me,mf) (k, expr_opt, l_f_args) ->
+        (match expr_opt with None -> me | Some k1 -> Mymap.add k k1 me),
+        Mymap.add k l_f_args mf)
+      (Mymap.empty, Mymap.empty) all_funcs in
+  object
+    method default_and_other_pats t =
+      match Mymap.find_opt t map_constr with
+      | Some default_others -> default_others
+      | None -> None, []
+    method constr_args t c =
+      match Mymap.find_opt t map_constr with
+      | Some (default,others) ->
+         if default = Some c then [||]
+         else
+           (match List.assoc_opt c others with
+            | Some args -> args
+            | None -> failwith "Model.asd#constr_args: unexpected constr for type")
+      | None -> failwith "Model.asd#constr_args: unexpected type"
+    method expr_opt k =
+      Mymap.find_opt k map_expr
+    method funcs k =
+      match Mymap.find_opt k map_funcs with
+      | Some funcs -> funcs
+      | None -> []
+  end
+  
 (* model encoding *)
 
-let size (* for DL computing *)
+let path_kind
+      ~(asd : ('t,'constr,'func) asd)
+    : 't kind -> 'constr path -> 't kind =
+  let rec aux k p =
+    match k, p with
+    | _, This -> k
+    | KVal t, Field (c,i,p1) ->
+       let kind_args = asd#constr_args t c in
+       let k1 = try kind_args.(i) with _ -> assert false in
+       aux k1 p1
+    | KSeq k1, Item (i,p1) -> aux k1 p1
+    | _ -> assert false
+  in
+  aux
+  
+let size_model_ast (* for DL computing *)
     : ('constr,'func) model -> int =
   let rec aux = function
     | Pat (c,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
-    | Expr e -> 1 + Expr.size e
+    | Expr e -> Expr.size_expr_ast e
     | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
   in
   aux
-  
-let dl
+
+let nb_model_ast (* for DL computing *)
+      ~(asd : ('t,'constr,'func) asd)
+    : 't kind -> int (* AST size *) -> float = (* float to handle large numbers *)
+  let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
+  let rec aux (k : 't kind) (size : int) : float =
+    match Hashtbl.find_opt tab (k,size) with
+    | Some nb -> nb
+    | None ->
+       let nb = (* counting possible expressions *)
+         match asd#expr_opt k with
+         | None -> 0.
+         | Some k1 -> Expr.nb_expr_ast ~funcs:asd#funcs k1 size in
+       match k with
+       | KVal t -> (* counting Pat (c,args) *)
+          let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
+          let nb =
+            if size = 0 && default_constr_opt <> None
+            then nb +. 1.
+            else nb in
+          let nb =
+            List.fold_left
+              (fun nb (c,k_args) ->
+                if k_args = [||] (* leaf node *)
+                then if size = 1 then nb +. 1. else nb
+                else
+                  if size >= 1
+                  then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
+                  else nb)
+              nb other_constr_args in
+          Hashtbl.add tab (k,size) nb;
+          nb
+       | KSeq k1 -> (* counting Seq (n,lm1) *)
+          let aux_k1 = aux k1 in
+          let size1 = size-1 in
+          Common.fold_for
+            (fun n nb ->
+              nb +. sum_conv (List.init n (fun _ -> aux_k1)) size1)
+            1 (max 9 size1)
+            nb
+  in
+  aux
+
+let dl_model_params
+      ~(dl_constr_params : 'constr -> dl)
+      ~(dl_func_params : 'func -> dl)
+      ~(dl_path : 'constr path -> dl)
     : ('constr,'func) model -> dl =
+  let dl_expr_params = Expr.dl_expr_params ~dl_func_params ~dl_path in
   let rec aux = function
-    | Pat (c,args) -> raise TODO
-    | Expr e -> raise TODO
-    | Seq (n,lm1) -> raise TODO
+    | Pat (c,args) ->
+       let dl_args_params =
+         Array.map aux args
+         |> Array.fold_left (+.) 0. in
+       dl_constr_params c +. dl_args_params
+    | Expr e -> dl_expr_params e
+    | Seq (n,lm1) ->
+       List.map aux lm1
+       |> List.fold_left (+.) 0.
     | Cst m1 -> raise TODO
   in
   aux
+
+let dl
+      ~(asd : ('t,'constr,'func) asd)
+      ~(dl_constr_params : 'constr -> dl)
+      ~(dl_func_params : 'func -> dl)
+      ~(dl_path : 'constr path -> dl)
+      (root_kind : 't kind) (p : 'constr path) (m : ('constr,'func) model) : dl =
+  let k = path_kind asd root_kind p in
+  let size = size_model_ast m in
+  let nb = nb_model_ast ~asd k size in
+  Mdl.Code.universal_int_star size (* encoding model AST size *)
+  +. Mdl.log2 nb (* encoding choice of model AST for that size *)
+  +. dl_model_params ~dl_constr_params ~dl_func_params ~dl_path m

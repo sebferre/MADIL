@@ -54,18 +54,4 @@ let rec find (p : 'dconstr path) (d : ('value,'dconstr) data) : ('value,'dconstr
           then find p1 (try List.nth items i with _ -> assert false)
           else Result.Error (Invalid_item i))
  *)
-  
-let kind
-      ~(t_field : 't -> 'constr -> int -> 't)
-    : 't kind -> 'constr path -> 't kind =
-  let rec aux k p =
-    match k, p with
-    | _, This -> k
-    | KVal t, Field (c,i,p1) ->
-       let t1 = t_field t c i in
-       let k1 = KVal t1 in
-       aux k1 p1
-    | KSeq k1, Item (i,p1) -> aux k1 p1
-    | _ -> assert false
-  in
-  aux
+

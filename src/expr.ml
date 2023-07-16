@@ -2,6 +2,7 @@
 open Madil_common
 open Data
 open Path
+open Kind 
 
 type ('constr,'func) expr =
   | Ref of 'constr path
@@ -177,12 +178,51 @@ let index_apply_functions
 
 (* expr encoding *)
 
-let size (* for DL computing *)
+let size_expr_ast (* for DL computing *)
     : ('constr,'func) expr -> int =
   let rec aux = function
     | Ref p -> 1
     | Apply (f,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
     | Arg -> 1
     | Fun e1 -> 1 + aux e1
+  in
+  aux
+
+let nb_expr_ast (* for DL computing *)
+      ~(funcs : 't kind -> ('func * 't kind array) list)
+    : 't kind -> int -> float =
+  let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
+  let rec aux (k : 't kind) (size : int) : float =
+    match Hashtbl.find_opt tab (k,size) with
+    | Some nb -> nb
+    | None ->
+       let nb =
+         List.fold_left
+           (fun nb (f,k_args) ->
+             if k_args = [||] (* leaf node *)
+             then if size = 1 then nb +. 1. else nb
+             else
+               if size >= 1
+               then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
+               else nb)
+           0. (funcs k) in
+       Hashtbl.add tab (k,size) nb;
+       nb
+  in
+  aux
+  
+let dl_expr_params
+      ~(dl_func_params : 'func -> dl)
+      ~(dl_path : 'constr path -> dl)
+    : ('constr,'func) expr -> dl =
+  let rec aux = function
+    | Ref p -> dl_path p
+    | Apply (f,args) ->
+       let dl_args_params =
+         Array.map aux args
+         |> Array.fold_left (+.) 0. in
+       dl_func_params f +. dl_args_params
+    | Arg -> 0.
+    | Fun e1 -> aux e1
   in
   aux
