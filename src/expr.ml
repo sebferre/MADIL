@@ -40,7 +40,7 @@ let eval
   let rec aux e =
     match e with
     | Ref p ->
-       (match List.assoc_opt p bindings with (* TODO: use sth more efficient *)
+       (match Mymap.find_opt p bindings with
         | Some v -> Result.Ok v
         | None -> eval_unbound_path p)
     | Apply (f,args) ->
@@ -147,9 +147,9 @@ module Index =
   end
            
 let index_add_bindings index (bindings : ('value,'constr) bindings) : ('value,'constr,'func) Index.t =
-  List.fold_left
-    (fun res (p,v) -> Index.bind v (SRef p) res)
-    index bindings
+  Mymap.fold
+    (fun p v res -> Index.bind v (SRef p) res)
+    bindings index
 
 let index_apply_functions
       index (max_arity : int) (get_functions : 'value array -> ('func * 'value) list)

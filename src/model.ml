@@ -52,7 +52,7 @@ let get_bindings
        let v_opt = constr_value_opt p v dc in
        let ref_acc = ref acc in
        Option.iter
-         (fun v -> ref_acc := (p,v) :: !ref_acc)
+         (fun v -> ref_acc := Mymap.add p v !ref_acc)
          v_opt;
        for i = 0 to n - 1 do
          let vi_opt, acc = aux (fun pi -> ctx (Field (c,i,pi))) args.(i) dargs.(i) !ref_acc in
@@ -79,7 +79,7 @@ let get_bindings
     | Cst _, _ -> raise TODO
     | _ -> assert false
   in
-  let v_opt, acc = aux ctx0 m d [] in
+  let v_opt, acc = aux ctx0 m d bindings0 in
   acc
 
 let eval

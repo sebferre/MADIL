@@ -8,8 +8,8 @@ type 'constr path =
   | Field of 'constr * int * 'constr path
   | Item of int * 'constr path
 
-type ('value,'constr) bindings = ('constr path * 'value) list
-let bindings0 = []
+type ('value,'constr) bindings = ('constr path, 'value) Mymap.t
+let bindings0 = Mymap.empty
 
 let xp_path
       (xp_field : ('constr * int) Xprint.xp)
