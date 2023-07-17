@@ -435,4 +435,20 @@ let write
   Result.Ok d)
 
 
-    
+(* model refinement *)
+
+let refine (* replace submodel of [m] at [p] by [r] *) 
+    : 'constr path -> ('constr,'func) model -> ('constr,'func) model -> ('constr,'func) model =
+  let rec aux p r m =
+    match p, m with
+    | This, _ -> r
+    | Field (c,i,p1), Pat (c',args) when c = c' && i < Array.length args ->
+       let new_args = Array.copy args in
+       new_args.(i) <- aux p1 r args.(i);
+       Pat (c, new_args)
+    | Item (i,p1), Seq (n,lm1) when i < n ->
+       let new_lm1 = list_update (fun mi -> aux p1 r mi) i lm1 in
+       Seq (n,new_lm1)
+    | _ -> assert false
+  in
+  aux
