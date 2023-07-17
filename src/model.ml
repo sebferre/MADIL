@@ -82,7 +82,7 @@ let get_bindings
   let v_opt, acc = aux ctx0 m d bindings0 in
   acc
 
-let eval
+let eval (* TODO: propagate kind downward, and pass to model_of_value *)
       ~eval_unbound_path ~eval_func ~eval_arg
       ~(model_of_value : 'value -> ('constr,'func) model result)
       (m : ('constr,'func) model) (bindings : ('value,'constr) bindings)
@@ -175,6 +175,10 @@ let encoder
   in
   enc
 
+let dl_parse_rank (rank : int) : dl =
+  (* penalty DL for parse rank, starting at 0 *)
+  Mdl.Code.universal_int_star rank -. 1.
+  
 (* ASD *)
 
 class virtual ['t,'constr,'func] asd =
@@ -335,3 +339,100 @@ let dl
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
   +. dl_model_params ~dl_constr_params ~dl_func_params ~dl_path m
+
+       
+(* reading *)
+
+type ('value,'dconstr,'constr,'func) read =
+  { env : ('value,'dconstr) data;
+    bindings : ('value,'constr) bindings;
+    index : ('value,'constr,'func) Expr.Index.t;
+    data : ('value,'dconstr) data;
+    dl : dl }
+
+let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a list =
+  match l with
+  | [] -> []
+  | x0::_ ->
+     let dl0 = f_dl x0 in
+     let min_dl = max_parse_dl_factor *. dl0 in
+     List.filter (fun x -> f_dl x <= min_dl) l
+
+exception Parse_failure
+     
+let read
+      ~(max_nb_parse : int)
+      ~(max_parse_dl_factor : float)
+      ~(max_nb_reads : int)
+      ~(eval : ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
+      ~(parseur : ('constr,'func) model -> ('input,'value,'dconstr) parseur)
+      ~(encoder : ('constr,'func) model -> ('info,'value,'dconstr) encoder)
+      ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
+
+      ?(dl_assuming_contents_known = false)
+      ~(env : ('value,'dconstr) data)
+      ~(bindings : ('value,'constr) bindings)
+      (m0 : ('constr,'func) model)
+      (x : 'input)
+      (info : 'info)
+    : ('value,'dconstr,'constr,'func) read list result =
+  Common.prof "Model.read" (fun () ->
+  let index = lazy (make_index bindings) in
+  let| m = eval m0 bindings in (* reducing expressions *)
+  let parse = parseur m in
+  let enc = encoder m in
+  let parses =
+    let* data, _ = parse x in
+    let dl = (* QUICK *)
+      let dl_data, _ = enc info data in (* should be equivalent to use [m], which is best ? *)
+      (* rounding before sorting to absorb float error accumulation *)
+      dl_round dl_data in
+    Myseq.return (data, dl) in
+  let l_parses =
+    Common.prof "Model.read/first_parses" (fun () ->
+        parses
+        |> Myseq.slice ~offset:0 ~limit:max_nb_parse
+        |> Myseq.to_list) in
+  if l_parses = []
+  then Result.Error Parse_failure
+  else
+    let best_parses =
+      l_parses (* QUICK *)
+      |> List.stable_sort (fun (_,dl1) (_,dl2) -> dl_compare dl1 dl2)
+      |> (fun l -> Common.sub_list l 0
+                     (if dl_assuming_contents_known
+                      then 1 (* TODO: relax because fragile, see task 5, relaxing digit 5 *)
+                      else max_nb_reads))
+                     (* in pruning mode, only best read as we simulate prediction *)
+                     (* TODO: should be handled by DLs *)
+      |> limit_dl ~max_parse_dl_factor (fun (_,dl) -> dl)
+      |> List.mapi (fun rank (data,dl) ->
+             let dl_rank = dl_parse_rank rank in
+             let dl =
+               if dl_assuming_contents_known
+               then dl_rank
+               else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
+             { env;
+               bindings;
+               index=Lazy.force index;
+               data;
+               dl }) in
+    Result.Ok best_parses)
+
+
+(* writing *)
+
+let write
+      ~(eval : ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
+      ~(generator : ('constr,'func) model -> ('info,'value,'dconstr) generator)
+      ~(bindings : ('value,'constr) bindings)
+      (m0 : ('constr,'func) model)
+      (info : 'info)
+    : ('value,'dconstr) data result =
+  Common.prof "Model.write" (fun () ->
+  let| m = eval m0 bindings in
+  let d = generator m info in
+  Result.Ok d)
+
+
+    

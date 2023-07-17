@@ -152,14 +152,17 @@ let index_add_bindings index (bindings : ('value,'constr) bindings) : ('value,'c
     bindings index
 
 let index_apply_functions
-      index (max_arity : int) (get_functions : 'value array -> ('func * 'value) list)
+      ~(eval_func : 'func -> 'value array -> 'value result)
+      index (max_arity : int) (get_functions : 'value array -> 'func list)
     : ('value,'constr,'func) Index.t =
   let rec aux k lv_k les_k args_k es_args_k res =
     let res =
       get_functions args_k
       |> List.fold_left
-           (fun res (f,v) ->
-             Index.bind v (SApply (f, es_args_k)) res)
+           (fun res f ->
+             match eval_func f args_k with
+             | Result.Ok v -> Index.bind v (SApply (f, es_args_k)) res
+             | Result.Error _ -> res)
            res in
     if k >= max_arity
     then res
