@@ -32,7 +32,13 @@ let rec list_partition_map (f : 'a -> ('b,'c) Result.t) (selected : 'a list) (ot
      ( match f x with
      | Result.Ok y -> y::r1, r2
      | Result.Error z -> r1, z::r2 )
-    
+
+let list_list_map (f : 'a -> 'b) (reads : 'a list list) : 'b list list  =
+  List.map
+    (fun l ->
+      List.map f l)
+    reads
+     
 (* result *)
         
 type 'a result = ('a,exn) Result.t
