@@ -332,8 +332,7 @@ let dl
       ~(dl_constr_params : 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
       ~(dl_path : 'constr path -> dl)
-      (root_kind : 't kind) (p : 'constr path) (m : ('constr,'func) model) : dl =
-  let k = path_kind asd root_kind p in
+      (k : 't kind) (m : ('constr,'func) model) : dl =
   let size = size_model_ast m in
   let nb = nb_model_ast ~asd k size in
   Mdl.Code.universal_int_star size (* encoding model AST size *)
