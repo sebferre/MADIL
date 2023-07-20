@@ -149,7 +149,6 @@ let parseur
   in
   parse
 
-
 (* model-based encoding of data *)
 
 type ('info,'value,'dconstr) encoder = 'info -> ('value,'dconstr) data -> dl * 'info
@@ -361,37 +360,28 @@ let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a
      List.filter (fun x -> f_dl x <= min_dl) l
 
 exception Parse_failure
-     
-let read
-      ~(max_nb_parse : int)
-      ~(max_parse_dl_factor : float)
-      ~(max_nb_reads : int)
-      ~(eval : ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
-      ~(parseur : ('constr,'func) model -> ('input,'value,'dconstr) parseur)
-      ~(encoder : ('constr,'func) model -> ('info,'value,'dconstr) encoder)
-      ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
 
-      ?(dl_assuming_contents_known = false)
-      ~(env : ('value,'dconstr) data)
-      ~(bindings : ('value,'constr) bindings)
-      (m0 : ('constr,'func) model)
-      (x : 'input)
-      (info : 'info)
-    : ('value,'dconstr,'constr,'func) read list result =
-  Common.prof "Model.read" (fun () ->
-  let index = lazy (make_index bindings) in
-  let| m = eval m0 bindings in (* reducing expressions *)
+type ('input,'value,'dconstr) parseur_bests = 'input -> (('value,'dconstr) data * dl) list result
+        
+let parseur_bests
+      ~(max_nb_parse : int)
+      ~(parseur : ('constr,'func) model -> ('input,'value,'dconstr) parseur)
+      ~(dl_data : ('constr,'func) model -> ('value,'dconstr) data -> dl)
+
+      (m : ('constr,'func) model)
+    : ('input,'value,'dconstr) parseur_bests =
   let parse = parseur m in
-  let enc = encoder m in
+  let dl_data_m = dl_data m in
+  fun x ->
+  Common.prof "Model.sorted_parseur" (fun () ->
   let parses =
     let* data, _ = parse x in
     let dl = (* QUICK *)
-      let dl_data, _ = enc info data in (* should be equivalent to use [m], which is best ? *)
+      dl_round (dl_data_m data) in
       (* rounding before sorting to absorb float error accumulation *)
-      dl_round dl_data in
     Myseq.return (data, dl) in
   let l_parses =
-    Common.prof "Model.read/first_parses" (fun () ->
+    Common.prof "Model.sorted_parseur/first_parses" (fun () ->
         parses
         |> Myseq.slice ~offset:0 ~limit:max_nb_parse
         |> Myseq.to_list) in
@@ -400,26 +390,49 @@ let read
   else
     let best_parses =
       l_parses (* QUICK *)
-      |> List.stable_sort (fun (_,dl1) (_,dl2) -> dl_compare dl1 dl2)
-      |> (fun l -> Common.sub_list l 0
-                     (if dl_assuming_contents_known
-                      then 1 (* TODO: relax because fragile, see task 5, relaxing digit 5 *)
-                      else max_nb_reads))
-                     (* in pruning mode, only best read as we simulate prediction *)
-                     (* TODO: should be handled by DLs *)
-      |> limit_dl ~max_parse_dl_factor (fun (_,dl) -> dl)
-      |> List.mapi (fun rank (data,dl) ->
-             let dl_rank = dl_parse_rank rank in
-             let dl =
-               if dl_assuming_contents_known
-               then dl_rank
-               else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
-             { env;
-               bindings;
-               index=Lazy.force index;
-               data;
-               dl }) in
+      |> List.stable_sort (fun (_,dl1) (_,dl2) -> dl_compare dl1 dl2) in
     Result.Ok best_parses)
+
+
+let read
+      ~(max_parse_dl_factor : float)
+      ~(max_nb_reads : int)
+      ~(eval : ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
+      ~(parseur_bests : ('constr,'func) model -> ('input,'value,'dconstr) parseur_bests)
+      ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
+
+      ?(dl_assuming_contents_known = false)
+      ~(env : ('value,'dconstr) data)
+      ~(bindings : ('value,'constr) bindings)
+      (m0 : ('constr,'func) model)
+      (x : 'input)
+    : ('value,'dconstr,'constr,'func) read list result =
+  Common.prof "Model.read" (fun () ->
+  let| m = eval m0 bindings in (* reducing expressions *)
+  let| best_parses = parseur_bests m x in
+  let index = lazy (make_index bindings) in
+  let reads =
+    best_parses
+    |> (fun l ->
+      Common.sub_list l 0
+        (if dl_assuming_contents_known
+         then 1 (* TODO: relax because fragile, see task 5, relaxing digit 5 *)
+         else max_nb_reads))
+         (* in pruning mode, only best read as we simulate prediction *)
+         (* TODO: should be handled by DLs *)
+    |> limit_dl ~max_parse_dl_factor (fun (_,dl) -> dl)
+    |> List.mapi (fun rank (data,dl) ->
+           let dl_rank = dl_parse_rank rank in
+           let dl =
+             if dl_assuming_contents_known
+             then dl_rank
+             else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
+           { env;
+             bindings;
+             index=Lazy.force index;
+             data;
+             dl }) in
+  Result.Ok reads)
 
 
 (* writing *)
