@@ -118,7 +118,7 @@ let refinements
       ~(asd : ('t,'constr,'func) Model.asd)
       ~(dl_model : ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : 'model -> (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(refinements_of_read : 'constr -> 'model array -> (('value,'dconstr,'constr,'func) Model.read as 'read) -> ('model * 'data) list) (* refined submodel with related new local data *)
+      ~(refinements_pat : 'constr -> 'model array -> 'data -> ('model * 'data) list) (* refined submodel with related new local data *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
       (* TODO: abstract on this: maybe combine a filtering predicate, 
@@ -176,7 +176,20 @@ let refinements
   and aux_pat k c args selected_reads =
     let dl_m = dl_model k m in
     let dl_data_m = dl_data m in
-    let refs = refinements_of_read c args in
+    let refs =
+      let refs_pat = refinements_pat c args in
+      fun (read : _ Model.read) ->
+      match read.data with
+      | DVal (v, DPat (dc, dargs)) ->
+         let rs = refs_pat read.data in
+         (match asd#expr_opt k with
+          | None -> rs (* no expression here *)
+          | Some k1 ->
+             let es = Expr.Index.lookup v read.index in
+             Myseq.fold_left
+               (fun rs e -> (Model.Expr e, Data.DVal (v, Data.DNone)) :: rs)
+               rs (Expr.exprset_to_seq es))
+      | _ -> assert false in
     let post = postprocessing c args in
     let r_best_reads = inter_union_reads refs selected_reads in
     let* m', best_reads = Mymap.to_seq r_best_reads in

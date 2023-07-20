@@ -12,6 +12,9 @@ type ('constr,'func) model =
   | Seq of int * ('constr,'func) model list
   | Cst of ('constr,'func) model
   | Expr of ('constr,'func) Expr.expr
+
+let make_pat (c : 'constr) (args : ('constr,'func) model array) : ('constr,'func) model =
+  Pat (c,args)
           
 let xp_model
       (xp_constr : 'constr Xprint.xp)
