@@ -118,7 +118,8 @@ let refinements
       ~(asd : ('t,'constr,'func) Model.asd)
       ~(dl_model : ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : 'model -> (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(refinements_pat : 'constr -> 'model array -> 'data -> ('model * 'data) list) (* refined submodel with related new local data *)
+      ~(parseur_bests : 'model -> ('input,'value,'dconstr) Model.parseur_bests)
+      ~(refinements_pat : 'constr -> 'model array -> 'data -> ('model * 'input) list) (* refined submodel with related new local data *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
       (* TODO: abstract on this: maybe combine a filtering predicate, 
@@ -180,8 +181,14 @@ let refinements
       let refs_pat = refinements_pat c args in
       fun (read : _ Model.read) ->
       match read.data with
-      | DVal (v, DPat (dc, dargs)) ->
-         let rs = refs_pat read.data in
+      | DVal (v, DPat (dc, dargs)) as data ->
+         let rs =
+           List.filter_map
+             (fun (m',x) ->
+               match parseur_bests m' x with
+               | Result.Ok ((data',dl')::_) -> Some (m',data')
+               | _ -> None)
+             (refs_pat data) in
          (match asd#expr_opt k with
           | None -> rs (* no expression here *)
           | Some k1 ->
