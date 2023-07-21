@@ -45,7 +45,8 @@ let xp_model
 let get_bindings
       ~(constr_value_opt : 'constr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
       ~(seq_value_opt : 'constr path -> 'value list -> 'value option)
-      (m : ('constr,'func) model) (d : ('value,'dconstr) data) : ('value,'constr) bindings =
+      (m : ('constr,'func) model)
+      (d : ('value,'dconstr) data) : ('value,'constr) bindings =
   let rec aux ctx m d acc =
     match m, d with
     | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
@@ -85,26 +86,40 @@ let get_bindings
   let v_opt, acc = aux ctx0 m d bindings0 in
   acc
 
-let eval (* TODO: propagate kind downward, and pass to model_of_value *)
+let eval
+      ~asd
       ~eval_unbound_path ~eval_func ~eval_arg
-      ~(model_of_value : 'value -> ('constr,'func) model result)
-      (m : ('constr,'func) model) (bindings : ('value,'constr) bindings)
+      ~(model_of_value : 't kind -> 'value -> ('constr,'func) model result)
+      (k : 't kind)
+      (m : ('constr,'func) model)
+      (bindings : ('value,'constr) bindings)
     : ('constr,'func) model result =
   let eval_expr = Expr.eval ~eval_unbound_path ~eval_func ~eval_arg in
-  let rec aux = function
-    | Pat (c,args) ->
-       let| l_args' = list_map_result aux (Array.to_list args) in
+  let rec aux k m =
+    match k, m with
+    | KVal t, Pat (c,args) ->
+       let k_args = asd#constr_args t c in
+       let| l_args' =
+         list_map_result
+           (fun (ki,argi) -> aux ki argi)
+           (Array.to_list
+              (Array.mapi
+                 (fun i argi ->
+                   let ki = try k_args.(i) with _ -> assert false in
+                   ki, argi)
+                 args)) in
        let args' = Array.of_list l_args' in
        Result.Ok (Pat (c,args'))
-    | Expr e ->
+    | _, Expr e ->
        let| v = eval_expr e bindings in
-       model_of_value v
-    | Seq (n,lm1) ->
-       let| lm1' = list_map_result aux lm1 in
+       model_of_value k v
+    | KSeq k1, Seq (n,lm1) ->
+       let| lm1' = list_map_result (aux k1) lm1 in
        Result.Ok (Seq (n,lm1'))
-    | Cst m1 -> raise TODO
+    | _, Cst m1 -> raise TODO
+    | _ -> assert false
   in
-  aux m
+  aux k m
   
 (* model-based generation *)
 
@@ -397,18 +412,19 @@ let parseur_bests
 let read
       ~(max_parse_dl_factor : float)
       ~(max_nb_reads : int)
-      ~(eval : ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
+      ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
       ~(parseur_bests : ('constr,'func) model -> ('input,'value,'dconstr) parseur_bests)
       ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
 
       ?(dl_assuming_contents_known = false)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('value,'constr) bindings)
+      (k : 't kind)
       (m0 : ('constr,'func) model)
       (x : 'input)
     : ('value,'dconstr,'constr,'func) read list result =
   Common.prof "Model.read" (fun () ->
-  let| m = eval m0 bindings in (* reducing expressions *)
+  let| m = eval k m0 bindings in (* reducing expressions *)
   let| best_parses = parseur_bests m x in
   let index = lazy (make_index bindings) in
   let reads =
@@ -438,14 +454,15 @@ let read
 (* writing *)
 
 let write
-      ~(eval : ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
+      ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
       ~(generator : ('constr,'func) model -> ('info,'value,'dconstr) generator)
       ~(bindings : ('value,'constr) bindings)
+      (k : 't kind)
       (m0 : ('constr,'func) model)
       (info : 'info)
     : ('value,'dconstr) data result =
   Common.prof "Model.write" (fun () ->
-  let| m = eval m0 bindings in
+  let| m = eval k m0 bindings in
   let d = generator m info in
   Result.Ok d)
 
