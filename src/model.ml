@@ -42,11 +42,46 @@ let xp_model
 
 (* model evaluation *)
 
+let binding_paths
+      ~(visible_path : 'constr path -> bool) (* is this path accessible to the output model? *)
+      (m : ('constr,'func) model)
+    : 'constr binding_paths =
+  let rec aux ctx m =
+    let p = ctx This in
+    let s =
+      if visible_path p
+      then Bintree.singleton p
+      else Bintree.empty in
+    match m with
+    | Pat (c,args) ->
+       let s_args =
+         Array.mapi
+           (fun i argi ->
+             let ctxi = (fun pi -> ctx (Field (c,i,pi))) in
+             aux ctxi argi)
+           args in
+       Array.fold_left Bintree.union s s_args
+    | Expr e -> s
+    | Seq (n,lm1) ->
+       let i, s =
+         List.fold_left
+           (fun (i,s) mi ->
+             let cxti = (fun pi -> ctx (Item (i,pi))) in
+             i+1, Bintree.union s (aux cxti mi))
+           (0,s) lm1 in
+       assert (i = n);
+       s
+    | Cst m1 -> raise TODO
+  in
+  aux ctx0 m
+
+  
 let get_bindings
       ~(constr_value_opt : 'constr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
       ~(seq_value_opt : 'constr path -> 'value list -> 'value option)
       (m : ('constr,'func) model)
-      (d : ('value,'dconstr) data) : ('value,'constr) bindings =
+      (d : ('value,'dconstr) data)
+    : ('value,'constr) bindings =
   let rec aux ctx m d acc =
     match m, d with
     | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
@@ -63,7 +98,7 @@ let get_bindings
          ref_acc := acc
        done;
        v_opt, !ref_acc
-    | Expr _, _ -> None, acc (* expressions only in task output *)
+    | Expr _, _ -> None, acc (* expressions only in task output but TODO in general expression values should be accessible *)
     | Seq (n,lm), DSeq (dn,ld) ->
        assert (n = dn);
        let _, lv_opt, acc =
@@ -456,6 +491,7 @@ let read
 let write
       ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
       ~(generator : ('constr,'func) model -> ('info,'value,'dconstr) generator)
+      
       ~(bindings : ('value,'constr) bindings)
       (k : 't kind)
       (m0 : ('constr,'func) model)

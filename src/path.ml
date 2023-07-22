@@ -8,6 +8,9 @@ type 'constr path =
   | Field of 'constr * int * 'constr path
   | Item of int * 'constr path
 
+type 'constr binding_paths = 'constr path Bintree.t
+let binding_paths0 = Bintree.empty
+
 type ('value,'constr) bindings = ('constr path, 'value) Mymap.t
 let bindings0 = Mymap.empty
 
