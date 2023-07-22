@@ -114,6 +114,15 @@ let make_alt
   m', best_reads'
  *)
 
+type ('t,'value,'dconstr,'constr,'func) refiner =
+  nb_env_paths:int ->
+  dl_M:dl -> (* current model DL *)
+  (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
+  't Kind.kind ->
+  (('constr,'func) Model.model as 'model) ->
+  ('value,'dconstr,'constr,'func) Model.read list list ->
+  ('constr Path.path * 'model (* refined submodel *) * int (* support *) * dl (* new DL *) * 'model (* new model *)) Myseq.t  (* result: a sequence of path-wise refinements with support and estimate DL *)
+     
 let refinements
       ~(alpha : float)
       ~(max_refinements : int)
@@ -124,15 +133,10 @@ let refinements
       ~(refinements_pat : 'constr -> 'model array -> 'data -> ('model * 'input) list) (* refined submodel with related new local data *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
-      (* TODO: abstract on this: maybe combine a filtering predicate, 
-         and a globally-defined autorefinement process *)
-      
-      ~(nb_env_paths : int)
-      ~(dl_M : dl) (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
-      (k : 'kind)
-      (m : 'model) (* local model at some path *)
-      (reads : 'read list list) (* local data with read information *)
-    : ('path * 'model (* refinement *) * int (* support *) * dl (* new DL *) * 'model (* new model*)) Myseq.t (* result: a sequence of path-wise refinements with support and estimate DL *) =
+    (* TODO: abstract on this: maybe combine a filtering predicate, 
+       and a globally-defined autorefinement process *)
+    : ('t,'value,'dconstr,'constr,'func) refiner =
+  fun ~nb_env_paths ~dl_M k m reads ->
   let rec aux k m selected_reads other_reads_env =
   if selected_reads = [] then Myseq.empty
   else
@@ -226,10 +230,11 @@ let refinements
   let m' = Model.refine p r m in
   Myseq.return (p, r, supp, dl', m')
 
+
 let task_refinements
-      ~(binding_paths : 'model -> 'binding_paths)
-      ~input_refinements
-      ~output_refinements
+      ~(binding_paths : ('constr,'func) Model.model -> 'constr Path.binding_paths)
+      ~(input_refinements : ('t,'value,'dconstr,'constr,'func) refiner)
+      ~(output_refinements : ('t,'value,'dconstr,'constr,'func) refiner)
       
       (* (last_r : (('constr,'func) Task_model.refinement as 'refinement)) *)
       (m : (('t,'constr,'func) Task_model.task_model) as 'task_model)
@@ -253,7 +258,7 @@ let task_refinements
           {m with output_model = mo})) ]
 
 let task_prunings
-      ~input_prunings
+      ~(input_prunings : ('t,'value,'dconstr,'constr,'func) refiner)
       
       (m : (('t,'constr,'func) Task_model.task_model as 'task_model))
       (dsri : ('value,'dconstr,'constr,'func) Task_model.reads)

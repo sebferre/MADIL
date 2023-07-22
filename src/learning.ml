@@ -6,13 +6,24 @@ open Task_model
 
 let learn
       ~(alpha : float)
-      ~(read_pairs : ?pruning:bool -> env:'data -> 'model -> 'input Task.pair list -> 'pairs_reads result)
-      ~(task_refinements : 'task_model -> 'pairs_reads -> 'reads -> 'reads ->
-                          ('refinement * 'task_model) Myseq.t)
-      ~(task_prunings : 'task_model -> 'reads ->
-                          ('refinement * 'task_model) Myseq.t)
-      ~(log_reading : 'refinement -> 'task_model ->
-                      status:[`Success of 'res | `Failure | `Timeout | `Error of exn] -> unit)
+      ~(read_pairs :
+          ?pruning:bool -> env:'data ->
+          (('t,'constr,'func) Task_model.task_model as 'task_model) ->
+          'input Task.pair list ->
+          (('value,'dconstr,'constr,'func) Task_model.pairs_reads as 'pairs_reads) result)
+      ~(task_refinements :
+          'task_model -> 'pairs_reads ->
+          (('value,'dconstr,'constr,'func) Task_model.reads as 'reads) -> 'reads ->
+          ((('constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
+      ~(task_prunings :
+          'task_model -> 'reads ->
+          ('refinement * 'task_model) Myseq.t)
+      ~(log_reading :
+          'refinement -> 'task_model ->
+          status:[ `Success of ('pairs_reads * 'reads * 'reads * dl triple triple * dl)
+                 | `Failure
+                 | `Timeout
+                 | `Error of exn] -> unit)
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> unit)
 
       ?(verbose = false)

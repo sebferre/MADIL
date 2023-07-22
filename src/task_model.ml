@@ -148,7 +148,7 @@ let apply
       ~(env : 'data)
       (m : ('t,'constr,'func) task_model) (x_i : 'input) (info_o : 'info)
     : (('data * 'data) list, exn) Result.t =
-  Common.prof "Model.apply_model" (fun () ->
+  Common.prof "Model.apply" (fun () ->
   let+|+ read_i =
     read
       ~dl_assuming_contents_known:true ~env ~bindings:bindings0
@@ -167,7 +167,7 @@ type ('constr,'func) refinement =
   | Rinput of 'constr path * ('constr,'func) model * int (* support *) * dl (* estimated result DL *)
   | Routput of 'constr path * ('constr,'func) model * int (* support *) * dl (* estimated result DL *)
 
-let refinement_support = function
+let refinement_support : ('constr,'func) refinement -> int = function
   | RInit -> (-1)
   | Rinput (_,_,supp,_) -> supp
   | Routput (_,_,supp,_) -> supp             
