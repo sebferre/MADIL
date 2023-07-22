@@ -364,7 +364,8 @@ let dl_model_params
       ~(dl_func_params : 'func -> dl)
       ~(dl_path : 'constr path -> dl)
     : ('constr,'func) model -> dl =
-  let dl_expr_params = Expr.dl_expr_params ~dl_func_params ~dl_path in
+  let dl_expr_params =
+    Expr.dl_expr_params ~dl_func_params ~dl_path in
   let rec aux = function
     | Pat (c,args) ->
        let dl_args_params =
@@ -383,13 +384,19 @@ let dl
       ~(asd : ('t,'constr,'func) asd)
       ~(dl_constr_params : 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
-      ~(dl_path : 'constr path -> dl)
+      ~(dl_path : nb_env_paths:int -> 'constr path -> dl)
+
+      ~(nb_env_paths : int)
       (k : 't kind) (m : ('constr,'func) model) : dl =
   let size = size_model_ast m in
   let nb = nb_model_ast ~asd k size in
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
-  +. dl_model_params ~dl_constr_params ~dl_func_params ~dl_path m
+  +. dl_model_params
+       ~dl_constr_params
+       ~dl_func_params
+       ~dl_path:(dl_path ~nb_env_paths)
+       m
 
        
 (* reading *)
