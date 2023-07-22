@@ -226,3 +226,31 @@ let refinements
   let m' = Model.refine p r m in
   Myseq.return (p, r, supp, dl', m')
 
+let task_refinements
+      ~input_refinements
+      ~output_refinements
+      
+      (* (last_r : (('constr,'func) Task_model.refinement as 'refinement)) *)
+      (m : (('t,'constr,'func) Task_model.task_model) as 'task_model)
+      (prs : ('value,'dconstr,'constr,'func) Task_model.pairs_reads)
+      (dsri : ('value,'dconstr,'constr,'func) Task_model.reads)
+      (dsro : ('value,'dconstr,'constr,'func) Task_model.reads)
+    : (('constr,'func) Task_model.refinement * 'task_model) Myseq.t =
+  Myseq.concat (* TODO: rather order by estimated dl *)
+    [ (let* p, ri, suppi, dli', mi =
+         input_refinements ~dl_M:prs.dl_mi m.input_kind m.input_model dsri.reads in
+       Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), {m with input_model = mi}));
+      (let* p, ro, suppo, dlo', mo =
+         output_refinements ~dl_M:prs.dl_mo m.output_kind m.output_model dsro.reads in
+       Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), {m with output_model = mo})) ]
+
+let task_prunings
+      ~input_prunings
+      
+      (m : (('t,'constr,'func) Task_model.task_model as 'task_model))
+      (dsri : ('value,'dconstr,'constr,'func) Task_model.reads)
+    : (('constr,'func) Task_model.refinement * 'task_model) Myseq.t =
+  let* pi, ri, suppi, dli', mi' =
+    input_prunings ~dl_M:dsri.dl_m m.input_kind m.input_model dsri.reads in
+  Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), {m with input_model = mi'})
+
