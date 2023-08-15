@@ -15,22 +15,22 @@ type ('value,'constr) bindings = ('constr path, 'value) Mymap.t
 let bindings0 = Mymap.empty
 
 let xp_path
-      (xp_field : ('constr * int) Xprint.xp)
-    : 'constr path Xprint.xp =
-  let rec aux print p =
+      ~(xp_field : ('constr * int) html_xp)
+    : 'constr path html_xp =
+  let rec aux ~html print p =
     match p with
     | This -> ()
     | Field (c,i,p1) ->
        print#string ".";
-       xp_field print (c,i);
-       aux print p1
+       xp_field ~html print (c,i);
+       aux ~html print p1
     | Item (i,p1) ->
        print#string "["; print#int i; print#string "]";
-       aux print p1
+       aux ~html print p1
   in
-  fun print p ->
+  fun ~html print p ->
   print#string "^";
-  aux print p
+  aux ~html print p
 
 (*
 exception Invalid_field of string

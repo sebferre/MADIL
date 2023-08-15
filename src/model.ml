@@ -17,25 +17,26 @@ let make_pat (c : 'constr) (args : ('constr,'func) model array) : ('constr,'func
   Pat (c,args)
           
 let xp_model
-      (xp_constr : 'constr Xprint.xp)
-      (xp_field : ('constr * int) Xprint.xp)
-      (xp_func : 'func Xprint.xp)
-    : ('constr,'func) model Xprint.xp =
-  let rec aux print m =
+      ~(xp_constr : 'constr html_xp)
+      ~(xp_field : ('constr * int) html_xp)
+      ~(xp_func : 'func html_xp)
+    : ('constr,'func) model html_xp =
+  let rec aux ~html print m =
     match m with
     | Pat (c,args) ->
-       xp_constr print c;
+       xp_constr ~html print c;
        Xprint.bracket ("[","]")
-         (Xprint.sep_array ", " aux)
+         (Xprint.sep_array ", " (aux ~html))
          print args
     | Seq (n,lm1) ->
-       Xprint.bracket ("<" ^ string_of_int n ^ ": ", ">")
-         (Xprint.sep_list ", " aux)
+       Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
+         (Xprint.sep_list ", " (aux ~html))
          print lm1
     | Cst m1 ->
-       Xprint.bracket ("<", " = >") aux
+       Xprint.bracket ("〈", " = 〉") (aux ~html)
          print m1
-    | Expr e -> Expr.xp_expr xp_field xp_func print e
+    | Expr e ->
+       Expr.xp_expr ~xp_field ~xp_func ~html print e
   in
   aux
 

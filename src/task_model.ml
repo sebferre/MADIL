@@ -16,13 +16,12 @@ type ('t,'constr,'func) task_model =
   }
        
 let xp_task_model
-      (xp_model : ('constr,'func) model Xprint.xp)
-    :  ('t,'constr,'func) task_model Xprint.xp =
-  let html = false in (* TODO *)
-  fun print m ->
-  xp_model print m.input_model;
-  print#string (if html then " ➜ " else "\n->\n");
-  xp_model print m.output_model
+      ~(xp_model : ('constr,'func) model html_xp)
+    :  ('t,'constr,'func) task_model html_xp =
+  fun ~html print m ->
+  xp_model ~html print m.input_model;
+  print#string (if html then " ➜ " else "\n➜\n");
+  xp_model ~html print m.output_model
 
 (* pair reading and encoding *)
   
@@ -173,11 +172,10 @@ let refinement_support : ('constr,'func) refinement -> int = function
   | Routput (_,_,supp,_) -> supp             
 
 let xp_refinement
-      (xp_path : 'constr path Xprint.xp)
-      (xp_model : ('constr,'func) model Xprint.xp)
-    : ('constr,'func) refinement Xprint.xp =
-  let html = false in (* TODO: handle html *)
-  let rec aux print = function
+      ~(xp_path : 'constr path html_xp)
+      ~(xp_model : ('constr,'func) model html_xp)
+    : ('constr,'func) refinement html_xp =
+  let rec aux ~html print = function
     | RInit -> print#string "init"
     | Rinput (p,ri,supp,dl') -> aux2 ~html print " In." p ri supp dl' "i"
     | Routput (p,ro,supp,dl') -> aux2 ~html print " Out." p ro supp dl' "o"
@@ -185,12 +183,12 @@ let xp_refinement
     if dl' <> 0. (* undefined value *) then
       print#string (Printf.sprintf " / ~%.3f%s)  " dl' i_o);
     print#string in_out;
-    xp_path (*~html*) print p;
+    xp_path ~html print p;
     print#string " ← ";
-    xp_model (*~html*) print r;
+    xp_model ~html print r;
     if supp <> 0 (* undefined value *) then
-      aux_support print supp
-  and aux_support print supp =
+      aux_support ~html print supp
+  and aux_support ~html print supp =
     print#string " ("; print#int supp; print#string ")"
   in
   aux

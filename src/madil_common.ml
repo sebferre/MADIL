@@ -90,6 +90,9 @@ let myseq_concat_if cond seq1 seq2 =
   then Myseq.concat [seq1; seq2]
   else seq2
 
+(* xprint *)
+
+type 'a html_xp = html:bool -> 'a Xprint.xp
 
 (* combinatorics *)
 

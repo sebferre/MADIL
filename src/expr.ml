@@ -11,22 +11,22 @@ type ('constr,'func) expr =
   | Fun of ('constr,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
 
 let xp_expr
-      (xp_field : ('constr * int) Xprint.xp)
-      (xp_func : 'func Xprint.xp)
-    : ('constr,'func) expr Xprint.xp =
-  let rec aux print e =
+      ~(xp_field : ('constr * int) html_xp)
+      ~(xp_func : 'func html_xp)
+    : ('constr,'func) expr html_xp =
+  let rec aux ~html print e =
     match e with
-    | Ref p -> xp_path xp_field print p
+    | Ref p -> xp_path ~xp_field ~html print p
     | Apply (f,args) ->
-       xp_func print f;
+       xp_func ~html print f;
        Xprint.bracket ("(",")")
-         (Xprint.sep_array ", " aux)
+         (Xprint.sep_array ", " (aux ~html))
          print args
     | Arg -> print#string "_"
-    | Fun e1 -> print#string "fun { "; aux print e1; print#string " }"
+    | Fun e1 -> print#string "fun { "; aux ~html print e1; print#string " }"
   in
-  fun print e ->
-  Xprint.bracket ("{","}") aux
+  fun ~html print e ->
+  Xprint.bracket ("{","}") (aux ~html)
     print e
 
 (* expression evaluation *)

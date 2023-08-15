@@ -12,23 +12,21 @@ let make_dval (v : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data array)
   DVal (v, DPat (dc, args))
           
 let xp_data
-      (* TODO: html option *)
-      (xp_value : 'value Xprint.xp)
-      (xp_dconstr : 'dconstr Xprint.xp)
-    : ('value,'dconstr) data Xprint.xp =
-  let rec aux print d =
+      ~(xp_value : 'value html_xp)
+      ~(xp_dconstr : 'dconstr html_xp)
+    : ('value,'dconstr) data html_xp =
+  let rec aux ~html print d =
     match d with
-    | DVal (v, DNone) -> xp_value print v
+    | DVal (v, DNone) -> xp_value ~html print v
     | DVal (v, DPat (dc,args)) ->
-       xp_dconstr print dc;
+       xp_dconstr ~html print dc;
        Xprint.bracket ("[", "]")
-         (Xprint.sep_array ", " aux)
+         (Xprint.sep_array ", " (aux ~html))
          print args
     | DSeq (n,items) ->
-       Xprint.bracket ("<" ^ string_of_int n ^ ": ", ">")
-         (Xprint.sep_list ", " aux)
+       Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
+         (Xprint.sep_list ", " (aux ~html))
          print items
   in
-  fun print d ->
-  aux print d
+  aux
 

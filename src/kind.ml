@@ -8,21 +8,20 @@ type 't kind =
 type 't signature = { res : 't kind; args : 't kind array }
 
 let xp_kind
-      (xp_type : 't Xprint.xp)
-    : 't kind Xprint.xp =
-  let rec aux print = function
-    | KVal t -> xp_type print t
-    | KSeq k1 -> aux print k1; print#string "+"
+      ~(xp_type : 't html_xp)
+    : 't kind html_xp =
+  let rec aux ~html print = function
+    | KVal t -> xp_type ~html print t
+    | KSeq k1 -> aux ~html print k1; print#string "+"
   in
   aux
 
 let xp_signature
-      (xp_type : 't Xprint.xp)
-    : 't signature Xprint.xp =
-  let xp_k = xp_kind xp_type in
-  fun print {res; args} ->
-  xp_k print res;
+      ~(xp_type : 't html_xp)
+    : 't signature html_xp =
+  fun ~html print {res; args} ->
+  xp_kind ~xp_type ~html print res;
   Xprint.bracket ("(", ")")
-    (Xprint.sep_array ", " xp_k)
+    (Xprint.sep_array ", " (xp_kind ~xp_type ~html))
     print args
 
