@@ -8,6 +8,8 @@ and ('value,'dconstr) pattern =
   | DNone
   | DPat of 'dconstr * ('value,'dconstr) data array
 
+(* TODO: consider adding DNil as nil data, for use as nil env *)
+
 let make_dval (v : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data array) : ('value,'dconstr) data =
   DVal (v, DPat (dc, args))
           
