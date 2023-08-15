@@ -459,7 +459,7 @@ let read
       ~(parseur_bests : ('constr,'func) model -> ('input,'value,'dconstr) parseur_bests)
       ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
 
-      ?(dl_assuming_contents_known = false)
+      ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('value,'constr) bindings)
       (k : 't kind)

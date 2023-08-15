@@ -7,7 +7,7 @@ open Task_model
 let learn
       ~(alpha : float)
       ~(read_pairs :
-          ?pruning:bool -> env:'data ->
+          pruning:bool -> env:'data ->
           (('t,'constr,'func) Task_model.task_model as 'task_model) ->
           'input Task.pair list ->
           (('value,'dconstr,'constr,'func) Task_model.pairs_reads as 'pairs_reads) result)
@@ -26,12 +26,10 @@ let learn
                  | `Error of exn] -> unit)
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> unit)
 
-      ?(verbose = false)
-      ?(pause = 0.)
       ~timeout_refine ~timeout_prune
       ~beam_width ~refine_degree
       ~env (* environment data to the input model *)
-      ~init_model
+      ~init_task_model
       (pairs : 'input Task.pair list)
     : ('task_model * 'pairs_reads * bool) double
   = Common.prof "Model.learn_model" (fun () ->
@@ -66,7 +64,7 @@ let learn
       ~timeout:timeout_refine
       ~beam_width
       ~refine_degree
-      ~m0:(RInit, init_model)
+      ~m0:(RInit, init_task_model)
       ~data:(fun (r,m) -> data_of_model ~pruning:false r m)
       ~code:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) -> lmd)
       ~refinements:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) dl ->

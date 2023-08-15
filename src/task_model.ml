@@ -35,13 +35,13 @@ type ('value,'dconstr,'constr,'func) pairs_reads =
 
 let read_pairs
       ~(dl_task_model : (('t,'constr,'func) task_model as 'task_model) -> dl * dl)
-      ~(read : ?dl_assuming_contents_known:bool ->
+      ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('value,'constr) bindings as 'bindings) ->
                't kind -> (('constr,'func) model as 'model) -> 'input -> 'read list result)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       
-      ?(pruning = false)
+      ~(pruning : bool)
       ~(env : 'data)
       (m : 'task_model)
       (pairs : 'input Task.pair list)
@@ -62,6 +62,7 @@ let read_pairs
              let+|+ ri = Result.Ok input_reads in      
              let+|+ ro =
                read
+                 ~dl_assuming_contents_known:false
                  ~env:ri.data ~bindings:(get_bindings m.input_model ri.data)
                  m.output_kind m.output_model output in
              let dl = ri.dl +. ro.dl in
@@ -136,7 +137,7 @@ let make_norm_dl_model_data
 (* applying a task model to an input *)
 
 let apply
-      ~(read : ?dl_assuming_contents_known:bool ->
+      ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('value,'constr) bindings as 'bindings) ->
                't kind -> (('constr,'func) model as 'model) -> 'input ->
@@ -146,7 +147,7 @@ let apply
                 't kind -> 'model -> 'info -> 'data result)
       ~(env : 'data)
       (m : ('t,'constr,'func) task_model) (x_i : 'input) (info_o : 'info)
-    : (('data * 'data) list, exn) Result.t =
+    : ('data * 'data) list result =
   Common.prof "Model.apply" (fun () ->
   let+|+ read_i =
     read
