@@ -134,7 +134,8 @@ let score_learned_model
                  else ( (* score=0 && rank <= 3 && new derived_grid *)
                    Printf.printf ">> Trial %d\n" rank;
                    if !training then (
-                     pp_data gdi;
+                     print_string "di: "; pp_data gdi; print_newline ();
+                     print_string "do: "; pp_data gdo; print_newline ()
                    (* TODO if !grid_viz then Grid.pp_grids [Model2.grid_of_data_as_template gdi.data] *)
                    );
 	           ( if derived = output
