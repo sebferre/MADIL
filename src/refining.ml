@@ -232,7 +232,7 @@ let refinements
 
 
 let task_refinements
-      ~(binding_paths : ('constr,'func) Model.model -> 'constr Path.binding_paths)
+      ~(binding_paths : 't Kind.kind -> ('constr,'func) Model.model -> 'constr Path.binding_paths)
       ~(input_refinements : ('t,'value,'dconstr,'constr,'func) refiner)
       ~(output_refinements : ('t,'value,'dconstr,'constr,'func) refiner)
       
@@ -246,7 +246,7 @@ let task_refinements
     [ (let* p, ri, suppi, dli', mi =
          input_refinements ~nb_env_paths:0 ~dl_M:prs.dl_mi
            m.input_kind m.input_model dsri.reads in
-       let nb_env_paths = Bintree.cardinal (binding_paths mi) in
+       let nb_env_paths = Bintree.cardinal (binding_paths m.input_kind mi) in
        Myseq.return
          (Task_model.Rinput (p,ri,suppi,dli'),
           {m with input_model = mi; nb_env_paths}));

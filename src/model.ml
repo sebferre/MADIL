@@ -44,13 +44,14 @@ let xp_model
 (* model evaluation *)
 
 let binding_paths
-      ~(visible_path : 'constr path -> bool) (* is this path accessible to the output model? *)
-      (m : ('constr,'func) model)
+      ~(visible_path : 't kind -> 'constr path -> bool) (* is this path accessible to the output model? *)
+      (k0 : 't kind)
+      (m0 : ('constr,'func) model)
     : 'constr binding_paths =
   let rec aux ctx m =
     let p = ctx This in
     let s =
-      if visible_path p
+      if visible_path k0 p
       then Bintree.singleton p
       else Bintree.empty in
     match m with
@@ -74,14 +75,15 @@ let binding_paths
        s
     | Cst m1 -> raise TODO
   in
-  aux ctx0 m
+  aux ctx0 m0
 
   
 let get_bindings
-      ~(constr_value_opt : 'constr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
-      ~(seq_value_opt : 'constr path -> 'value list -> 'value option)
-      (m : ('constr,'func) model)
-      (d : ('value,'dconstr) data)
+      ~(constr_value_opt : 't kind -> 'constr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
+      ~(seq_value_opt : 't kind -> 'constr path -> 'value list -> 'value option)
+      (k0 : 't kind)
+      (m0 : ('constr,'func) model)
+      (d0 : ('value,'dconstr) data)
     : ('value,'constr) bindings =
   let rec aux ctx m d acc =
     match m, d with
@@ -89,7 +91,7 @@ let get_bindings
        let n = Array.length args in
        assert (Array.length dargs = n);
        let p = ctx This in
-       let v_opt = constr_value_opt p v dc in
+       let v_opt = constr_value_opt k0 p v dc in
        let ref_acc = ref acc in
        Option.iter
          (fun v -> ref_acc := Mymap.add p v !ref_acc)
@@ -114,12 +116,12 @@ let get_bindings
        (match lv_opt with
         | Some lv ->
            let p = ctx This in
-           seq_value_opt p lv, acc
+           seq_value_opt k0 p lv, acc
         | None -> None, acc)
     | Cst _, _ -> raise TODO
     | _ -> assert false
   in
-  let v_opt, acc = aux ctx0 m d bindings0 in
+  let v_opt, acc = aux ctx0 m0 d0 bindings0 in
   acc
 
 let eval
