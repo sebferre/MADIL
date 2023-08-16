@@ -144,7 +144,7 @@ let refinements
     | Kind.KVal t, Model.Pat (c,args) ->
        let k_args = asd#constr_args t c in
        Myseq.interleave
-         (aux_pat k c args selected_reads
+         (aux_pat k m c args selected_reads
           :: Array.to_list
               (Array.mapi
                (fun i mi ->
@@ -178,7 +178,7 @@ let refinements
             lm1)
     | _, Model.Cst m1 -> raise TODO
     | _ -> assert false
-  and aux_pat k c args selected_reads =
+  and aux_pat k m c args selected_reads =
     let dl_m = dl_model ~nb_env_paths k m in
     let dl_data_m = dl_data m in
     let refs =
