@@ -239,19 +239,13 @@ let dl_parse_rank (rank : int) : dl =
 
 class virtual ['t,'constr,'func] asd =
   object (self)
+    method virtual constr_args : 't -> 'constr -> 't kind array
     method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
-    method constr_args : 't -> 'constr -> 't kind array =
-      fun t c ->
-      let def_opt, others = self#default_and_other_pats t in
-      if def_opt = Some c then [||]
-      else
-        match List.assoc_opt c others with
-        | Some args -> args
-        | None -> failwith "Model.asd#constr_args: unexpected constr"
     method virtual expr_opt : 't kind -> 't kind option
     method virtual funcs : 't kind -> ('func * 't kind array) list (* None when expressions not allowed for this kind *)
   end
 
+(*
 let make_asd
       ~(all_constrs : ('t (* for each type *)
                       * 'constr option (* is there a default constr? *)
@@ -293,7 +287,8 @@ let make_asd
       | Some funcs -> funcs
       | None -> []
   end
-  
+ *)
+        
 (* model encoding *)
 
 let path_kind
