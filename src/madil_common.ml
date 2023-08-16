@@ -94,6 +94,13 @@ let myseq_concat_if cond seq1 seq2 =
 
 type 'a html_xp = html:bool -> 'a Xprint.xp
 
+let pp (xp : 'a html_xp) (x : 'a) : unit =
+  Xprint.to_stdout (xp ~html:false) x
+
+let pp_endline xp x =
+  pp xp x;
+  print_newline ()
+
 (* combinatorics *)
 
 let rec sum_conv (lf : (int -> float) list) (n : int) : float =

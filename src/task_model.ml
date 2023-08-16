@@ -20,7 +20,7 @@ let xp_task_model
     :  ('t,'constr,'func) task_model html_xp =
   fun ~html print m ->
   xp_model ~html print m.input_model;
-  print#string (if html then " ➜ " else "\n➜\n");
+  print#string " ➜ ";
   xp_model ~html print m.output_model
 
 (* pair reading and encoding *)

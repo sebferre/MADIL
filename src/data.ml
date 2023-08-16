@@ -22,9 +22,10 @@ let xp_data
     | DVal (v, DNone) -> xp_value ~html print v
     | DVal (v, DPat (dc,args)) ->
        xp_dconstr ~html print dc;
-       Xprint.bracket ("[", "]")
-         (Xprint.sep_array ", " (aux ~html))
-         print args
+       if args <> [||] then
+         Xprint.bracket ("[", "]")
+           (Xprint.sep_array ", " (aux ~html))
+           print args
     | DSeq (n,items) ->
        Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
          (Xprint.sep_list ", " (aux ~html))

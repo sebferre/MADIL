@@ -25,9 +25,10 @@ let xp_model
     match m with
     | Pat (c,args) ->
        xp_constr ~html print c;
-       Xprint.bracket ("[","]")
-         (Xprint.sep_array ", " (aux ~html))
-         print args
+       if args <> [||] then
+         Xprint.bracket ("[","]")
+           (Xprint.sep_array ", " (aux ~html))
+           print args
     | Seq (n,lm1) ->
        Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
          (Xprint.sep_list ", " (aux ~html))
