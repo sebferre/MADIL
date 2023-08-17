@@ -474,13 +474,7 @@ let read
   let index = lazy (make_index bindings) in
   let reads =
     best_parses
-    |> (fun l ->
-      Common.sub_list l 0
-        (if dl_assuming_contents_known
-         then 1 (* TODO: relax because fragile, see task 5, relaxing digit 5 *)
-         else max_nb_reads))
-         (* in pruning mode, only best read as we simulate prediction *)
-         (* TODO: should be handled by DLs *)
+    |> (fun l -> Common.sub_list l 0 max_nb_reads)
     |> limit_dl ~max_parse_dl_factor (fun (_,dl) -> dl)
     |> List.mapi (fun rank (data,dl) ->
            let dl_rank = dl_parse_rank rank in
