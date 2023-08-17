@@ -209,13 +209,16 @@ type ('info,'value,'dconstr) encoder = 'info -> ('value,'dconstr) data -> dl * '
 
 let encoder
       ~(encoder_pat : 'constr -> 'enc array -> 'enc)
+      ~(info_expr : 'info -> ('value,'dconstr) data -> 'info)
   : ('constr,'func) model -> (('info,'value,'dconstr) encoder as 'enc) =
   let rec enc = function
     | Pat (c,args) ->
        let enc_args = Array.map enc args in
        encoder_pat c enc_args
     | Expr e ->
-       (fun x d -> 0., x)
+       (fun x d ->
+         let x = info_expr x d in
+         0., x)
     | Seq (n,lm1) ->
        let enc_lm1 = List.map enc lm1 in
        (fun x -> function
@@ -417,23 +420,25 @@ let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a
 
 exception Parse_failure
 
-type ('input,'value,'dconstr) parseur_bests = 'input -> (('value,'dconstr) data * dl) list result
+type ('input,'value,'dconstr,'constr) eval_parse_bests = ('value,'constr) bindings -> 'input -> (('value,'dconstr) data * dl) list result
         
-let parseur_bests
+let eval_parse_bests
       ~(max_nb_parse : int)
+      ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
       ~(parseur : ('constr,'func) model -> ('input,'value,'dconstr) parseur)
       ~(dl_data : ('constr,'func) model -> ('value,'dconstr) data -> dl)
 
-      (m : ('constr,'func) model)
-    : ('input,'value,'dconstr) parseur_bests =
-  let parse = parseur m in
-  let dl_data_m = dl_data m in
-  fun x ->
-  Common.prof "Model.sorted_parseur" (fun () ->
+      (k : 't kind)
+      (m0 : ('constr,'func) model)
+    : ('input,'value,'dconstr,'constr) eval_parse_bests =
+  let dl_data_m0 = dl_data m0 in
+  fun bindings x ->
+  Common.prof "Model.eval_parse_bests" (fun () ->
+  let| m = eval k m0 bindings in (* resolving expressions *)
   let parses =
-    let* data, _ = parse x in
+    let* data, _ = parseur m x in
     let dl = (* QUICK *)
-      dl_round (dl_data_m data) in
+      dl_round (dl_data_m0 data) in
       (* rounding before sorting to absorb float error accumulation *)
     Myseq.return (data, dl) in
   let l_parses =
@@ -454,7 +459,7 @@ let read
       ~(max_parse_dl_factor : float)
       ~(max_nb_reads : int)
       ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
-      ~(parseur_bests : ('constr,'func) model -> ('input,'value,'dconstr) parseur_bests)
+      ~(eval_parse_bests : 't kind -> ('constr,'func) model -> ('input,'value,'dconstr,'constr) eval_parse_bests)
       ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
 
       ~(dl_assuming_contents_known : bool)
@@ -465,8 +470,7 @@ let read
       (x : 'input)
     : ('value,'dconstr,'constr,'func) read list result =
   Common.prof "Model.read" (fun () ->
-  let| m = eval k m0 bindings in (* reducing expressions *)
-  let| best_parses = parseur_bests m x in
+  let| best_parses = eval_parse_bests k m0 bindings x in
   let index = lazy (make_index bindings) in
   let reads =
     best_parses

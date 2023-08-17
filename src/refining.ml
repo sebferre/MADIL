@@ -129,7 +129,7 @@ let refinements
       ~(asd : ('t,'constr,'func) Model.asd)
       ~(dl_model : nb_env_paths:int -> ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : 'model -> (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(parseur_bests : 'model -> ('input,'value,'dconstr) Model.parseur_bests)
+      ~(eval_parse_bests : 'kind -> 'model -> ('input,'value,'dconstr,'constr) Model.eval_parse_bests)
       ~(refinements_pat : 'constr -> 'model array -> 'data -> ('model * 'input) list) (* refined submodel with related new local data *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
@@ -189,7 +189,7 @@ let refinements
          let rs =
            List.filter_map
              (fun (m',x) ->
-               match parseur_bests m' x with
+               match eval_parse_bests k m' read.bindings x with
                | Result.Ok ((data',dl')::_) -> Some (m',data')
                | _ -> None)
              (refs_pat data) in
