@@ -9,7 +9,7 @@ let learn
       ~(read_pairs :
           pruning:bool -> env:'data ->
           (('t,'constr,'func) Task_model.task_model as 'task_model) ->
-          'input Task.pair list ->
+          'value Task.pair list ->
           (('value,'dconstr,'constr,'func) Task_model.pairs_reads as 'pairs_reads) result)
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
@@ -30,7 +30,7 @@ let learn
       ~beam_width ~refine_degree
       ~env (* environment data to the input model *)
       ~init_task_model
-      (pairs : 'input Task.pair list)
+      (pairs : 'value Task.pair list)
     : ('task_model * 'pairs_reads * bool) double
   = Common.prof "Model.learn_model" (fun () ->
   let norm_dl_model_data = make_norm_dl_model_data ~alpha () in

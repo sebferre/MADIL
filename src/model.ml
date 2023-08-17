@@ -458,6 +458,7 @@ let eval_parse_bests
 let read
       ~(max_parse_dl_factor : float)
       ~(max_nb_reads : int)
+      ~(input_of_value : 'value -> 'input)
       ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
       ~(eval_parse_bests : 't kind -> ('constr,'func) model -> ('input,'value,'dconstr,'constr) eval_parse_bests)
       ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
@@ -467,9 +468,10 @@ let read
       ~(bindings : ('value,'constr) bindings)
       (k : 't kind)
       (m0 : ('constr,'func) model)
-      (x : 'input)
+      (v : 'value)
     : ('value,'dconstr,'constr,'func) read list result =
   Common.prof "Model.read" (fun () ->
+  let x = input_of_value v in
   let| best_parses = eval_parse_bests k m0 bindings x in
   let index = lazy (make_index bindings) in
   let reads =
@@ -495,16 +497,18 @@ let read
 let write
       ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
       ~(generator : ('constr,'func) model -> ('info,'value,'dconstr) generator)
+      ~(value_of_data : ('value,'dconstr) data -> 'value)
       
       ~(bindings : ('value,'constr) bindings)
       (k : 't kind)
       (m0 : ('constr,'func) model)
       (info : 'info)
-    : ('value,'dconstr) data result =
+    : (('value,'dconstr) data * 'value) result =
   Common.prof "Model.write" (fun () ->
   let| m = eval k m0 bindings in
   let d = generator m info in
-  Result.Ok d)
+  let v = value_of_data d in
+  Result.Ok (d, v))
 
 
 (* model refinement *)

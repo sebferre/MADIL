@@ -38,13 +38,13 @@ let read_pairs
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('value,'constr) bindings as 'bindings) ->
-               't kind -> (('constr,'func) model as 'model) -> 'input -> 'read list result)
+               't kind -> (('constr,'func) model as 'model) -> 'value -> 'read list result)
       ~(get_bindings : 't kind -> 'model -> 'data -> 'bindings)
       
       ~(pruning : bool)
       ~(env : 'data)
       (m : 'task_model)
-      (pairs : 'input Task.pair list)
+      (pairs : 'value Task.pair list)
     : ('value,'dconstr,'constr,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
   (* takes model, input env+docs, output docs *)
@@ -140,25 +140,25 @@ let apply
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('value,'constr) bindings as 'bindings) ->
-               't kind -> (('constr,'func) model as 'model) -> 'input ->
+               't kind -> (('constr,'func) model as 'model) -> 'value ->
                ('value,'dconstr,'constr,'func) read list result)
       ~(get_bindings : 't kind -> 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
-                't kind -> 'model -> 'info -> 'data result)
+                't kind -> 'model -> 'info -> ('data * 'value) result)
       ~(env : 'data)
-      (m : ('t,'constr,'func) task_model) (x_i : 'input) (info_o : 'info)
-    : ('data * 'data) list result =
+      (m : ('t,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
+    : ('data * 'data * 'value) list result =
   Common.prof "Model.apply" (fun () ->
   let+|+ read_i =
     read
       ~dl_assuming_contents_known:true ~env ~bindings:bindings0
-      m.input_kind m.input_model x_i in
+      m.input_kind m.input_model v_i in
   let data_i = read_i.data in
-  let| data_o =
+  let| data_o, v_o =
     write
       ~bindings:(get_bindings m.input_kind m.input_model data_i)
       m.output_kind m.output_model info_o in
-  Result.Ok [(data_i, data_o)])
+  Result.Ok [(data_i, data_o, v_o)])
 
 (* refinements *)
   

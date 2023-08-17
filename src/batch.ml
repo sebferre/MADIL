@@ -54,16 +54,15 @@ let print_measures count ms =
 
 let apply_model
       ~apply =
-  fun ~env m x_i info_o ->
+  fun ~env m v_i info_o ->
   let res_opt =
     Common.do_timeout !timeout_predict (fun () ->
-        apply ~env m x_i info_o) in
+        apply ~env m v_i info_o) in
   match res_opt with
   | Some res -> res
   | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
   
 let score_learned_model
-      ~(input_of_data : ('value,'dconstr) Data.data -> 'input)
       ~(xp_data : ('value,'dconstr) Data.data html_xp)
       ~read (* model read *)
       ~kind_i (* input top kind *)
@@ -123,8 +122,7 @@ let score_learned_model
 	  match apply_model ~apply ~env:env0 m input info_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
-               (fun (score,rank,label,failed_derived_grids) (gdi, gdo) ->
-                 let derived = input_of_data gdo in
+               (fun (score,rank,label,failed_derived_grids) (gdi, gdo, derived) ->
                  if score=1 then
                    score, rank, label, failed_derived_grids (* already success *)
                  else if rank > 3 then
@@ -178,7 +176,6 @@ let score_learned_model
   micro, macro, mrr
        
 let print_learned_model
-      ~input_of_data
       ~xp_data ~xp_task_model
       ~read ~learn ~apply
       ~alpha ~refine_degree
@@ -225,12 +222,12 @@ let print_learned_model
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~xp_data ~read ~input_of_data ~kind_i ~env0 ~apply ~info_o
+         ~xp_data ~read ~kind_i ~env0 ~apply ~info_o
          name m_prune (`TRAIN psr_prune) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~xp_data ~read ~input_of_data ~kind_i ~env0 ~apply ~info_o
+         ~xp_data ~read ~kind_i ~env0 ~apply ~info_o
          name m_prune (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -250,12 +247,11 @@ let print_learned_model
 (* === main === *)
   
 let task_of_name
-      ~data_of_json
+      ~value_of_json
       dir name =
-  Task.from_file ~data_of_json (Filename.concat dir name)
+  Task.from_file ~value_of_json (Filename.concat dir name)
 
 let process_task
-      ~input_of_data
       ~xp_data ~xp_task_model
       ~read ~learn ~apply
       ~read_pairs
@@ -272,7 +268,7 @@ let process_task
       let ms =
         print_learned_model
           ~xp_data ~xp_task_model
-          ~read ~learn ~apply ~input_of_data
+          ~read ~learn ~apply
           ~alpha ~env0 ~kind_i ~info_o
           ~init_task_model ~refine_degree name task in
       count := !count+1;
@@ -292,17 +288,16 @@ let summarize_tasks count sum_ms =
   flush stdout
   
 let main
-      ~(data_of_json : Yojson.Safe.t -> 'input)
-      ~(input_of_data : 'data -> 'input)
+      ~(value_of_json : Yojson.Safe.t -> 'value)
       ~(xp_data : (('value,'dconstr) Data.data as 'data) html_xp)
       ~(xp_task_model : (('t,'constr,'func) Task_model.task_model as 'task_model) html_xp)
-      ~(read : dl_assuming_contents_known:bool -> env:'data -> bindings:(('value,'constr) Path.bindings as 'bindings) -> ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> 'input -> 'read list result) 
-      ~(learn : timeout_refine:int -> timeout_prune:int -> beam_width:int -> refine_degree:int -> env:'data -> init_task_model:'task_model -> 'input Task.pair list -> ('task_model * 'pairs_reads * bool) double)
-      ~(apply : env:'data -> 'task_model -> 'input -> 'info -> ('data * 'data) list result)
-      ~(read_pairs : pruning:bool -> env:'data -> 'task_model -> 'input Task.pair list -> 'pairs_reads result)
+      ~(read : dl_assuming_contents_known:bool -> env:'data -> bindings:(('value,'constr) Path.bindings as 'bindings) -> ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> 'value -> 'read list result) 
+      ~(learn : timeout_refine:int -> timeout_prune:int -> beam_width:int -> refine_degree:int -> env:'data -> init_task_model:'task_model -> 'value Task.pair list -> ('task_model * 'pairs_reads * bool) double)
+      ~(apply : env:'data -> 'task_model -> 'value -> 'info -> ('data * 'data * 'value) list result)
+      ~(read_pairs : pruning:bool -> env:'data -> 'task_model -> 'value Task.pair list -> 'pairs_reads result)
       ~(alpha : float)
       ~(refine_degree : int)
-      ~(get_init_task_model : string -> 'input Task.task -> 'data * 'kind * 'task_model * 'info)
+      ~(get_init_task_model : string -> 'value Task.task -> 'data * 'kind * 'task_model * 'info)
       ()
     : unit =
   let () = Printexc.record_backtrace true in
@@ -358,7 +353,7 @@ let main
     List.fold_left
       (fun rank name ->
         if rank <= !start_rank then (
-          let task = task_of_name ~data_of_json !dir name in
+          let task = task_of_name ~value_of_json !dir name in
           print_endline "=====================================";
           Printf.printf "[-%d] Checking task %s: %d train, %d test\n"
 	    rank name
@@ -366,7 +361,7 @@ let main
 	    (List.length task.Task.test);
           process_task
             ~xp_data ~xp_task_model
-            ~read ~learn ~apply ~input_of_data
+            ~read ~learn ~apply
             ~read_pairs
             ~alpha ~refine_degree
             ~get_init_task_model
