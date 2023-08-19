@@ -42,74 +42,134 @@ let xp_model
   aux
 
 
+(* ASD *)
+
+class virtual ['t,'constr,'func] asd =
+  object (self)
+    method virtual constr_args : 't -> 'constr -> 't kind array
+    method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
+    method virtual expr_opt : 't kind -> 't kind option
+    method virtual funcs : 't kind -> ('func * 't kind array) list (* None when expressions not allowed for this kind *)
+  end
+
+(*
+let make_asd
+      ~(all_constrs : ('t (* for each type *)
+                      * 'constr option (* is there a default constr? *)
+                      * ('constr * 't kind array) list (* other constrs and their arg kind *)
+                     ) list)
+      ~(all_funcs : ('t kind (* for each kind *)
+                     * 't kind option (* can it be an expr? *)
+                     * ('func * 't kind array) list (* funcs resulting in this kind, and their arg kind *)
+                    ) list) : ('t,'constr,'func) asd =
+  let map_constr =
+    List.fold_left
+      (fun m (t, default_constr_opt, other_constr_args) ->
+        Mymap.add t (default_constr_opt, other_constr_args) m)
+      Mymap.empty all_constrs in
+  let map_expr, map_funcs =
+    List.fold_left
+      (fun (me,mf) (k, expr_opt, l_f_args) ->
+        (match expr_opt with None -> me | Some k1 -> Mymap.add k k1 me),
+        Mymap.add k l_f_args mf)
+      (Mymap.empty, Mymap.empty) all_funcs in
+  object
+    method default_and_other_pats t =
+      match Mymap.find_opt t map_constr with
+      | Some default_others -> default_others
+      | None -> None, []
+    method constr_args t c =
+      match Mymap.find_opt t map_constr with
+      | Some (default,others) ->
+         if default = Some c then [||]
+         else
+           (match List.assoc_opt c others with
+            | Some args -> args
+            | None -> failwith "Model.asd#constr_args: unexpected constr for type")
+      | None -> failwith "Model.asd#constr_args: unexpected type"
+    method expr_opt k =
+      Mymap.find_opt k map_expr
+    method funcs k =
+      match Mymap.find_opt k map_funcs with
+      | Some funcs -> funcs
+      | None -> []
+  end
+ *)
+        
 (* model evaluation *)
 
 let binding_paths
-      ~(visible_path : 't kind -> 'constr path -> bool) (* is this path accessible to the output model? *)
+      ~(asd : ('t,'constr,'func) asd)
+      ~(visible_path :  'constr path -> 't kind -> bool) (* is this path accessible to the output model? *)
       (k0 : 't kind)
       (m0 : ('constr,'func) model)
     : 'constr binding_paths =
-  let rec aux ctx m =
+  let rec aux ctx k m =
     let p = ctx This in
     let s =
-      if visible_path k0 p
+      if visible_path p k
       then Bintree.singleton p
       else Bintree.empty in
-    match m with
-    | Pat (c,args) ->
+    match k, m with
+    | KVal t, Pat (c,args) ->
+       let kind_args = asd#constr_args t c in
        let s_args =
          Array.mapi
            (fun i argi ->
              let ctxi = (fun pi -> ctx (Field (c,i,pi))) in
-             aux ctxi argi)
+             let ki = try kind_args.(i) with _ -> assert false in
+             aux ctxi ki argi)
            args in
        Array.fold_left Bintree.union s s_args
-    | Expr e -> s
-    | Seq (n,lm1) ->
+    | _, Expr e -> s
+    | KSeq k1, Seq (n,lm1) ->
        let i, s =
          List.fold_left
            (fun (i,s) mi ->
              let cxti = (fun pi -> ctx (Item (i,pi))) in
-             i+1, Bintree.union s (aux cxti mi))
+             i+1, Bintree.union s (aux cxti k1 mi))
            (0,s) lm1 in
        assert (i = n);
        s
-    | Cst m1 -> raise TODO
+    | KSeq k1, Cst m1 -> raise TODO
+    | _ -> assert false
   in
-  aux ctx0 m0
+  aux ctx0 k0 m0
 
   
 let get_bindings
-      ~(constr_value_opt : 't kind -> 'constr path -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
-      ~(seq_value_opt : 't kind -> 'constr path -> 'value list -> 'value option)
+      ~(asd : ('t,'constr,'func) asd)
+      ~(constr_value_opt : 'constr path -> 't kind -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
+      ~(seq_value_opt : 'constr path -> 't kind -> 'value list -> 'value option)
       (k0 : 't kind)
       (m0 : ('constr,'func) model)
       (d0 : ('value,'dconstr) data)
     : ('value,'constr) bindings =
-  let rec aux ctx m d acc =
-    match m, d with
-    | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
+  let rec aux ctx k m d acc =
+    match k, m, d with
+    | KVal t, Pat (c,args), DVal (v, DPat (dc, dargs)) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
+       let kind_args = asd#constr_args t c in
        let p = ctx This in
-       let v_opt = constr_value_opt k0 p v dc in
+       let v_opt = constr_value_opt p k v dc in
        let ref_acc = ref acc in
        Option.iter
          (fun v -> ref_acc := Mymap.add p v !ref_acc)
          v_opt;
        for i = 0 to n - 1 do
-         let vi_opt, acc = aux (fun pi -> ctx (Field (c,i,pi))) args.(i) dargs.(i) !ref_acc in
+         let vi_opt, acc = aux (fun pi -> ctx (Field (c,i,pi))) kind_args.(i) args.(i) dargs.(i) !ref_acc in
          ref_acc := acc
        done;
        v_opt, !ref_acc
-    | Expr _, _ -> None, acc (* expressions only in task output but TODO in general expression values should be accessible *)
-    | Seq (n,lm), DSeq (dn,ld) ->
+    | _, Expr _, _ -> None, acc (* expressions only in task output but TODO in general expression values should be accessible *)
+    | KSeq k1, Seq (n,lm), DSeq (dn,ld) ->
        assert (n = dn);
        let _, lv_opt, acc =
          List.fold_right2
            (fun mi di (i,lv_opt,acc) ->
              let ctx_i = (fun pi -> ctx (Item (i,pi))) in
-             let v_opt, acc = aux ctx_i mi di acc in
+             let v_opt, acc = aux ctx_i k1 mi di acc in
              match v_opt, lv_opt with
              | Some v, Some lv -> i-1, Some (v::lv), acc
              | _ -> i-1, None, acc)
@@ -117,12 +177,12 @@ let get_bindings
        (match lv_opt with
         | Some lv ->
            let p = ctx This in
-           seq_value_opt k0 p lv, acc
+           seq_value_opt p k lv, acc
         | None -> None, acc)
-    | Cst _, _ -> raise TODO
+    | _, Cst _, _ -> raise TODO
     | _ -> assert false
   in
-  let v_opt, acc = aux ctx0 m0 d0 bindings0 in
+  let v_opt, acc = aux ctx0 k0 m0 d0 bindings0 in
   acc
 
 let eval
@@ -238,60 +298,6 @@ let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
   Mdl.Code.universal_int_star rank -. 1.
   
-(* ASD *)
-
-class virtual ['t,'constr,'func] asd =
-  object (self)
-    method virtual constr_args : 't -> 'constr -> 't kind array
-    method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
-    method virtual expr_opt : 't kind -> 't kind option
-    method virtual funcs : 't kind -> ('func * 't kind array) list (* None when expressions not allowed for this kind *)
-  end
-
-(*
-let make_asd
-      ~(all_constrs : ('t (* for each type *)
-                      * 'constr option (* is there a default constr? *)
-                      * ('constr * 't kind array) list (* other constrs and their arg kind *)
-                     ) list)
-      ~(all_funcs : ('t kind (* for each kind *)
-                     * 't kind option (* can it be an expr? *)
-                     * ('func * 't kind array) list (* funcs resulting in this kind, and their arg kind *)
-                    ) list) : ('t,'constr,'func) asd =
-  let map_constr =
-    List.fold_left
-      (fun m (t, default_constr_opt, other_constr_args) ->
-        Mymap.add t (default_constr_opt, other_constr_args) m)
-      Mymap.empty all_constrs in
-  let map_expr, map_funcs =
-    List.fold_left
-      (fun (me,mf) (k, expr_opt, l_f_args) ->
-        (match expr_opt with None -> me | Some k1 -> Mymap.add k k1 me),
-        Mymap.add k l_f_args mf)
-      (Mymap.empty, Mymap.empty) all_funcs in
-  object
-    method default_and_other_pats t =
-      match Mymap.find_opt t map_constr with
-      | Some default_others -> default_others
-      | None -> None, []
-    method constr_args t c =
-      match Mymap.find_opt t map_constr with
-      | Some (default,others) ->
-         if default = Some c then [||]
-         else
-           (match List.assoc_opt c others with
-            | Some args -> args
-            | None -> failwith "Model.asd#constr_args: unexpected constr for type")
-      | None -> failwith "Model.asd#constr_args: unexpected type"
-    method expr_opt k =
-      Mymap.find_opt k map_expr
-    method funcs k =
-      match Mymap.find_opt k map_funcs with
-      | Some funcs -> funcs
-      | None -> []
-  end
- *)
-        
 (* model encoding *)
 
 let path_kind

@@ -163,9 +163,9 @@ module type DOMAIN =
 
     (* bindings and evaluation *)
 
-    val visible_path : kind -> path -> bool
-    val constr_value_opt : kind -> path -> value -> dconstr -> value option
-    val seq_value_opt : kind -> path -> value list -> value option
+    val visible_path : path -> kind -> bool
+    val constr_value_opt : path -> kind -> value -> dconstr -> value option
+    val seq_value_opt : path -> kind -> value list -> value option
       
     val eval_func : func -> value array -> value result
     val eval_unbound_path : path -> value result
@@ -218,10 +218,12 @@ module Make (Domain : DOMAIN) =
                   
     let binding_paths : kind -> model -> binding_paths =
       Model.binding_paths
+        ~asd
         ~visible_path
   
     let get_bindings : kind -> model -> data -> bindings =
       Model.get_bindings
+        ~asd
         ~constr_value_opt
         ~seq_value_opt
 
