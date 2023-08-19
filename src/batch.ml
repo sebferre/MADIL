@@ -65,7 +65,6 @@ let apply_model
 let score_learned_model
       ~(xp_data : ('value,'dconstr) Data.data html_xp)
       ~read (* model read *)
-      ~kind_i (* input top kind *)
       ~env0 (* input env data *)
       ~apply
       ~info_o (* generation output info *)
@@ -106,7 +105,7 @@ let score_learned_model
             | `TEST -> read
                          ~dl_assuming_contents_known:false
                          ~env:env0 ~bindings:Path.bindings0
-                         kind_i m.Task_model.input_model input in
+                         m.Task_model.input_kind m.Task_model.input_model input in
           ( match input_reads with
             | Result.Ok reads ->
                List.iter
@@ -179,7 +178,7 @@ let print_learned_model
       ~xp_data ~xp_task_model
       ~read ~learn ~apply
       ~alpha ~refine_degree
-      ~env0 ~kind_i ~init_task_model ~info_o
+      ~env0 ~init_task_model ~info_o
       (name : string) (task : 'a Task.task)
     : measures =
   let pp_task_model = Xprint.to_stdout (xp_task_model ~html:false) in
@@ -222,12 +221,12 @@ let print_learned_model
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~xp_data ~read ~kind_i ~env0 ~apply ~info_o
+         ~xp_data ~read ~env0 ~apply ~info_o
          name m_prune (`TRAIN psr_prune) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~xp_data ~read ~kind_i ~env0 ~apply ~info_o
+         ~xp_data ~read ~env0 ~apply ~info_o
          name m_prune (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -259,7 +258,7 @@ let process_task
       ~get_init_task_model
       name task
       count sum_ms =
-      let env0, kind_i, init_task_model, info_o = get_init_task_model name task in
+      let env0, init_task_model, info_o = get_init_task_model name task in
       print_endline "\n# evaluating init_task_model";
       print_dl_task_model
         ~read_pairs ~alpha ~env0
@@ -269,7 +268,7 @@ let process_task
         print_learned_model
           ~xp_data ~xp_task_model
           ~read ~learn ~apply
-          ~alpha ~env0 ~kind_i ~info_o
+          ~alpha ~env0 ~info_o
           ~init_task_model ~refine_degree name task in
       count := !count+1;
       sum_ms :=
@@ -297,7 +296,7 @@ let main
       ~(read_pairs : pruning:bool -> env:'data -> 'task_model -> 'value Task.pair list -> 'pairs_reads result)
       ~(alpha : float)
       ~(refine_degree : int)
-      ~(get_init_task_model : string -> 'value Task.task -> 'data * 'kind * 'task_model * 'info)
+      ~(get_init_task_model : string -> 'value Task.task -> 'data * 'task_model * 'info)
       ()
     : unit =
   let () = Printexc.record_backtrace true in
