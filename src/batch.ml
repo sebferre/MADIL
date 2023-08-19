@@ -371,3 +371,21 @@ let main
       nb_tasks !names in
   summarize_tasks !count !sum_ms;
   Common.prerr_profiling ()
+
+
+module Make (Domain : Madil.DOMAIN) =
+  struct
+    include Madil.Make(Domain)
+
+    let main : unit -> unit =
+      main
+        ~value_of_json
+        ~xp_data ~xp_task_model
+        ~read ~learn ~apply
+        ~read_pairs
+        ~alpha:(!alpha)
+        ~refine_degree:(!max_refinements)
+        ~get_init_task_model
+      
+  end
+
