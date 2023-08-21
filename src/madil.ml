@@ -34,7 +34,8 @@ module type TYPES =
     include BASIC_TYPES
 
     (* defined types *)
-          
+
+    type task_pair = value Task.pair
     type task = value Task.task
               
     type kind = t Kind.kind
@@ -91,7 +92,8 @@ module Defined_types (T : BASIC_TYPES) =
     open T
        
     (* defined types *)
-          
+
+    type task_pair = value Task.pair
     type task = value Task.task
               
     type kind = t Kind.kind
@@ -207,6 +209,8 @@ module type DOMAIN =
     val get_init_task_model : string (* task name *) -> task -> data (* env0 *) * task_model * generator_info
     val log_reading : refinement -> task_model -> status:status -> unit
     val log_refining : refinement -> task_model -> pairs_reads -> dl -> unit
+
+    val default_name_task : string * task
       
   end
 
@@ -353,4 +357,18 @@ module Make (Domain : DOMAIN) =
         ~log_reading
         ~log_refining
       
+    (* tasks *)
+
+    let task_of_json : Yojson.Safe.t -> task =
+      Task.task_of_json
+        ~value_of_json
+
+    let task_from_filename_contents : string -> string -> task =
+      Task.from_filename_contents
+        ~value_of_json
+
+    let task_from_file : string -> task =
+      Task.from_file
+        ~value_of_json
+
   end
