@@ -17,18 +17,18 @@ let make_pat (c : 'constr) (args : ('constr,'func) model array) : ('constr,'func
   Pat (c,args)
           
 let xp_model
-      ~(xp_constr : 'constr html_xp)
+      ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
       ~(xp_field : ('constr * int) html_xp)
       ~(xp_func : 'func html_xp)
     : ('constr,'func) model html_xp =
   let rec aux ~html print m =
     match m with
     | Pat (c,args) ->
-       xp_constr ~html print c;
-       if args <> [||] then
-         Xprint.bracket ("[","]")
-           (Xprint.sep_array ", " (aux ~html))
-           print args
+       let xp_args =
+         Array.map
+           (fun arg -> (fun ~html print () -> aux ~html print arg))
+           args in
+       xp_pat c xp_args ~html print ()
     | Seq (n,lm1) ->
        Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
          (Xprint.sep_list ", " (aux ~html))
@@ -41,6 +41,21 @@ let xp_model
   in
   aux
 
+let xp_pat_default
+      ~(xp_constr : 'constr html_xp)
+
+      (c : 'constr) (xp_args : unit html_xp array) : unit html_xp =
+  fun ~html print () ->
+  xp_constr ~html print c;
+  if xp_args <> [||] then (
+    print#string "[";
+    Array.iteri
+      (fun i xp_argi ->
+        if i > 0 then print#string ", ";
+        xp_argi ~html print ())
+      xp_args;
+    print#string "]"
+  )
 
 (* ASD *)
 

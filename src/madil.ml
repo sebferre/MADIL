@@ -13,9 +13,10 @@ module type BASIC_TYPES =
     val xp_type : t html_xp
 
     type dconstr
+    val xp_dpat : dconstr -> unit html_xp array -> unit html_xp
 
     type constr
-    val xp_constr : constr html_xp
+    val xp_pat : constr -> unit html_xp array -> unit html_xp
     val xp_field : (constr * int) html_xp
 
     type func
@@ -45,6 +46,7 @@ module type TYPES =
     val xp_signature : signature html_xp
           
     type data = (value,dconstr) Data.data
+    val xp_data : data html_xp
               
     type path = constr Path.path
     val xp_path : path html_xp
@@ -102,7 +104,8 @@ module Defined_types (T : BASIC_TYPES) =
     let xp_signature : signature html_xp = Kind.xp_signature ~xp_type
           
     type data = (value,dconstr) Data.data
-              
+    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dpat
+                               
     type path = constr Path.path
     let xp_path : path html_xp = Path.xp_path ~xp_field
 
@@ -113,7 +116,7 @@ module Defined_types (T : BASIC_TYPES) =
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_field ~xp_func
 
     type model = (constr,func) Model.model
-    let xp_model : model html_xp = Model.xp_model ~xp_constr ~xp_field ~xp_func
+    let xp_model : model html_xp = Model.xp_model ~xp_pat ~xp_field ~xp_func
 
     type asd = (t,constr,func) Model.asd
 
@@ -155,10 +158,6 @@ module type DOMAIN =
 
     include TYPES
 
-    (* pretty-printing *)
-
-    val xp_dpat : dconstr -> data html_xp array -> data array html_xp
-          
     (* bindings and evaluation *)
 
     val visible_path : path -> kind -> bool
@@ -214,13 +213,6 @@ module Make (Domain : DOMAIN) =
   struct
     include Domain
 
-    (* pretty-printing *)
-
-    let xp_data : data html_xp =
-      Data.xp_data
-        ~xp_value
-        ~xp_dpat
-          
     (* bindings and evaluation *)
                   
     let binding_paths : kind -> model -> binding_paths =
