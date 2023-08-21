@@ -4,16 +4,14 @@ SRC=madil_common.cmo task.cmo kind.cmo data.cmo path.cmo expr.cmo model.cmo task
 SRC_FABLIS=focus.cmo syntax.cmo lis.cmo jsutils.cmo webapp.cmo html.cmo widget_focus.cmo widget_suggestions.cmo widget_table.cmo widget_commandline.cmo
 
 FLAGS= -g -principal -I ../../lib -package unix,str,num,csv,yojson,ppx_deriving_yojson
-FLAGS_FABLIS = -I ../../fablis/core -I ../../fablis/core/webapp
+FLAGS_FABLIS = -package js_of_ocaml,js_of_ocaml-lwt,js_of_ocaml-ppx -I ../../fablis/core -I ../../fablis/core/webapp
 #JSOO_FLAGS = -pretty -no-inline -debug-info # for dev
 JSOO_FLAGS = --opt 3 # for prod
 
 all: $(SRC:.cmo=.cmx)
 
-#lis: $(SRC) string_lis.ml
-## requires to set profiling off (Common.prof_on := false)
-#	ocamlfind ocamlc $(FLAGS) $(FLAGS_FABLIS) -package js_of_ocaml,js_of_ocaml-lwt,js_of_ocaml-ppx -linkpkg -o html/script.byte $(OBJ) $(SRC) $(SRC_FABLIS) string_lis.ml
-#	js_of_ocaml $(JSOO_FLAGS) html/script.byte
+lis: $(SRC) arc_lis.ml
+	ocamlfind ocamlc -c $(FLAGS) $(FLAGS_FABLIS) arc_lis.ml
 
 clean:
 	rm -f *.cm[ioax]
