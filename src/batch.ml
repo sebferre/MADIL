@@ -1,6 +1,10 @@
 
 open Madil_common
 
+module Make (Domain : Madil.DOMAIN) =
+  struct
+    include Madil.Make(Domain)
+
 (* === command line options === *)
 
 let training = ref true (* should be set to false on evaluation set *)
@@ -14,27 +18,21 @@ let pause = ref 0. (* TODO: not used in code *)
 
 (* === printing and checking functions === *)
 
-let print_dl_md
-      ~alpha =
-  fun psr -> (* model+data DL *)
+let print_dl_md psr = (* model+data DL *)
   let (lmi,lmo,lm), (ldi,ldo,ld), (lmdi, lmdo, lmd) =
-    Task_model.dl_model_data ~alpha psr in
+    Task_model.dl_model_data ~alpha:(!alpha) psr in
   Printf.printf "DL input  with Mi: L = %.1f + %.1f = %.1f\n" lmi ldi lmdi;
   Printf.printf "DL output with Mo: L = %.1f + %.1f = %.1f\n" lmo ldo lmdo;
   Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" lm ld lmd;
   ldo
 
-let print_dl_task_model
-      ~read_pairs
-      ~alpha
-      ~env0 =
-  fun name task model ->
+let print_dl_task_model ~env name task model =
   read_pairs
     ~pruning:false
-    ~env:env0
+    ~env
     model task.Task.train
   |> Result.fold
-       ~ok:(fun psr -> ignore (print_dl_md ~alpha psr))
+       ~ok:(fun psr -> ignore (print_dl_md psr))
        ~error:(fun exn -> raise exn)
 
 (* === monitoring learning === *)
@@ -52,9 +50,7 @@ let print_measures count ms =
     ms;
   print_newline ()
 
-let apply_model
-      ~apply =
-  fun ~env m v_i info_o ->
+let apply_model ~env m v_i info_o =
   let res_opt =
     Common.do_timeout !timeout_predict (fun () ->
         apply ~env m v_i info_o) in
@@ -63,17 +59,13 @@ let apply_model
   | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
   
 let score_learned_model
-      ~(xp_data : ('value,'dconstr) Data.data html_xp)
-      ~read (* model read *)
-      ~env0 (* input env data *)
-      ~apply
-      ~info_o (* generation output info *)
-      
+      ~env (* input env data *)
+      ~info_o (* generation output info *)      
       name
-      (m : ('t,'constr,'func) Task_model.task_model)
-      (train_test : [ `TRAIN of ('value,'dconstr,'constr,'func) Task_model.pairs_reads
+      (m : task_model)
+      (train_test : [ `TRAIN of pairs_reads
                     | `TEST ])
-      (examples : 'input Task.pair list)
+      (examples : task_pair list)
     : float * float * float (* micro success, macro success, MRR *) =
   let pp_data = Xprint.to_stdout (xp_data ~html:false) in
   let _, nb_ex, nb_correct, sum_rrank =
@@ -104,7 +96,7 @@ let score_learned_model
             | `TRAIN psr -> Result.Ok (List.nth psr.Task_model.inputs_reads (i-1))
             | `TEST -> read
                          ~dl_assuming_contents_known:false
-                         ~env:env0 ~bindings:Path.bindings0
+                         ~env ~bindings:Path.bindings0
                          m.Task_model.input_kind m.Task_model.input_model input in
           ( match input_reads with
             | Result.Ok reads ->
@@ -118,7 +110,7 @@ let score_learned_model
           ));
         print_endline "\n> Output prediction from input (up to 3 trials):";
         let score, rank, label, _failed_derived_grids =
-	  match apply_model ~apply ~env:env0 m input info_o with
+	  match apply_model ~env m input info_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
                (fun (score,rank,label,failed_derived_grids) (gdi, gdo, derived) ->
@@ -175,11 +167,8 @@ let score_learned_model
   micro, macro, mrr
        
 let print_learned_model
-      ~xp_data ~xp_task_model
-      ~read ~learn ~apply
-      ~alpha ~refine_degree
-      ~env0 ~init_task_model ~info_o
-      (name : string) (task : 'a Task.task)
+      ~env ~init_task_model ~info_o
+      (name : string) (task : task)
     : measures =
   let pp_task_model = Xprint.to_stdout (xp_task_model ~html:false) in
   Common.prof "Test.print_learned_model" (fun () ->
@@ -188,9 +177,8 @@ let print_learned_model
         learn
           ~timeout_refine:(!timeout_refine)
           ~timeout_prune:(!timeout_prune)
-          ~beam_width:1 ~refine_degree
-          ~env:env0
-          ~init_task_model
+          ~beam_width:1 ~refine_degree:(!max_refinements)
+          ~env ~init_task_model
           task.train)
   in
   match res with
@@ -213,20 +201,20 @@ let print_learned_model
      print_endline "\n# Learned model (decriptive, before pruning):";
      pp_task_model m_refine;
      print_newline ();
-     let _ = print_dl_md ~alpha psr_refine in
+     let _ = print_dl_md psr_refine in
      print_endline "\n# Learned model (predictive, after pruning):";
      pp_task_model m_prune;
      print_newline ();
-     let ldo = print_dl_md ~alpha psr_prune in
+     let ldo = print_dl_md psr_prune in
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~xp_data ~read ~env0 ~apply ~info_o
+         ~env ~info_o
          name m_prune (`TRAIN psr_prune) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~xp_data ~read ~env0 ~apply ~info_o
+         ~env ~info_o
          name m_prune (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -241,35 +229,24 @@ let print_learned_model
        ] in
      print_measures 1 ms;
      ms)
-               
+
 
 (* === main === *)
   
-let task_of_name
-      ~value_of_json
-      dir name =
-  Task.from_file ~value_of_json (Filename.concat dir name)
+let task_of_name dir name =
+  task_from_file (Filename.concat dir name)
 
 let process_task
-      ~xp_data ~xp_task_model
-      ~read ~learn ~apply
-      ~read_pairs
-      ~alpha ~refine_degree
-      ~get_init_task_model
       name task
       count sum_ms =
-      let env0, init_task_model, info_o = get_init_task_model name task in
+      let env, init_task_model, info_o = get_init_task_model name task in
       print_endline "\n# evaluating init_task_model";
-      print_dl_task_model
-        ~read_pairs ~alpha ~env0
-        name task init_task_model;
+      print_dl_task_model ~env name task init_task_model;
       print_endline "\n# learning a model for train pairs";
       let ms =
         print_learned_model
-          ~xp_data ~xp_task_model
-          ~read ~learn ~apply
-          ~alpha ~env0 ~info_o
-          ~init_task_model ~refine_degree name task in
+          ~env ~info_o
+          ~init_task_model name task in
       count := !count+1;
       sum_ms :=
 	if !sum_ms = []
@@ -286,19 +263,7 @@ let summarize_tasks count sum_ms =
   print_measures count sum_ms;
   flush stdout
   
-let main
-      ~(value_of_json : Yojson.Safe.t -> 'value)
-      ~(xp_data : (('value,'dconstr) Data.data as 'data) html_xp)
-      ~(xp_task_model : (('t,'constr,'func) Task_model.task_model as 'task_model) html_xp)
-      ~(read : dl_assuming_contents_known:bool -> env:'data -> bindings:(('value,'constr) Path.bindings as 'bindings) -> ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> 'value -> 'read list result) 
-      ~(learn : timeout_refine:int -> timeout_prune:int -> beam_width:int -> refine_degree:int -> env:'data -> init_task_model:'task_model -> 'value Task.pair list -> ('task_model * 'pairs_reads * bool) double)
-      ~(apply : env:'data -> 'task_model -> 'value -> 'info -> ('data * 'data * 'value) list result)
-      ~(read_pairs : pruning:bool -> env:'data -> 'task_model -> 'value Task.pair list -> 'pairs_reads result)
-      ~(alpha : float)
-      ~(refine_degree : int)
-      ~(get_init_task_model : string -> 'value Task.task -> 'data * 'task_model * 'info)
-      ()
-    : unit =
+let main () : unit =
   let () = Printexc.record_backtrace true in
   let dir = ref "." in
   let names = ref [] in
@@ -338,7 +303,7 @@ let main
     "test [-dir PATH] [-all|-sample N|-tasks ID,ID,...] [-r N] [-alpha N] [-timeout_refine N] [-timeout_prune] [-viz [-pause T]] [-v N]";
   
   print_endline "## options";
-  Printf.printf "alpha = %.1f\n" alpha;
+  Printf.printf "alpha = %.1f\n" !alpha;
   Printf.printf "mode = %s\n" (if !training then "training" else "evaluation");
   Printf.printf "timeout_refine = %d\n" !timeout_refine;
   Printf.printf "timeout_prune = %d\n" !timeout_prune;
@@ -352,18 +317,13 @@ let main
     List.fold_left
       (fun rank name ->
         if rank <= !start_rank then (
-          let task = task_of_name ~value_of_json !dir name in
+          let task = task_of_name !dir name in
           print_endline "=====================================";
           Printf.printf "[-%d] Checking task %s: %d train, %d test\n"
 	    rank name
 	    (List.length task.Task.train)
 	    (List.length task.Task.test);
           process_task
-            ~xp_data ~xp_task_model
-            ~read ~learn ~apply
-            ~read_pairs
-            ~alpha ~refine_degree
-            ~get_init_task_model
             name task
             count sum_ms
         );
@@ -372,20 +332,4 @@ let main
   summarize_tasks !count !sum_ms;
   Common.prerr_profiling ()
 
-
-module Make (Domain : Madil.DOMAIN) =
-  struct
-    include Madil.Make(Domain)
-
-    let main : unit -> unit =
-      main
-        ~value_of_json
-        ~xp_data ~xp_task_model
-        ~read ~learn ~apply
-        ~read_pairs
-        ~alpha:(!alpha)
-        ~refine_degree:(!max_refinements)
-        ~get_init_task_model
-      
   end
-
