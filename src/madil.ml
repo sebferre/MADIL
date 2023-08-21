@@ -17,6 +17,7 @@ module type BASIC_TYPES =
 
     type constr
     val xp_constr : constr html_xp
+    val xp_field : (constr * int) html_xp
 
     type func
     val xp_func : func html_xp
@@ -106,12 +107,6 @@ module Defined_types (T : BASIC_TYPES) =
     let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dconstr
               
     type path = constr Path.path
-
-    let xp_field : (constr * int) html_xp =
-      fun ~html print (c,i) ->
-      xp_constr ~html print c;
-      print#string "/";
-      print#int i
     let xp_path : path html_xp = Path.xp_path ~xp_field
 
     type binding_paths = constr Path.binding_paths

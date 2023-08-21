@@ -178,8 +178,8 @@ let xp_refinement
     : ('constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
-    | Rinput (p,ri,supp,dl') -> aux2 ~html print " In." p ri supp dl' "i"
-    | Routput (p,ro,supp,dl') -> aux2 ~html print " Out." p ro supp dl' "o"
+    | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
+    | Routput (p,ro,supp,dl') -> aux2 ~html print " Out" p ro supp dl' "o"
   and aux2 ~html print in_out p r supp dl' i_o =
     if dl' <> 0. (* undefined value *) then
       print#string (Printf.sprintf " / ~%.3f%s)  " dl' i_o);

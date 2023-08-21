@@ -16,7 +16,9 @@ let xp_expr
     : ('constr,'func) expr html_xp =
   let rec aux ~html print e =
     match e with
-    | Ref p -> xp_path ~xp_field ~html print p
+    | Ref p ->
+       print#string "In"; (* assuming only references to input value *)
+       xp_path ~xp_field ~html print p
     | Apply (f,args) ->
        xp_func ~html print f;
        Xprint.bracket ("(",")")

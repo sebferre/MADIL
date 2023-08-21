@@ -28,9 +28,7 @@ let xp_path
        print#string "["; print#int i; print#string "]";
        aux ~html print p1
   in
-  fun ~html print p ->
-  print#string "^";
-  aux ~html print p
+  aux
 
 (*
 exception Invalid_field of string
