@@ -7,17 +7,19 @@ open Model
 
 (* task models *)
    
-type ('t,'constr,'func) task_model =
+type ('t,'var,'constr,'func) task_model =
   { input_kind : 't kind;
-    input_model : ('constr,'func) model; (* no reference *)
-    nb_env_paths : int; (* nb of visible paths in input model *)
+    input_model : ('var,'constr,'func) model; (* no reference *)
+    input_varseq : 'var Myseq.t;
+    nb_env_vars : int; (* nb of visible paths in input model *)
     output_kind : 't kind;
-    output_model : ('constr,'func) model
+    output_model : ('var,'constr,'func) model;
+    output_varseq : 'var Myseq.t
   }
        
 let xp_task_model
-      ~(xp_model : ('constr,'func) model html_xp)
-    :  ('t,'constr,'func) task_model html_xp =
+      ~(xp_model : ('var,'constr,'func) model html_xp)
+    :  ('t,'var,'constr,'func) task_model html_xp =
   fun ~html print m ->
   xp_model ~html print m.input_model;
   print#string "\n ➜ ";
@@ -25,27 +27,27 @@ let xp_task_model
 
 (* pair reading and encoding *)
   
-type ('value,'dconstr,'constr,'func) pairs_reads =
+type ('value,'dconstr,'var,'func) pairs_reads =
   (* result of reading a list of pairs of grids *)
   { dl_mi : dl; (* input model DL *)
     dl_mo : dl; (* output model DL *)
-    inputs_reads : (('value,'dconstr,'constr,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
+    inputs_reads : (('value,'dconstr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
     reads : ('read * 'read * dl) list list; (* outer list over examples, inner list over parses, sorted in increasing DL *)
   }
 
 let read_pairs
-      ~(dl_task_model : (('t,'constr,'func) task_model as 'task_model) -> dl * dl)
+      ~(dl_task_model : (('t,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
-               bindings:(('value,'constr) bindings as 'bindings) ->
-               't kind -> (('constr,'func) model as 'model) -> 'value -> 'read list result)
+               bindings:(('var,'value) Expr.bindings as 'bindings) ->
+               't kind -> (('var,'constr,'func) model as 'model) -> 'value -> 'read list result)
       ~(get_bindings : 't kind -> 'model -> 'data -> 'bindings)
       
       ~(pruning : bool)
       ~(env : 'data)
       (m : 'task_model)
       (pairs : 'value Task.pair list)
-    : ('value,'dconstr,'constr,'func) pairs_reads result =
+    : ('value,'dconstr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
   (* takes model, input env+docs, output docs *)
   let dl_mi, dl_mo = dl_task_model m in
@@ -56,7 +58,7 @@ let read_pairs
            let| input_reads =
              read
                ~dl_assuming_contents_known:pruning
-               ~env ~bindings:bindings0
+               ~env ~bindings:Expr.bindings0
                m.input_kind m.input_model input in (* no diff allowed during training *)
            let| pair_reads = 
              let+|+ ri = Result.Ok input_reads in      
@@ -75,13 +77,13 @@ let read_pairs
   let inputs_reads, reads = List.split inputs_reads_reads in
   Result.Ok {dl_mi; dl_mo; inputs_reads; reads})
 
-type ('value,'dconstr,'constr,'func) reads =
+type ('value,'dconstr,'var,'func) reads =
   { dl_m : dl; (* DL of the model *)
-    reads : ('value,'dconstr,'constr,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
+    reads : ('value,'dconstr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
   }
   
 let split_pairs_read
-      (prs : ('value,'dconstr,'constr,'func) pairs_reads) : ('value,'dconstr,'constr,'func) reads double =
+      (prs : ('value,'dconstr,'var,'func) pairs_reads) : ('value,'dconstr,'var,'func) reads double =
   let project_reads proj =
     List.map
       (fun pair_reads ->
@@ -99,7 +101,7 @@ let split_pairs_read
 
 let dl_model_data
       ~(alpha : float)
-      (psr : ('value,'dconstr,'constr,'func) pairs_reads) : dl triple triple = (* QUICK *)
+      (psr : ('value,'dconstr,'var,'func) pairs_reads) : dl triple triple = (* QUICK *)
   let lmi = psr.dl_mi in
   let lmo = psr.dl_mo in
   let ldi, ldo =
@@ -118,7 +120,7 @@ let dl_model_data
 
 let make_norm_dl_model_data
       ~(alpha : float)
-      () : ('value,'dconstr,'constr,'func) pairs_reads -> dl triple triple =
+      () : ('value,'dconstr,'var,'func) pairs_reads -> dl triple triple =
   let lmdi0 = ref (-1.) in
   let lmdo0 = ref (-1.) in
   fun psr ->
@@ -139,19 +141,19 @@ let make_norm_dl_model_data
 let apply
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
-               bindings:(('value,'constr) bindings as 'bindings) ->
-               't kind -> (('constr,'func) model as 'model) -> 'value ->
-               ('value,'dconstr,'constr,'func) read list result)
+               bindings:(('var,'value) Expr.bindings as 'bindings) ->
+               't kind -> (('var,'constr,'func) model as 'model) -> 'value ->
+               ('value,'dconstr,'var,'func) read list result)
       ~(get_bindings : 't kind -> 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 't kind -> 'model -> 'info -> ('data * 'value) result)
       ~(env : 'data)
-      (m : ('t,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
+      (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
     : ('data * 'data * 'value) list result =
   Common.prof "Model.apply" (fun () ->
   let+|+ read_i =
     read
-      ~dl_assuming_contents_known:true ~env ~bindings:bindings0
+      ~dl_assuming_contents_known:true ~env ~bindings:Expr.bindings0
       m.input_kind m.input_model v_i in
   let data_i = read_i.data in
   let| data_o, v_o =
@@ -162,20 +164,20 @@ let apply
 
 (* refinements *)
   
-type ('constr,'func) refinement =
+type ('var,'constr,'func) refinement =
   | RInit
-  | Rinput of 'constr path * ('constr,'func) model * int (* support *) * dl (* estimated result DL *)
-  | Routput of 'constr path * ('constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Rinput of 'constr path * ('var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Routput of 'constr path * ('var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
 
-let refinement_support : ('constr,'func) refinement -> int = function
+let refinement_support : ('var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
   | Rinput (_,_,supp,_) -> supp
   | Routput (_,_,supp,_) -> supp             
 
 let xp_refinement
       ~(xp_path : 'constr path html_xp)
-      ~(xp_model : ('constr,'func) model html_xp)
-    : ('constr,'func) refinement html_xp =
+      ~(xp_model : ('var,'constr,'func) model html_xp)
+    : ('var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
     | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
@@ -194,12 +196,11 @@ let xp_refinement
   in
   aux
 
-let refine (r : ('constr,'func) refinement) (m : ('t,'constr,'func) task_model)
-    : (('constr,'func) refinement * ('t,'constr,'func) task_model) result =
+let refine (r : ('var,'constr,'func) refinement) (m : ('t,'var,'constr,'func) task_model)
+    : (('var,'constr,'func) refinement * ('t,'var,'constr,'func) task_model) result =
   match r with
   | RInit -> Result.Error (Failure "Task_model.refine")
   | Rinput (p,ri,supp,dl') ->
      Result.Ok (r, {m with input_model = Model.refine p ri m.input_model})
   | Routput (p,ro,supp,dl') ->
      Result.Ok (r, {m with output_model = Model.refine p ro m.output_model})
-

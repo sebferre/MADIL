@@ -1,28 +1,33 @@
 
 open Madil_common
+open Kind
 open Data
 open Path
-open Kind
 
 type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
 
-type ('constr,'func) model =
-  | Pat of 'constr * ('constr,'func) model array (* constr type may be different from data constr *)
-  | Seq of int * ('constr,'func) model list
-  | Cst of ('constr,'func) model
-  | Expr of ('constr,'func) Expr.expr
+type ('var,'constr,'func) model =
+  | Def of 'var * ('var,'constr,'func) model (* a var is an id for the value at this sub-model *)
+  | Pat of 'constr * ('var,'constr,'func) model array (* constr type may be different from data constr *)
+  | Seq of int * ('var,'constr,'func) model list
+  | Cst of ('var,'constr,'func) model
+  | Expr of ('var,'func) Expr.expr
 
-let make_pat (c : 'constr) (args : ('constr,'func) model array) : ('constr,'func) model =
+let make_def (x : 'var) (m1 : ('var,'constr,'func) model) : ('var,'constr,'func) model =
+  Def (x,m1)
+let make_pat (c : 'constr) (args : ('var,'constr,'func) model array) : ('var,'constr,'func) model =
   Pat (c,args)
           
 let xp_model
+      ~(xp_var : 'var html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
-      ~(xp_field : ('constr * int) html_xp)
       ~(xp_func : 'func html_xp)
-    : ('constr,'func) model html_xp =
+    : ('var,'constr,'func) model html_xp =
   let rec aux ~html print m =
     match m with
+    | Def (x,m1) ->
+       xp_var ~html print x; print#string ": "; aux ~html print m1
     | Pat (c,args) ->
        let xp_args =
          Array.map
@@ -37,7 +42,7 @@ let xp_model
        Xprint.bracket ("〈", " = 〉") (aux ~html)
          print m1
     | Expr e ->
-       Expr.xp_expr ~xp_field ~xp_func ~html print e
+       Expr.xp_expr ~xp_var ~xp_func ~html print e
   in
   aux
 
@@ -113,104 +118,85 @@ let make_asd
         
 (* model evaluation *)
 
-let binding_paths
+let binding_vars (* TODO: ignore kinds, hence asd *)
       ~(asd : ('t,'constr,'func) asd)
-      ~(visible_path :  'constr path -> 't kind -> bool) (* is this path accessible to the output model? *)
       (k0 : 't kind)
-      (m0 : ('constr,'func) model)
-    : 'constr binding_paths =
-  let rec aux ctx k m =
-    let p = ctx This in
-    let s =
-      if visible_path p k
-      then Bintree.singleton p
-      else Bintree.empty in
+      (m0 : ('var,'constr,'func) model)
+    : 'var Expr.binding_vars =
+  let rec aux k m = (* TODO: use acc *)
     match k, m with
+    | _, Def (x,m1) ->
+       let s = aux k m1 in
+       Bintree.add x s
     | KVal t, Pat (c,args) ->
        let kind_args = asd#constr_args t c in
        let s_args =
          Array.mapi
            (fun i argi ->
-             let ctxi = (fun pi -> ctx (Field (c,i,pi))) in
              let ki = try kind_args.(i) with _ -> assert false in
-             aux ctxi ki argi)
+             aux ki argi)
            args in
-       Array.fold_left Bintree.union s s_args
-    | _, Expr e -> s
+       Array.fold_left Bintree.union Bintree.empty s_args
+    | _, Expr e -> Bintree.empty
     | KSeq k1, Seq (n,lm1) ->
        let i, s =
          List.fold_left
            (fun (i,s) mi ->
-             let cxti = (fun pi -> ctx (Item (i,pi))) in
-             i+1, Bintree.union s (aux cxti k1 mi))
-           (0,s) lm1 in
+             i+1, Bintree.union s (aux k1 mi))
+           (0, Bintree.empty) lm1 in
        assert (i = n);
        s
     | KSeq k1, Cst m1 -> raise TODO
     | _ -> assert false
   in
-  aux ctx0 k0 m0
+  aux k0 m0
 
   
 let get_bindings
       ~(asd : ('t,'constr,'func) asd)
-      ~(constr_value_opt : 'constr path -> 't kind -> 'value -> 'dconstr -> 'value option) (* binding values at some path given value and data constr there *)
-      ~(seq_value_opt : 'constr path -> 't kind -> 'value list -> 'value option)
       (k0 : 't kind)
-      (m0 : ('constr,'func) model)
+      (m0 : ('var,'constr,'func) model)
       (d0 : ('value,'dconstr) data)
-    : ('value,'constr) bindings =
-  let rec aux ctx k m d acc =
+    : ('var,'value) Expr.bindings =
+  let rec aux k m d acc =
     match k, m, d with
+    | _, Def (x,m1), DVal (v, _) -> Mymap.add x v acc
     | KVal t, Pat (c,args), DVal (v, DPat (dc, dargs)) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
        let kind_args = asd#constr_args t c in
-       let p = ctx This in
-       let v_opt = constr_value_opt p k v dc in
        let ref_acc = ref acc in
-       Option.iter
-         (fun v -> ref_acc := Mymap.add p v !ref_acc)
-         v_opt;
        for i = 0 to n - 1 do
-         let vi_opt, acc = aux (fun pi -> ctx (Field (c,i,pi))) kind_args.(i) args.(i) dargs.(i) !ref_acc in
+         let acc = aux kind_args.(i) args.(i) dargs.(i) !ref_acc in
          ref_acc := acc
        done;
-       v_opt, !ref_acc
-    | _, Expr _, _ -> None, acc (* expressions only in task output but TODO in general expression values should be accessible *)
+       !ref_acc
+    | _, Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
     | KSeq k1, Seq (n,lm), DSeq (dn,ld) ->
        assert (n = dn);
-       let _, lv_opt, acc =
-         List.fold_right2
-           (fun mi di (i,lv_opt,acc) ->
-             let ctx_i = (fun pi -> ctx (Item (i,pi))) in
-             let v_opt, acc = aux ctx_i k1 mi di acc in
-             match v_opt, lv_opt with
-             | Some v, Some lv -> i-1, Some (v::lv), acc
-             | _ -> i-1, None, acc)
-           lm ld (n-1, Some [], acc) in
-       (match lv_opt with
-        | Some lv ->
-           let p = ctx This in
-           seq_value_opt p k lv, acc
-        | None -> None, acc)
+       List.fold_right2
+         (fun mi di acc ->
+           aux k1 mi di acc)
+         lm ld acc
     | _, Cst _, _ -> raise TODO
     | _ -> assert false
   in
-  let v_opt, acc = aux ctx0 k0 m0 d0 bindings0 in
-  acc
+  aux k0 m0 d0 Expr.bindings0
 
 let eval
       ~asd
-      ~eval_unbound_path ~eval_func ~eval_arg
-      ~(model_of_value : 't kind -> 'value -> ('constr,'func) model result)
+      ~eval_unbound_var ~eval_func ~eval_arg
+      ~(model_of_value : 't kind -> 'value -> ('var,'constr,'func) model result)
       (k : 't kind)
-      (m : ('constr,'func) model)
-      (bindings : ('value,'constr) bindings)
-    : ('constr,'func) model result =
-  let eval_expr = Expr.eval ~eval_unbound_path ~eval_func ~eval_arg in
+      (m : ('var,'constr,'func) model)
+      (bindings : ('var,'value) Expr.bindings)
+    : ('var,'constr,'func) model result =
+  let eval_expr = Expr.eval ~eval_unbound_var ~eval_func ~eval_arg in
   let rec aux k m =
     match k, m with
+    | _, Def (x,m1) ->
+       let| m1' = aux k m1 in
+       Result.Ok (Def (x,m1'))
     | KVal t, Pat (c,args) ->
        let k_args = asd#constr_args t c in
        let| l_args' =
@@ -241,16 +227,18 @@ type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data
 
 let generator
       ~(generator_pat: 'constr -> 'gen array -> 'gen)
-    : ('constr,'func) model -> (('info,'value,'dconstr) generator as 'gen) =
+    : ('var,'constr,'func) model -> (('info,'value,'dconstr) generator as 'gen) =
   let rec gen = function
+    | Def (x,m1) ->
+       gen m1
     | Pat (c,args) ->
        let gen_args = Array.map gen args in
        generator_pat c gen_args
     | Expr e -> assert false
     | Seq (n,lm1) ->
        let gen_lm1 = List.map gen lm1 in
-       (fun x ->
-         let ld = List.map (fun gen_mi -> gen_mi x) gen_lm1 in
+       (fun info ->
+         let ld = List.map (fun gen_mi -> gen_mi info) gen_lm1 in
          DSeq (n, ld))
     | Cst m1 -> raise TODO
   in
@@ -263,17 +251,19 @@ type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'inp
 
 let parseur
       ~(parseur_pat : 'constr -> 'parse array -> 'parse)
-    : ('constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
+    : ('var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse = function
+    | Def (x,m1) ->
+       parse m1
     | Pat (c,args) ->
        let parse_args = Array.map parse args in
        parseur_pat c parse_args
     | Expr e -> assert false
     | Seq (n,lm1) ->
        let parse_lm1 = List.map parse lm1 in
-       (fun x ->
-         let* ld, x = Myseq.product_dependent_fair parse_lm1 x in
-         Myseq.return (DSeq (n, ld), x))
+       (fun input ->
+         let* ld, input = Myseq.product_dependent_fair parse_lm1 input in
+         Myseq.return (DSeq (n, ld), input))
     | Cst m1 -> raise TODO
   in
   parse
@@ -285,24 +275,26 @@ type ('info,'value,'dconstr) encoder = 'info -> ('value,'dconstr) data -> dl * '
 let encoder
       ~(encoder_pat : 'constr -> 'enc array -> 'enc)
       ~(info_expr : 'info -> ('value,'dconstr) data -> 'info)
-  : ('constr,'func) model -> (('info,'value,'dconstr) encoder as 'enc) =
+  : ('var,'constr,'func) model -> (('info,'value,'dconstr) encoder as 'enc) =
   let rec enc = function
+    | Def (x,m1) ->
+       enc m1
     | Pat (c,args) ->
        let enc_args = Array.map enc args in
        encoder_pat c enc_args
     | Expr e ->
-       (fun x d ->
-         let x = info_expr x d in
-         0., x)
+       (fun info d ->
+         let info = info_expr info d in
+         0., info)
     | Seq (n,lm1) ->
        let enc_lm1 = List.map enc lm1 in
-       (fun x -> function
+       (fun info -> function
          | DSeq (dn, ld) when dn = n ->
             List.fold_left2
-              (fun (dl,x) enc_mi di ->
-                let dli, x = enc_mi x di in
-                dl +. dli, x)
-              (0., x) (* no need to encode 'dn', equal 'n' in model *)
+              (fun (dl,info) enc_mi di ->
+                let dli, info = enc_mi info di in
+                dl +. dli, info)
+              (0., info) (* no need to encode 'dn', equal 'n' in model *)
               enc_lm1 ld
          | _ -> assert false)
     | Cst m1 -> raise TODO
@@ -315,24 +307,10 @@ let dl_parse_rank (rank : int) : dl =
   
 (* model encoding *)
 
-let path_kind
-      ~(asd : ('t,'constr,'func) asd)
-    : 't kind -> 'constr path -> 't kind =
-  let rec aux k p =
-    match k, p with
-    | _, This -> k
-    | KVal t, Field (c,i,p1) ->
-       let kind_args = asd#constr_args t c in
-       let k1 = try kind_args.(i) with _ -> assert false in
-       aux k1 p1
-    | KSeq k1, Item (i,p1) -> aux k1 p1
-    | _ -> assert false
-  in
-  aux
-  
 let size_model_ast (* for DL computing *)
-    : ('constr,'func) model -> int =
+    : ('var,'constr,'func) model -> int =
   let rec aux = function
+    | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Pat (c,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
     | Expr e -> Expr.size_expr_ast e
     | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
@@ -385,11 +363,12 @@ let nb_model_ast (* for DL computing *)
 let dl_model_params
       ~(dl_constr_params : 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
-      ~(dl_path : 'constr path -> dl)
-    : ('constr,'func) model -> dl =
+      ~(dl_var : 'var -> dl)
+    : ('var,'constr,'func) model -> dl =
   let dl_expr_params =
-    Expr.dl_expr_params ~dl_func_params ~dl_path in
+    Expr.dl_expr_params ~dl_func_params ~dl_var in
   let rec aux = function
+    | Def (x,m1) -> aux m1 (* variable names do not matter, only variable choice in expr matters *)
     | Pat (c,args) ->
        let dl_args_params =
          Array.map aux args
@@ -407,10 +386,10 @@ let dl
       ~(asd : ('t,'constr,'func) asd)
       ~(dl_constr_params : 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
-      ~(dl_path : nb_env_paths:int -> 'constr path -> dl)
+      ~(dl_var : nb_env_vars:int -> 'var -> dl)
 
-      ~(nb_env_paths : int)
-      (k : 't kind) (m : ('constr,'func) model) : dl =
+      ~(nb_env_vars : int)
+      (k : 't kind) (m : ('var,'constr,'func) model) : dl =
   let size = size_model_ast m in
   let nb = nb_model_ast ~asd k size in
   Mdl.Code.universal_int_star size (* encoding model AST size *)
@@ -418,16 +397,16 @@ let dl
   +. dl_model_params
        ~dl_constr_params
        ~dl_func_params
-       ~dl_path:(dl_path ~nb_env_paths)
+       ~dl_var:(dl_var ~nb_env_vars)
        m
 
        
 (* reading *)
 
-type ('value,'dconstr,'constr,'func) read =
+type ('value,'dconstr,'var,'func) read =
   { env : ('value,'dconstr) data;
-    bindings : ('value,'constr) bindings;
-    index : ('value,'constr,'func) Expr.Index.t;
+    bindings : ('var,'value) Expr.bindings;
+    index : ('value,'var,'func) Expr.Index.t;
     data : ('value,'dconstr) data;
     dl : dl }
 
@@ -441,23 +420,23 @@ let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a
 
 exception Parse_failure
 
-type ('input,'value,'dconstr,'constr) eval_parse_bests = ('value,'constr) bindings -> 'input -> (('value,'dconstr) data * dl) list result
+type ('input,'value,'dconstr,'var) eval_parse_bests = ('var,'value) Expr.bindings -> 'input -> (('value,'dconstr) data * dl) list result
         
 let eval_parse_bests
       ~(max_nb_parse : int)
-      ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
-      ~(parseur : ('constr,'func) model -> ('input,'value,'dconstr) parseur)
-      ~(dl_data : ('constr,'func) model -> ('value,'dconstr) data -> dl)
+      ~(eval : 't kind -> ('var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('var,'constr,'func) model result)
+      ~(parseur : ('var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
+      ~(dl_data : ('var,'constr,'func) model -> ('value,'dconstr) data -> dl)
 
       (k : 't kind)
-      (m0 : ('constr,'func) model)
-    : ('input,'value,'dconstr,'constr) eval_parse_bests =
+      (m0 : ('var,'constr,'func) model)
+    : ('input,'value,'dconstr,'var) eval_parse_bests =
   let dl_data_m0 = dl_data m0 in
-  fun bindings x ->
+  fun bindings input ->
   Common.prof "Model.eval_parse_bests" (fun () ->
   let| m = eval k m0 bindings in (* resolving expressions *)
   let parses =
-    let* data, _ = parseur m x in
+    let* data, _ = parseur m input in
     let dl = (* QUICK *)
       dl_round (dl_data_m0 data) in
       (* rounding before sorting to absorb float error accumulation *)
@@ -480,20 +459,20 @@ let read
       ~(max_parse_dl_factor : float)
       ~(max_nb_reads : int)
       ~(input_of_value : 'value -> 'input)
-      ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
-      ~(eval_parse_bests : 't kind -> ('constr,'func) model -> ('input,'value,'dconstr,'constr) eval_parse_bests)
-      ~(make_index : ('value,'constr) bindings -> ('value,'constr,'func) Expr.Index.t)
+      ~(eval : 't kind -> ('var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('var,'constr,'func) model result)
+      ~(eval_parse_bests : 't kind -> ('var,'constr,'func) model -> ('input,'value,'dconstr,'var) eval_parse_bests)
+      ~(make_index : ('var,'value) Expr.bindings -> ('value,'var,'func) Expr.Index.t)
 
       ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
-      ~(bindings : ('value,'constr) bindings)
+      ~(bindings : ('var,'value) Expr.bindings)
       (k : 't kind)
-      (m0 : ('constr,'func) model)
+      (m0 : ('var,'constr,'func) model)
       (v : 'value)
-    : ('value,'dconstr,'constr,'func) read list result =
+    : ('value,'dconstr,'var,'func) read list result =
   Common.prof "Model.read" (fun () ->
-  let x = input_of_value v in
-  let| best_parses = eval_parse_bests k m0 bindings x in
+  let input = input_of_value v in
+  let| best_parses = eval_parse_bests k m0 bindings input in
   let index = lazy (make_index bindings) in
   let reads =
     best_parses
@@ -516,13 +495,13 @@ let read
 (* writing *)
 
 let write
-      ~(eval : 't kind -> ('constr,'func) model -> ('value,'constr) bindings -> ('constr,'func) model result)
-      ~(generator : ('constr,'func) model -> ('info,'value,'dconstr) generator)
+      ~(eval : 't kind -> ('var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('var,'constr,'func) model result)
+      ~(generator : ('var,'constr,'func) model -> ('info,'value,'dconstr) generator)
       ~(value_of_data : ('value,'dconstr) data -> 'value)
       
-      ~(bindings : ('value,'constr) bindings)
+      ~(bindings : ('var,'value) Expr.bindings)
       (k : 't kind)
-      (m0 : ('constr,'func) model)
+      (m0 : ('var,'constr,'func) model)
       (info : 'info)
     : (('value,'dconstr) data * 'value) result =
   Common.prof "Model.write" (fun () ->
@@ -534,10 +513,28 @@ let write
 
 (* model refinement *)
 
+let path_kind
+      ~(asd : ('t,'constr,'func) asd)
+    : 't kind -> 'constr path -> 't kind =
+  let rec aux k p =
+    match k, p with
+    | _, This -> k
+    | KVal t, Field (c,i,p1) ->
+       let kind_args = asd#constr_args t c in
+       let k1 = try kind_args.(i) with _ -> assert false in
+       aux k1 p1
+    | KSeq k1, Item (i,p1) -> aux k1 p1
+    | _ -> assert false
+  in
+  aux
+  
 let refine (* replace submodel of [m] at [p] by [r] *) 
-    : 'constr path -> ('constr,'func) model -> ('constr,'func) model -> ('constr,'func) model =
+    : 'constr path -> ('var,'constr,'func) model -> ('var,'constr,'func) model -> ('var,'constr,'func) model =
   let rec aux p r m =
     match p, m with
+    | _, Def (x,m1) ->
+       let new_m1 = aux p r m1 in
+       Def (x,new_m1)
     | This, _ -> r
     | Field (c,i,p1), Pat (c',args) when c = c' && i < Array.length args ->
        let new_args = Array.copy args in

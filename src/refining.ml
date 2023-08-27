@@ -22,12 +22,12 @@ let partition_map_reads (f : 'a -> ('b,'c) Result.t) (selected_reads : 'a list l
     selected_reads
     other_reads
 
-type ('value,'dconstr,'constr,'func) best_read =
+type ('value,'dconstr,'var,'func) best_read =
   { matching : bool; (* matching flag *)
-    read : ('value,'dconstr,'constr,'func) Model.read; (* the selected best read *)
+    read : ('value,'dconstr,'var,'func) Model.read; (* the selected best read *)
     new_data : ('value,'dconstr) Data.data } (* the new data *)
 
-let best_reads_stats (best_reads : ('value,'dconstr,'constr,'func) best_read list) : int * int = (* support, total *)
+let best_reads_stats (best_reads : ('value,'dconstr,'var,'func) best_read list) : int * int = (* support, total *)
   List.fold_left
     (fun (supp,nb) best_read ->
       if best_read.matching
@@ -36,9 +36,9 @@ let best_reads_stats (best_reads : ('value,'dconstr,'constr,'func) best_read lis
     (0,0) best_reads
 
 let inter_union_reads
-      (get_rs : ('value,'dconstr,'constr,'func) Model.read -> (('constr,'func) Model.model * ('value,'dconstr) Data.data) list)
-      (reads : ('value,'dconstr,'constr,'func) Model.read list list)
-    : (('constr,'func) Model.model, ('value,'dconstr,'constr,'func) best_read list) Mymap.t =
+      (get_rs : ('value,'dconstr,'var,'func) Model.read -> (('var,'constr,'func) Model.model * 'var Myseq.t * ('value,'dconstr) Data.data) list)
+      (reads : ('value,'dconstr,'var,'func) Model.read list list)
+    : (('var,'constr,'func) Model.model, 'var Myseq.t * ('value,'dconstr,'var,'func) best_read list) Mymap.t =
   (* given a function extracting refinements (submodels) from each read,
      return a set of such refinements, each mapped to the dl-shortest reads supporting it, along with new data *)
   let process_example reads =
@@ -50,10 +50,10 @@ let inter_union_reads
         (fun refs read ->
           let refs_read = get_rs read in
           List.fold_left (* union(refs, refs_read) *)
-            (fun refs (r,data') ->
+            (fun refs (r,varseq',data') ->
               if Mymap.mem r refs
               then refs
-              else Mymap.add r {matching = true; read; new_data = data'} refs)
+              else Mymap.add r (varseq', {matching = true; read; new_data = data'}) refs)
             refs refs_read)
         Mymap.empty reads in
     alt_read, refs
@@ -63,18 +63,21 @@ let inter_union_reads
   | example0_reads :: other_reads ->
      let alt_read0, refs0 = process_example example0_reads in
      let alt_reads = [alt_read0] in
-     let refs = refs0 |> Mymap.map (fun best_read -> [best_read]) in
+     let refs = refs0 |> Mymap.map (fun (varseq', best_read) -> varseq', [best_read]) in
      let alt_reads, refs =
        List.fold_left
          (fun (alt_reads,refs) exampleI_reads ->
            let alt_readI, refsI = process_example exampleI_reads in
            let refs =
              Mymap.merge (* intersection(refs, refsI) *)
-               (fun r best_reads_opt best_readI_opt ->
-                 match best_reads_opt, best_readI_opt with
-                 | Some best_reads, Some best_readI -> Some (best_readI :: best_reads)
-                 | Some best_reads, None -> Some (alt_readI :: best_reads)
-                 | None, Some best_readI -> Some (best_readI :: alt_reads)
+               (fun r varseq_best_reads_opt varseq_best_readI_opt ->
+                 match varseq_best_reads_opt, varseq_best_readI_opt with
+                 | Some (varseq, best_reads), Some (varseqI, best_readI) ->
+                    Some (varseq, best_readI :: best_reads)
+                 | Some (varseq, best_reads), None ->
+                    Some (varseq, alt_readI :: best_reads)
+                 | None, Some (varseqI, best_readI) ->
+                    Some (varseqI, best_readI :: alt_reads)
                  | _ -> None)
                refs refsI in
            let alt_reads = alt_readI :: alt_reads in
@@ -114,33 +117,43 @@ let make_alt
   m', best_reads'
  *)
 
-type ('t,'value,'dconstr,'constr,'func) refiner =
-  nb_env_paths:int ->
+let new_var (varseq : 'var Myseq.t) : 'var * 'var Myseq.t =
+  match varseq () with
+  | Myseq.Cons (x,varseq') -> x, varseq'
+  | Myseq.Nil -> failwith "No more fresh variable (should be an infinite sequence"
+
+type ('t,'value,'dconstr,'var,'constr,'func) refiner =
+  nb_env_vars:int ->
   dl_M:dl -> (* current model DL *)
   (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
   't Kind.kind ->
-  (('constr,'func) Model.model as 'model) ->
-  ('value,'dconstr,'constr,'func) Model.read list list ->
-  ('constr Path.path * 'model (* refined submodel *) * int (* support *) * dl (* new DL *) * 'model (* new model *)) Myseq.t  (* result: a sequence of path-wise refinements with support and estimate DL *)
+  (('var,'constr,'func) Model.model as 'model) ->
+  'var Myseq.t -> (* fresh variables viz the model *)
+  ('value,'dconstr,'var,'func) Model.read list list ->
+  ('constr Path.path * 'model (* refined submodel *) * int (* support *) * dl (* new DL *) * 'model (* new model *) * 'var Myseq.t (* remaining fresh vars *)) Myseq.t
+(* result: a sequence of path-wise refinements with support and estimate DL *)
      
 let refinements
+      ~(xp_model : 'model html_xp)
       ~(alpha : float)
       ~(max_refinements : int)
       ~(asd : ('t,'constr,'func) Model.asd)
-      ~(dl_model : nb_env_paths:int -> ('t Kind.kind as 'kind) -> (('constr,'func) Model.model as 'model) -> dl)
+      ~(dl_model : nb_env_vars:int -> ('t Kind.kind as 'kind) -> (('var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : 'model -> (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(eval_parse_bests : 'kind -> 'model -> ('input,'value,'dconstr,'constr) Model.eval_parse_bests)
-      ~(refinements_pat : 'constr -> 'model array -> 'data -> ('model * 'input) list) (* refined submodel with related new local data *)
+      ~(eval_parse_bests : 'kind -> 'model -> ('input,'value,'dconstr,'var) Model.eval_parse_bests)
+      ~(refinements_pat : 'constr -> 'model array -> 'var Myseq.t -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     (* TODO: abstract on this: maybe combine a filtering predicate, 
        and a globally-defined autorefinement process *)
-    : ('t,'value,'dconstr,'constr,'func) refiner =
-  fun ~nb_env_paths ~dl_M k m reads ->
+    : ('t,'value,'dconstr,'var,'constr,'func) refiner =
+  fun ~nb_env_vars ~dl_M k m varseq reads ->
   let rec aux k m selected_reads other_reads_env =
   if selected_reads = [] then Myseq.empty
   else
     match k, m with
+    | _, Model.Def (x,m1) ->
+       aux k m1 selected_reads other_reads_env
     | Kind.KVal t, Model.Pat (c,args) ->
        let k_args = asd#constr_args t c in
        Myseq.interleave
@@ -158,7 +171,7 @@ let refinements
                         | _ -> assert false)
                       selected_reads)
                    other_reads_env
-                 |> Myseq.map (fun (p,r,supp,dl') -> Path.Field (c,i,p), r, supp, dl'))
+                 |> Myseq.map (fun (p,r,varseq',supp,dl') -> Path.Field (c,i,p), r, varseq', supp, dl'))
                args))
                         
     | _, Model.Expr e -> Myseq.empty
@@ -174,23 +187,23 @@ let refinements
                      | _ -> assert false)
                    selected_reads)
                 other_reads_env
-              |> Myseq.map (fun (p,r,supp,dl') -> Path.Item (i,p), r, supp, dl'))
+              |> Myseq.map (fun (p,r,varseq',supp,dl') -> Path.Item (i,p), r, varseq', supp, dl'))
             lm1)
     | _, Model.Cst m1 -> raise TODO
     | _ -> assert false
   and aux_pat k m c args selected_reads =
-    let dl_m = dl_model ~nb_env_paths k m in
+    let dl_m = dl_model ~nb_env_vars k m in
     let dl_data_m = dl_data m in
     let refs =
-      let refs_pat = refinements_pat c args in
+      let refs_pat = refinements_pat c args varseq in
       fun (read : _ Model.read) ->
       match read.data with
       | DVal (v, DPat (dc, dargs)) as data ->
          let rs =
            List.filter_map
-             (fun (m',x) ->
-               match eval_parse_bests k m' read.bindings x with
-               | Result.Ok ((data',dl')::_) -> Some (m',data')
+             (fun (m',varseq',input) ->
+               match eval_parse_bests k m' read.bindings input with
+               | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
                | _ -> None)
              (refs_pat data) in
          (match asd#expr_opt k with
@@ -198,73 +211,74 @@ let refinements
           | Some k1 ->
              let es = Expr.Index.lookup v read.index in
              Myseq.fold_left
-               (fun rs e -> (Model.Expr e, Data.DVal (v, Data.DNone)) :: rs)
+               (fun rs e -> (Model.Expr e, varseq, Data.DVal (v, Data.DNone)) :: rs)
                rs (Expr.exprset_to_seq es))
       | _ -> assert false in
     let post = postprocessing c args in
     let r_best_reads = inter_union_reads refs selected_reads in
-    let* m', best_reads = Mymap.to_seq r_best_reads in
+    let* m', (varseq', best_reads) = Mymap.to_seq r_best_reads in
     let supp, nb = best_reads_stats best_reads in
     let alt = (supp < nb) in
     let* m_new, best_reads = post m' ~supp ~nb ~alt best_reads in
     let m_new, best_reads =
       (* TODO if alt then make_alt m_new m best_reads
       else*) m_new, best_reads in
-    let dl_m_new = dl_model ~nb_env_paths k m_new in
+    let dl_m_new = dl_model ~nb_env_vars k m_new in
     let dl_data_m_new = dl_data m_new in
     let dl_new =
       dl_M -. dl_m +. dl_m_new
       +. alpha *. Mdl.sum best_reads
                     (fun {matching; read; new_data} ->
                       read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
-    Myseq.return (Path.This, m_new, supp, dl_new)         
+    Myseq.return (Path.This, m_new, varseq', supp, dl_new)         
   in
   let selected_reads = reads in
   let other_reads_env = [] in
-  let* p, r, supp, dl' =
+  let* p, r, varseq', supp, dl' =
     aux k m selected_reads other_reads_env
-    |> Myseq.sort (fun (p1,r1,supp1,dl1) (p2,r2,supp2,dl2) ->
+    |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
            dl_compare dl1 dl2) (* support use for sorting in LIS UI *)
     |> Myseq.unique
     |> Myseq.slice ~limit:max_refinements in
   let m' = Model.refine p r m in
-  Myseq.return (p, r, supp, dl', m')
+  Myseq.return (p, r, supp, dl', m', varseq')
 
 
 let task_refinements
-      ~(binding_paths : 't Kind.kind -> ('constr,'func) Model.model -> 'constr Path.binding_paths)
-      ~(input_refinements : ('t,'value,'dconstr,'constr,'func) refiner)
-      ~(output_refinements : ('t,'value,'dconstr,'constr,'func) refiner)
+      ~(binding_vars : 't Kind.kind -> ('var,'constr,'func) Model.model -> 'var Expr.binding_vars)
+      ~(input_refinements : ('t,'value,'dconstr,'var,'constr,'func) refiner)
+      ~(output_refinements : ('t,'value,'dconstr,'var,'constr,'func) refiner)
       
-      (* (last_r : (('constr,'func) Task_model.refinement as 'refinement)) *)
-      (m : (('t,'constr,'func) Task_model.task_model) as 'task_model)
-      (prs : ('value,'dconstr,'constr,'func) Task_model.pairs_reads)
-      (dsri : ('value,'dconstr,'constr,'func) Task_model.reads)
-      (dsro : ('value,'dconstr,'constr,'func) Task_model.reads)
-    : (('constr,'func) Task_model.refinement * 'task_model) Myseq.t =
+      (m : (('t,'var,'constr,'func) Task_model.task_model) as 'task_model)
+      (prs : ('value,'dconstr,'var,'func) Task_model.pairs_reads)
+      (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
+      (dsro : ('value,'dconstr,'var,'func) Task_model.reads)
+    : (('var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t =
   Myseq.concat (* TODO: rather order by estimated dl *)
-    [ (let* p, ri, suppi, dli', mi =
-         input_refinements ~nb_env_paths:0 ~dl_M:prs.dl_mi
-           m.input_kind m.input_model dsri.reads in
-       let nb_env_paths = Bintree.cardinal (binding_paths m.input_kind mi) in
+    [ (let* p, ri, suppi, dli', mi, varseqi =
+         input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
+           m.input_kind m.input_model m.input_varseq dsri.reads in
+       let nb_env_vars = Bintree.cardinal (binding_vars m.input_kind mi) in
        Myseq.return
          (Task_model.Rinput (p,ri,suppi,dli'),
-          {m with input_model = mi; nb_env_paths}));
-      (let* p, ro, suppo, dlo', mo =
-         output_refinements ~nb_env_paths:m.nb_env_paths ~dl_M:prs.dl_mo
-           m.output_kind m.output_model dsro.reads in
+          {m with input_model = mi; input_varseq = varseqi; nb_env_vars}));
+      (let* p, ro, suppo, dlo', mo, varseqo =
+         output_refinements ~nb_env_vars:m.nb_env_vars ~dl_M:prs.dl_mo
+           m.output_kind m.output_model m.output_varseq dsro.reads in
        Myseq.return
          (Task_model.Routput (p,ro,suppo,dlo'),
-          {m with output_model = mo})) ]
+          {m with output_model = mo; output_varseq = varseqo})) ]
 
 let task_prunings
-      ~(input_prunings : ('t,'value,'dconstr,'constr,'func) refiner)
+      ~(input_prunings : ('t,'value,'dconstr,'var,'constr,'func) refiner)
       
-      (m : (('t,'constr,'func) Task_model.task_model as 'task_model))
-      (dsri : ('value,'dconstr,'constr,'func) Task_model.reads)
-    : (('constr,'func) Task_model.refinement * 'task_model) Myseq.t =
-  let* pi, ri, suppi, dli', mi' =
-    input_prunings ~nb_env_paths:0 ~dl_M:dsri.dl_m
-      m.input_kind m.input_model dsri.reads in
-  Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), {m with input_model = mi'})
+      (m : (('t,'var,'constr,'func) Task_model.task_model as 'task_model))
+      (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
+    : (('var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t =
+  let* pi, ri, suppi, dli', mi', varseqi' =
+    input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m
+      m.input_kind m.input_model m.input_varseq dsri.reads in
+  Myseq.return
+    (Task_model.Rinput (pi,ri,suppi,dli'),
+     {m with input_model = mi'; input_varseq = varseqi'})
 

@@ -8,13 +8,13 @@ let learn
       ~(alpha : float)
       ~(read_pairs :
           pruning:bool -> env:'data ->
-          (('t,'constr,'func) Task_model.task_model as 'task_model) ->
+          (('t,'var,'constr,'func) Task_model.task_model as 'task_model) ->
           'value Task.pair list ->
-          (('value,'dconstr,'constr,'func) Task_model.pairs_reads as 'pairs_reads) result)
+          (('value,'dconstr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
-          (('value,'dconstr,'constr,'func) Task_model.reads as 'reads) -> 'reads ->
-          ((('constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
+          (('value,'dconstr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
+          ((('var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
       ~(task_prunings :
           'task_model -> 'reads ->
           ('refinement * 'task_model) Myseq.t)

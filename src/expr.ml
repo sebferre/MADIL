@@ -1,24 +1,27 @@
 
 open Madil_common
 open Data
-open Path
 open Kind 
 
-type ('constr,'func) expr =
-  | Ref of 'constr path
-  | Apply of 'func * ('constr,'func) expr array
+type ('var,'func) expr =
+  | Ref of 'var
+  | Apply of 'func * ('var,'func) expr array
   | Arg (* implicit unique argument of functions *)
-  | Fun of ('constr,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
+  | Fun of ('var,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
+
+type 'var binding_vars = 'var Bintree.t
+let binding_vars0 = Bintree.empty
+
+type ('var,'value) bindings = ('var, 'value) Mymap.t
+let bindings0 = Mymap.empty
 
 let xp_expr
-      ~(xp_field : ('constr * int) html_xp)
+      ~(xp_var : 'var html_xp)
       ~(xp_func : 'func html_xp)
-    : ('constr,'func) expr html_xp =
+    : ('var,'func) expr html_xp =
   let rec aux ~html print e =
     match e with
-    | Ref p ->
-       print#string "In"; (* assuming only references to input value *)
-       xp_path ~xp_field ~html print p
+    | Ref x -> xp_var ~html print x
     | Apply (f,args) ->
        xp_func ~html print f;
        Xprint.bracket ("(",")")
@@ -34,17 +37,17 @@ let xp_expr
 (* expression evaluation *)
 
 let eval
-      ~(eval_unbound_path : 'constr path -> 'value result) (* ex: return some null value, or fail *)
+      ~(eval_unbound_var : 'var -> 'value result) (* ex: return some null value, or fail *)
       ~(eval_func : 'func -> 'value array -> 'value result)
       ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
-      (e : ('constr,'func) expr) (bindings : ('value,'constr) bindings)
+      (e : ('var,'func) expr) (bindings : ('var,'value) bindings)
     : 'value result =
   let rec aux e =
     match e with
-    | Ref p ->
-       (match Mymap.find_opt p bindings with
+    | Ref x ->
+       (match Mymap.find_opt x bindings with
         | Some v -> Result.Ok v
-        | None -> eval_unbound_path p)
+        | None -> eval_unbound_var x)
     | Apply (f,args) ->
        let| lv = list_map_result aux (Array.to_list args) in
        eval_func f (Array.of_list lv)
@@ -56,19 +59,19 @@ let eval
   
 (* expression sets : idea taken from FlashMeta *)
     
-type ('constr,'func) exprset = ('constr,'func) expritem list
-and ('constr,'func) expritem =
-  | SRef of 'constr path
-  | SApply of 'func * ('constr,'func) exprset array
+type ('var,'func) exprset = ('var,'func) expritem list
+and ('var,'func) expritem =
+  | SRef of 'var
+  | SApply of 'func * ('var,'func) exprset array
   | SArg
-  | SFun of ('constr,'func) exprset
+  | SFun of ('var,'func) exprset
 
-let rec exprset_to_seq (es : ('constr,'func) exprset) : ('constr,'func) expr Myseq.t =
+let rec exprset_to_seq (es : ('var,'func) exprset) : ('var,'func) expr Myseq.t =
   let* item = Myseq.from_list es in
   expritem_to_seq item
-and expritem_to_seq : ('constr,'func) expritem -> ('constr,'func) expr Myseq.t =
+and expritem_to_seq : ('var,'func) expritem -> ('var,'func) expr Myseq.t =
   function
-  | SRef p -> Myseq.return (Ref p)
+  | SRef x -> Myseq.return (Ref x)
   | SApply (f,es_args) ->
      let seq_args = Array.map exprset_to_seq es_args in
      let* l_args = Myseq.product (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
@@ -79,7 +82,7 @@ and expritem_to_seq : ('constr,'func) expritem -> ('constr,'func) expr Myseq.t =
      let* e1 = exprset_to_seq es1 in
      Myseq.return (Fun e1)
 
-let rec exprset_inter (es1 : ('constr,'func) exprset) (es2 : ('constr,'func) exprset) : ('constr,'func) exprset =
+let rec exprset_inter (es1 : ('var,'func) exprset) (es2 : ('var,'func) exprset) : ('var,'func) exprset =
   List.fold_left
     (fun res item1 ->
       List.fold_left
@@ -89,9 +92,9 @@ let rec exprset_inter (es1 : ('constr,'func) exprset) (es2 : ('constr,'func) exp
           | Some item -> item::res)
         res es2)
     [] es1
-and expritem_inter (item1 : ('constr,'func) expritem) (item2 : ('constr,'func) expritem) : ('constr,'func) expritem option =
+and expritem_inter (item1 : ('var,'func) expritem) (item2 : ('var,'func) expritem) : ('var,'func) expritem option =
   match item1, item2 with
-  | SRef p1, SRef p2 when p1 = p2 -> Some (SRef p1)
+  | SRef x1, SRef x2 when x1 = x2 -> Some (SRef x1)
   | SApply (f1,es_args1), SApply (f2,es_args2) when f1 = f2 ->
      let es_args = Array.map2 exprset_inter es_args1 es_args2 in
      if Array.exists (fun es -> es = []) es_args
@@ -104,7 +107,7 @@ and expritem_inter (item1 : ('constr,'func) expritem) (item2 : ('constr,'func) e
       | es -> Some (SFun es))
   | _ -> None
 
-let rec exprset_inter_list (esl1 : ('constr,'func) exprset list) (esl2 : ('constr,'func) exprset list) : ('constr,'func) exprset list =
+let rec exprset_inter_list (esl1 : ('var,'func) exprset list) (esl2 : ('var,'func) exprset list) : ('var,'func) exprset list =
   List.fold_left
     (fun res es1 ->
       List.fold_left
@@ -120,18 +123,18 @@ let rec exprset_inter_list (esl1 : ('constr,'func) exprset list) (esl2 : ('const
 
 module Index =
   struct
-    type ('value,'constr,'func) t = ('value, ('constr,'func) exprset) Mymap.t
+    type ('value,'var,'func) t = ('value, ('var,'func) exprset) Mymap.t
 
     let empty = Mymap.empty
                 
-    let bind (v : 'value) (item : ('constr,'func) expritem) (index : ('value,'constr,'func) t) : ('value,'constr,'func) t =
+    let bind (v : 'value) (item : ('var,'func) expritem) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
       Mymap.update v
         (function
          | None -> Some [item]
          | Some exprs -> Some (item :: exprs))
         index
 
-    let bind_set (v : 'value) (es : ('constr,'func) exprset) (index : ('value,'constr,'func) t) : ('value,'constr,'func) t =
+    let bind_set (v : 'value) (es : ('var,'func) exprset) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
       Mymap.update v
         (function
          | None -> Some es
@@ -142,21 +145,21 @@ module Index =
 
     let fold = Mymap.fold
                 
-    let lookup (v : 'value) (index : ('value,'constr,'func) t) : ('constr,'func) exprset =
+    let lookup (v : 'value) (index : ('value,'var,'func) t) : ('var,'func) exprset =
       match find_opt v index with
       | None -> []
       | Some exprs -> exprs
   end
            
-let index_add_bindings index (bindings : ('value,'constr) bindings) : ('value,'constr,'func) Index.t =
+let index_add_bindings index (bindings : ('var,'value) bindings) : ('value,'var,'func) Index.t =
   Mymap.fold
-    (fun p v res -> Index.bind v (SRef p) res)
+    (fun x v res -> Index.bind v (SRef x) res)
     bindings index
 
 let index_apply_functions
       ~(eval_func : 'func -> 'value array -> 'value result)
       index (max_arity : int) (get_functions : 'value array -> 'func list)
-    : ('value,'constr,'func) Index.t =
+    : ('value,'var,'func) Index.t =
   let rec aux k lv_k les_k args_k es_args_k res =
     let res =
       get_functions args_k
@@ -184,9 +187,9 @@ let index_apply_functions
 (* expr encoding *)
 
 let size_expr_ast (* for DL computing *)
-    : ('constr,'func) expr -> int =
+    : ('var,'func) expr -> int =
   let rec aux = function
-    | Ref p -> 1
+    | Ref x -> 1
     | Apply (f,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
     | Arg -> 1
     | Fun e1 -> 1 + aux e1
@@ -218,10 +221,10 @@ let nb_expr_ast (* for DL computing *)
   
 let dl_expr_params
       ~(dl_func_params : 'func -> dl)
-      ~(dl_path : 'constr path -> dl)
-    : ('constr,'func) expr -> dl =
+      ~(dl_var : 'var -> dl)
+    : ('var,'func) expr -> dl =
   let rec aux = function
-    | Ref p -> dl_path p
+    | Ref x -> dl_var x
     | Apply (f,args) ->
        let dl_args_params =
          Array.map aux args

@@ -15,6 +15,9 @@ module type BASIC_TYPES =
     type dconstr
     val xp_dpat : dconstr -> unit html_xp array -> unit html_xp
 
+    type var
+    val xp_var : var html_xp
+
     type constr
     val xp_pat : constr -> unit html_xp array -> unit html_xp
     val xp_field : (constr * int) html_xp
@@ -51,34 +54,34 @@ module type TYPES =
     type path = constr Path.path
     val xp_path : path html_xp
 
-    type binding_paths = constr Path.binding_paths
-    type bindings = (value,constr) Path.bindings
+    type binding_vars = var Expr.binding_vars
+    type bindings = (var,value) Expr.bindings
           
-    type expr = (constr,func) Expr.expr
+    type expr = (var,func) Expr.expr
     val xp_expr : expr html_xp
 
-    type model = (constr,func) Model.model
+    type model = (var,constr,func) Model.model
     val xp_model : model html_xp
 
     type asd = (t,constr,func) Model.asd
 
-    type task_model = (t,constr,func) Task_model.task_model
+    type task_model = (t,var,constr,func) Task_model.task_model
     val xp_task_model : task_model html_xp
 
-    type refinement = (constr,func) Task_model.refinement
+    type refinement = (var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
-    type read = (value,dconstr,constr,func) Model.read
-    type reads = (value,dconstr,constr,func) Task_model.reads
-    type pairs_reads = (value,dconstr,constr,func) Task_model.pairs_reads
+    type read = (value,dconstr,var,func) Model.read
+    type reads = (value,dconstr,var,func) Task_model.reads
+    type pairs_reads = (value,dconstr,var,func) Task_model.pairs_reads
 
     type generator = (generator_info,value,dconstr) Model.generator
     type parseur = (input,value,dconstr) Model.parseur
     type encoder = (encoder_info,value,dconstr) Model.encoder
 
-    type expr_index = (value,constr,func) Expr.Index.t
+    type expr_index = (value,var,func) Expr.Index.t
 
-    type best_reads = (value,dconstr,constr,func) Refining.best_read list
+    type best_reads = (value,dconstr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * dl triple triple * dl)
@@ -109,34 +112,34 @@ module Defined_types (T : BASIC_TYPES) =
     type path = constr Path.path
     let xp_path : path html_xp = Path.xp_path ~xp_field
 
-    type binding_paths = constr Path.binding_paths
-    type bindings = (value,constr) Path.bindings
+    type binding_vars = var Expr.binding_vars
+    type bindings = (var,value) Expr.bindings
           
-    type expr = (constr,func) Expr.expr
-    let xp_expr : expr html_xp = Expr.xp_expr ~xp_field ~xp_func
+    type expr = (var,func) Expr.expr
+    let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
 
-    type model = (constr,func) Model.model
-    let xp_model : model html_xp = Model.xp_model ~xp_pat ~xp_field ~xp_func
+    type model = (var,constr,func) Model.model
+    let xp_model : model html_xp = Model.xp_model ~xp_var ~xp_pat ~xp_func
 
     type asd = (t,constr,func) Model.asd
 
-    type task_model = (t,constr,func) Task_model.task_model
+    type task_model = (t,var,constr,func) Task_model.task_model
     let xp_task_model : task_model html_xp = Task_model.xp_task_model ~xp_model
 
-    type refinement = (constr,func) Task_model.refinement
+    type refinement = (var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
-    type read = (value,dconstr,constr,func) Model.read
-    type reads = (value,dconstr,constr,func) Task_model.reads
-    type pairs_reads = (value,dconstr,constr,func) Task_model.pairs_reads
+    type read = (value,dconstr,var,func) Model.read
+    type reads = (value,dconstr,var,func) Task_model.reads
+    type pairs_reads = (value,dconstr,var,func) Task_model.pairs_reads
                      
     type generator = (generator_info,value,dconstr) Model.generator
     type parseur = (input,value,dconstr) Model.parseur
     type encoder = (encoder_info,value,dconstr) Model.encoder
 
-    type expr_index = (value,constr,func) Expr.Index.t
+    type expr_index = (value,var,func) Expr.Index.t
 
-    type best_reads = (value,dconstr,constr,func) Refining.best_read list
+    type best_reads = (value,dconstr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * dl triple triple * dl)
@@ -160,12 +163,12 @@ module type DOMAIN =
 
     (* bindings and evaluation *)
 
-    val visible_path : path -> kind -> bool
+(* REM    val visible_path : path -> kind -> bool
     val constr_value_opt : path -> kind -> value -> dconstr -> value option
-    val seq_value_opt : path -> kind -> value list -> value option
+    val seq_value_opt : path -> kind -> value list -> value option *)
       
     val eval_func : func -> value array -> value result
-    val eval_unbound_path : path -> value result
+    val eval_unbound_var : var -> value result
     val eval_arg : unit -> value result
     val model_of_value : kind -> value -> model result
 
@@ -185,7 +188,7 @@ module type DOMAIN =
 
     val dl_constr_params : constr -> dl
     val dl_func_params : func -> dl
-    val dl_path : nb_env_paths:int -> path -> dl
+    val dl_var : nb_env_vars:int -> var -> dl
       
     (* expression index *)
 
@@ -193,10 +196,10 @@ module type DOMAIN =
 
     (* refining *)
 
-    val refinements_pat : constr -> model array -> data -> (model * input) list
+    val refinements_pat : constr -> model array -> var Myseq.t -> data -> (model * var Myseq.t * input) list
     val refinements_postprocessing : constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
-    val prunings_pat : constr -> model array -> data -> (model * input) list
+    val prunings_pat : constr -> model array -> var Myseq.t -> data -> (model * var Myseq.t * input) list
     val prunings_postprocessing : constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
@@ -215,22 +218,22 @@ module Make (Domain : DOMAIN) =
 
     (* bindings and evaluation *)
                   
-    let binding_paths : kind -> model -> binding_paths =
-      Model.binding_paths
+    let binding_vars : kind -> model -> binding_vars =
+      Model.binding_vars
         ~asd
-        ~visible_path
+    (* REM ~visible_path *)
   
     let get_bindings : kind -> model -> data -> bindings =
       Model.get_bindings
         ~asd
-        ~constr_value_opt
-        ~seq_value_opt
+        (* REM ~constr_value_opt *)
+    (* REM ~seq_value_opt *)
 
     let eval : kind -> model -> bindings -> model result =
       Model.eval
         ~asd
         ~eval_func
-        ~eval_unbound_path
+        ~eval_unbound_var
         ~eval_arg
         ~model_of_value
 
@@ -258,12 +261,12 @@ module Make (Domain : DOMAIN) =
       let dl, _ = enc info d in
       dl
 
-    let dl_model : nb_env_paths:int -> kind -> model -> dl =
+    let dl_model : nb_env_vars:int -> kind -> model -> dl =
       Model.dl
         ~asd
         ~dl_constr_params
         ~dl_func_params
-        ~dl_path
+        ~dl_var
 
     (* reading and writing *)
 
@@ -293,6 +296,7 @@ module Make (Domain : DOMAIN) =
 
     let refinements =
       Refining.refinements
+        ~xp_model
         ~asd
         ~dl_model
         ~dl_data
@@ -304,6 +308,7 @@ module Make (Domain : DOMAIN) =
 
     let prunings =
       Refining.refinements
+        ~xp_model
         ~asd
         ~dl_model
         ~dl_data
@@ -316,9 +321,9 @@ module Make (Domain : DOMAIN) =
     (* task models *)
 
     let dl_task_model (m : task_model) : dl * dl =
-      dl_model ~nb_env_paths:0
+      dl_model ~nb_env_vars:0
         m.input_kind m.input_model,
-      dl_model ~nb_env_paths:m.nb_env_paths
+      dl_model ~nb_env_vars:m.nb_env_vars
         m.output_kind m.output_model
     
     let read_pairs =
@@ -335,7 +340,7 @@ module Make (Domain : DOMAIN) =
 
     let task_refinements =
       Refining.task_refinements
-        ~binding_paths
+        ~binding_vars
         ~input_refinements:refinements
         ~output_refinements:refinements
 
