@@ -41,7 +41,7 @@ let read_pairs
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
                't kind -> (('var,'constr,'func) model as 'model) -> 'value -> 'read list result)
-      ~(get_bindings : 't kind -> 'model -> 'data -> 'bindings)
+      ~(get_bindings : 'model -> 'data -> 'bindings)
       
       ~(pruning : bool)
       ~(env : 'data)
@@ -65,7 +65,7 @@ let read_pairs
              let+|+ ro =
                read
                  ~dl_assuming_contents_known:false
-                 ~env:ri.data ~bindings:(get_bindings m.input_kind m.input_model ri.data)
+                 ~env:ri.data ~bindings:(get_bindings m.input_model ri.data)
                  m.output_kind m.output_model output in
              let dl = ri.dl +. ro.dl in
              Result.Ok [(ri,ro,dl)] in
@@ -144,7 +144,7 @@ let apply
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
                't kind -> (('var,'constr,'func) model as 'model) -> 'value ->
                ('value,'dconstr,'var,'func) read list result)
-      ~(get_bindings : 't kind -> 'model -> 'data -> 'bindings)
+      ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 't kind -> 'model -> 'info -> ('data * 'value) result)
       ~(env : 'data)
@@ -158,7 +158,7 @@ let apply
   let data_i = read_i.data in
   let| data_o, v_o =
     write
-      ~bindings:(get_bindings m.input_kind m.input_model data_i)
+      ~bindings:(get_bindings m.input_model data_i)
       m.output_kind m.output_model info_o in
   Result.Ok [(data_i, data_o, v_o)])
 

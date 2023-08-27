@@ -245,7 +245,7 @@ let refinements
 
 
 let task_refinements
-      ~(binding_vars : 't Kind.kind -> ('var,'constr,'func) Model.model -> 'var Expr.binding_vars)
+      ~(binding_vars : ('var,'constr,'func) Model.model -> 'var Expr.binding_vars)
       ~(input_refinements : ('t,'value,'dconstr,'var,'constr,'func) refiner)
       ~(output_refinements : ('t,'value,'dconstr,'var,'constr,'func) refiner)
       
@@ -258,7 +258,7 @@ let task_refinements
     [ (let* p, ri, suppi, dli', mi, varseqi =
          input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
            m.input_kind m.input_model m.input_varseq dsri.reads in
-       let nb_env_vars = Bintree.cardinal (binding_vars m.input_kind mi) in
+       let nb_env_vars = Bintree.cardinal (binding_vars mi) in
        Myseq.return
          (Task_model.Rinput (p,ri,suppi,dli'),
           {m with input_model = mi; input_varseq = varseqi; nb_env_vars}));

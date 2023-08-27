@@ -118,70 +118,49 @@ let make_asd
         
 (* model evaluation *)
 
-let binding_vars (* TODO: ignore kinds, hence asd *)
-      ~(asd : ('t,'constr,'func) asd)
-      (k0 : 't kind)
+let binding_vars
       (m0 : ('var,'constr,'func) model)
     : 'var Expr.binding_vars =
-  let rec aux k m = (* TODO: use acc *)
-    match k, m with
-    | _, Def (x,m1) ->
-       let s = aux k m1 in
-       Bintree.add x s
-    | KVal t, Pat (c,args) ->
-       let kind_args = asd#constr_args t c in
-       let s_args =
-         Array.mapi
-           (fun i argi ->
-             let ki = try kind_args.(i) with _ -> assert false in
-             aux ki argi)
-           args in
-       Array.fold_left Bintree.union Bintree.empty s_args
-    | _, Expr e -> Bintree.empty
-    | KSeq k1, Seq (n,lm1) ->
-       let i, s =
-         List.fold_left
-           (fun (i,s) mi ->
-             i+1, Bintree.union s (aux k1 mi))
-           (0, Bintree.empty) lm1 in
-       assert (i = n);
-       s
-    | KSeq k1, Cst m1 -> raise TODO
-    | _ -> assert false
+  let rec aux m acc =
+    match m with
+    | Def (x,m1) ->
+       let acc = aux m1 acc in
+       Bintree.add x acc
+    | Pat (c,args) ->
+       Array.fold_right aux args acc
+    | Expr e -> acc
+    | Seq (n,lm1) ->
+       List.fold_right aux lm1 acc
+    | Cst m1 -> raise TODO
   in
-  aux k0 m0
+  aux m0 Bintree.empty
 
   
 let get_bindings
-      ~(asd : ('t,'constr,'func) asd)
-      (k0 : 't kind)
       (m0 : ('var,'constr,'func) model)
       (d0 : ('value,'dconstr) data)
     : ('var,'value) Expr.bindings =
-  let rec aux k m d acc =
-    match k, m, d with
-    | _, Def (x,m1), DVal (v, _) -> Mymap.add x v acc
-    | KVal t, Pat (c,args), DVal (v, DPat (dc, dargs)) ->
+  let rec aux m d acc =
+    match m, d with
+    | Def (x,m1), DVal (v, _) ->
+       Mymap.add x v acc
+    | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
-       let kind_args = asd#constr_args t c in
-       let ref_acc = ref acc in
+       let ref_acc = ref acc in (* missing Array.fold_right2 *)
        for i = 0 to n - 1 do
-         let acc = aux kind_args.(i) args.(i) dargs.(i) !ref_acc in
+         let acc = aux args.(i) dargs.(i) !ref_acc in
          ref_acc := acc
        done;
        !ref_acc
-    | _, Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
-    | KSeq k1, Seq (n,lm), DSeq (dn,ld) ->
+    | Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
+    | Seq (n,lm), DSeq (dn,ld) ->
        assert (n = dn);
-       List.fold_right2
-         (fun mi di acc ->
-           aux k1 mi di acc)
-         lm ld acc
-    | _, Cst _, _ -> raise TODO
+       List.fold_right2 aux lm ld acc
+    | Cst _, _ -> raise TODO
     | _ -> assert false
   in
-  aux k0 m0 d0 Expr.bindings0
+  aux m0 d0 Expr.bindings0
 
 let eval
       ~asd

@@ -218,16 +218,11 @@ module Make (Domain : DOMAIN) =
 
     (* bindings and evaluation *)
                   
-    let binding_vars : kind -> model -> binding_vars =
+    let binding_vars : model -> binding_vars =
       Model.binding_vars
-        ~asd
-    (* REM ~visible_path *)
   
-    let get_bindings : kind -> model -> data -> bindings =
+    let get_bindings : model -> data -> bindings =
       Model.get_bindings
-        ~asd
-        (* REM ~constr_value_opt *)
-    (* REM ~seq_value_opt *)
 
     let eval : kind -> model -> bindings -> model result =
       Model.eval
