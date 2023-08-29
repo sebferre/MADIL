@@ -51,7 +51,7 @@ module type TYPES =
     type data = (value,dconstr) Data.data
     val xp_data : data html_xp
               
-    type path = constr Path.path
+    type path = constr Model.path
     val xp_path : path html_xp
 
     type binding_vars = var Expr.binding_vars
@@ -109,8 +109,8 @@ module Defined_types (T : BASIC_TYPES) =
     type data = (value,dconstr) Data.data
     let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dpat
                                
-    type path = constr Path.path
-    let xp_path : path html_xp = Path.xp_path ~xp_field
+    type path = constr Model.path
+    let xp_path : path html_xp = Model.xp_path ~xp_field
 
     type binding_vars = var Expr.binding_vars
     type bindings = (var,value) Expr.bindings
@@ -163,10 +163,6 @@ module type DOMAIN =
 
     (* bindings and evaluation *)
 
-(* REM    val visible_path : path -> kind -> bool
-    val constr_value_opt : path -> kind -> value -> dconstr -> value option
-    val seq_value_opt : path -> kind -> value list -> value option *)
-      
     val eval_func : func -> value array -> value result
     val eval_unbound_var : var -> value result
     val eval_arg : unit -> value result

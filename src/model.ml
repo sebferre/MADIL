@@ -2,10 +2,6 @@
 open Madil_common
 open Kind
 open Data
-open Path
-
-type 'constr ctx = 'constr path -> 'constr path
-let ctx0 : _ ctx = (fun p -> p)
 
 type ('var,'constr,'func) model =
   | Def of 'var * ('var,'constr,'func) model (* a var is an id for the value at this sub-model *)
@@ -14,11 +10,19 @@ type ('var,'constr,'func) model =
   | Cst of ('var,'constr,'func) model
   | Expr of ('var,'func) Expr.expr
 
+type 'constr path =
+  | This
+  | Field of 'constr * int * 'constr path
+  | Item of int * 'constr path
+
+type 'constr ctx = 'constr path -> 'constr path
+let ctx0 : _ ctx = (fun p -> p)
+
 let make_def (x : 'var) (m1 : ('var,'constr,'func) model) : ('var,'constr,'func) model =
   Def (x,m1)
 let make_pat (c : 'constr) (args : ('var,'constr,'func) model array) : ('var,'constr,'func) model =
   Pat (c,args)
-          
+
 let xp_model
       ~(xp_var : 'var html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
@@ -61,6 +65,22 @@ let xp_pat_default
       xp_args;
     print#string "]"
   )
+
+let xp_path
+      ~(xp_field : ('constr * int) html_xp)
+    : 'constr path html_xp =
+  let rec aux ~html print p =
+    match p with
+    | This -> ()
+    | Field (c,i,p1) ->
+       print#string ".";
+       xp_field ~html print (c,i);
+       aux ~html print p1
+    | Item (i,p1) ->
+       print#string "["; print#int i; print#string "]";
+       aux ~html print p1
+  in
+  aux
 
 (* ASD *)
 

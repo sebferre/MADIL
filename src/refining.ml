@@ -130,7 +130,7 @@ type ('t,'value,'dconstr,'var,'constr,'func) refiner =
   (('var,'constr,'func) Model.model as 'model) ->
   'var Myseq.t -> (* fresh variables viz the model *)
   ('value,'dconstr,'var,'func) Model.read list list ->
-  ('constr Path.path * 'model (* refined submodel *) * int (* support *) * dl (* new DL *) * 'model (* new model *) * 'var Myseq.t (* remaining fresh vars *)) Myseq.t
+  ('constr Model.path * 'model (* refined submodel *) * int (* support *) * dl (* new DL *) * 'model (* new model *) * 'var Myseq.t (* remaining fresh vars *)) Myseq.t
 (* result: a sequence of path-wise refinements with support and estimate DL *)
      
 let refinements
@@ -148,50 +148,52 @@ let refinements
        and a globally-defined autorefinement process *)
     : ('t,'value,'dconstr,'var,'constr,'func) refiner =
   fun ~nb_env_vars ~dl_M k m varseq reads ->
-  let rec aux k m selected_reads other_reads_env =
+  let rec aux ctx k m selected_reads other_reads_env =
   if selected_reads = [] then Myseq.empty
   else
     match k, m with
     | _, Model.Def (x,m1) ->
-       aux k m1 selected_reads other_reads_env
+       aux ctx k m1 selected_reads other_reads_env
     | Kind.KVal t, Model.Pat (c,args) ->
        let k_args = asd#constr_args t c in
        Myseq.interleave
-         (aux_pat k m c args selected_reads
+         (aux_pat ctx k m c args selected_reads
           :: Array.to_list
               (Array.mapi
-               (fun i mi ->
-                 aux k_args.(i) mi
-                   (map_reads
-                      (fun read ->
-                        match read.Model.data with
-                        | DVal (_, DPat (dc, args)) ->
-                           let di = try args.(i) with _ -> assert false in
-                           {read with Model.data = di}
-                        | _ -> assert false)
-                      selected_reads)
-                   other_reads_env
-                 |> Myseq.map (fun (p,r,varseq',supp,dl') -> Path.Field (c,i,p), r, varseq', supp, dl'))
-               args))
+                 (fun i mi ->
+                   let ctxi = (fun p1 -> ctx (Model.Field (c,i,p1))) in
+                   let ki = k_args.(i) in
+                   aux ctxi ki mi
+                     (map_reads
+                        (fun read ->
+                          match read.Model.data with
+                          | DVal (_, DPat (dc, args)) ->
+                             let di = try args.(i) with _ -> assert false in
+                             {read with Model.data = di}
+                          | _ -> assert false)
+                        selected_reads)
+                     other_reads_env)
+                 args))
                         
     | _, Model.Expr e -> Myseq.empty
     | Kind.KSeq k1, Model.Seq (n,lm1) ->
        Myseq.interleave
          (List.mapi
             (fun i mi ->
-              aux k1 mi
+              let ctxi = (fun p1 -> ctx (Model.Item (i,p1))) in
+              aux ctxi k1 mi
                 (map_reads
                    (fun read ->
                      match read.Model.data with
                      | DSeq (_,ld) -> {read with Model.data = List.nth ld i}
                      | _ -> assert false)
                    selected_reads)
-                other_reads_env
-              |> Myseq.map (fun (p,r,varseq',supp,dl') -> Path.Item (i,p), r, varseq', supp, dl'))
+                other_reads_env)
             lm1)
     | _, Model.Cst m1 -> raise TODO
     | _ -> assert false
-  and aux_pat k m c args selected_reads =
+  and aux_pat ctx k m c args selected_reads =
+    let p = ctx Model.This in (* local path *)
     let dl_m = dl_model ~nb_env_vars k m in
     let dl_data_m = dl_data m in
     let refs =
@@ -230,12 +232,12 @@ let refinements
       +. alpha *. Mdl.sum best_reads
                     (fun {matching; read; new_data} ->
                       read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
-    Myseq.return (Path.This, m_new, varseq', supp, dl_new)         
+    Myseq.return (p, m_new, varseq', supp, dl_new)         
   in
   let selected_reads = reads in
   let other_reads_env = [] in
   let* p, r, varseq', supp, dl' =
-    aux k m selected_reads other_reads_env
+    aux Model.ctx0 k m selected_reads other_reads_env
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
            dl_compare dl1 dl2) (* support use for sorting in LIS UI *)
     |> Myseq.unique

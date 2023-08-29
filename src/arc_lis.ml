@@ -216,7 +216,7 @@ let html_of_suggestion ~input_dico = function
           (match s.stage with Build -> "building" | Prune -> "pruning"))
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
-       (Printf.sprintf "(%f" s.norm_dl
+       (Printf.sprintf "(%f)  " s.norm_dl
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
 
 let html_of_value v =

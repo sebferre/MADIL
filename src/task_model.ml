@@ -2,7 +2,6 @@
 open Madil_common
 open Kind
 open Data
-open Path
 open Model
 
 (* task models *)
@@ -11,7 +10,7 @@ type ('t,'var,'constr,'func) task_model =
   { input_kind : 't kind;
     input_model : ('var,'constr,'func) model; (* no reference *)
     input_varseq : 'var Myseq.t;
-    nb_env_vars : int; (* nb of visible paths in input model *)
+    nb_env_vars : int; (* nb of visible vars in input model *)
     output_kind : 't kind;
     output_model : ('var,'constr,'func) model;
     output_varseq : 'var Myseq.t
@@ -183,14 +182,14 @@ let xp_refinement
     | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
     | Routput (p,ro,supp,dl') -> aux2 ~html print " Out" p ro supp dl' "o"
   and aux2 ~html print in_out p r supp dl' i_o =
-    if dl' <> 0. (* undefined value *) then
-      print#string (Printf.sprintf " / ~%.3f%s)  " dl' i_o);
-    print#string in_out;
-    xp_path ~html print p;
-    print#string " ← ";
+    (*if dl' <> 0. (* undefined value *) then
+      print#string (Printf.sprintf " / ~%.3f%s)  " dl' i_o); *)
     xp_model ~html print r;
     if supp <> 0 (* undefined value *) then
-      aux_support ~html print supp
+      aux_support ~html print supp;
+    print#string " @ ";
+    print#string in_out;
+    xp_path ~html print p    
   and aux_support ~html print supp =
     print#string " ("; print#int supp; print#string ")"
   in
