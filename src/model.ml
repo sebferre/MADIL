@@ -31,7 +31,9 @@ let xp_model
   let rec aux ~html print m =
     match m with
     | Def (x,m1) ->
-       xp_var ~html print x; print#string ": "; aux ~html print m1
+       if html then print#string "<span class=\"model-def\">";
+       xp_var ~html print x; print#string ": "; aux ~html print m1;
+       if html then print#string "</span>"
     | Pat (c,args) ->
        let xp_args =
          Array.map
@@ -46,7 +48,9 @@ let xp_model
        Xprint.bracket ("〈", " = 〉") (aux ~html)
          print m1
     | Expr e ->
-       Expr.xp_expr ~xp_var ~xp_func ~html print e
+       if html then print#string "<span class=\"model-expr\">";
+       Expr.xp_expr ~xp_var ~xp_func ~html print e;
+       if html then print#string "</span>"
   in
   aux
 
