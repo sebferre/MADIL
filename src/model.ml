@@ -514,8 +514,21 @@ let write
   Result.Ok (d, v))
 
 
-(* model refinement *)
+(* paths and model refinement *)
 
+let reverse_path (p : 'constr path) : 'constr path =
+  let rec aux = function
+    | This -> (fun rp -> rp)
+    | Field (c,i,p1) ->
+       let ctx1 = aux p1 in
+       (fun rp -> ctx1 (Field (c,i,rp)))
+    | Item (i,p1) ->
+       let ctx1 = aux p1 in
+       (fun rp -> ctx1 (Item (i,rp)))
+  in
+  let ctx = aux p in
+  ctx This       
+  
 let path_kind
       ~(asd : ('t,'constr,'func) asd)
     : 't kind -> 'constr path -> 't kind =
