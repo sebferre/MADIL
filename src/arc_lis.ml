@@ -246,7 +246,7 @@ let html_of_cell : cell -> Html.t = function
        (html_of_row_from_data ro.data)
      ^ Printf.sprintf "<br/>DL = %.3f = %.3fi + %.3fo" (ri.dl +. ro.dl) ri.dl ro.dl
   | Pred (expected_vo, l_di_do_vo) ->
-     String.concat ""
+     String.concat (if html then "<br/>" else "\n")
        (List.map
           (fun (di,_do,vo) ->
             html_row_pair

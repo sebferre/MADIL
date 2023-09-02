@@ -178,9 +178,10 @@ module type DOMAIN =
 
     (* description lengths *)
       
-    val encoder_pat : constr -> encoder array -> encoder
-    val info_expr : encoder_info -> data -> encoder_info
-    val encoder_info_of_data : data -> encoder_info
+    val encoder_pat : constr -> (data -> encoder_info) array -> (data -> encoder_info)
+    val encoder_expr : data -> encoder_info
+    val encoder_seq : encoder_info list -> encoder_info
+    val dl_of_encoder_info : encoder_info -> dl
 
     val dl_constr_params : constr -> dl
     val dl_func_params : func -> dl
@@ -240,17 +241,14 @@ module Make (Domain : DOMAIN) =
 
     (* description lengths *)
       
-    let encoder : model -> encoder =
+    let encoder : model -> data -> dl =
       Model.encoder
         ~encoder_pat
-        ~info_expr
+        ~encoder_expr
+        ~encoder_seq
+        ~dl_of_encoder_info
 
-    let dl_data (m : model) : data -> dl =
-      let enc = encoder m in
-      fun d ->
-      let info = encoder_info_of_data d in
-      let dl, _ = enc info d in
-      dl
+    let dl_data (m : model) (d : data) : dl = encoder m d
 
     let dl_model : nb_env_vars:int -> kind -> model -> dl =
       Model.dl
@@ -337,7 +335,7 @@ module Make (Domain : DOMAIN) =
 
     let task_prunings =
       Refining.task_prunings
-        ~input_prunings:refinements
+        ~input_prunings:prunings
     
     let learn =
       Learning.learn

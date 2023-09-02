@@ -90,6 +90,7 @@ let xp_path
 
 class virtual ['t,'constr,'func] asd =
   object (self)
+    method virtual is_default_constr : 'constr -> bool
     method virtual constr_args : 't -> 'constr -> 't kind array
     method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
     method virtual expr_opt : 't kind -> 't kind option
@@ -273,12 +274,14 @@ let parseur
 
 (* model-based encoding of data *)
 
-type ('info,'value,'dconstr) encoder = 'info -> ('value,'dconstr) data -> dl * 'info
+type ('a,'value,'dconstr) encoder = ('value,'dconstr) data -> 'a
 
 let encoder
       ~(encoder_pat : 'constr -> 'enc array -> 'enc)
-      ~(info_expr : 'info -> ('value,'dconstr) data -> 'info)
-  : ('var,'constr,'func) model -> (('info,'value,'dconstr) encoder as 'enc) =
+      ~(encoder_expr : ('info,'value,'dconstr) encoder as 'enc)
+      ~(encoder_seq : 'info list -> 'info)
+      ~(dl_of_encoder_info : 'info -> dl)
+      (m : ('var,'constr,'func) model) : (dl,'value,'dconstr) encoder =
   let rec enc = function
     | Def (x,m1) ->
        enc m1
@@ -286,23 +289,21 @@ let encoder
        let enc_args = Array.map enc args in
        encoder_pat c enc_args
     | Expr e ->
-       (fun info d ->
-         let info = info_expr info d in
-         0., info)
+       encoder_expr
     | Seq (n,lm1) ->
        let enc_lm1 = List.map enc lm1 in
-       (fun info -> function
-         | DSeq (dn, ld) when dn = n ->
-            List.fold_left2
-              (fun (dl,info) enc_mi di ->
-                let dli, info = enc_mi info di in
-                dl +. dli, info)
-              (0., info) (* no need to encode 'dn', equal 'n' in model *)
-              enc_lm1 ld
-         | _ -> assert false)
+       (function
+        | DSeq (dn, ld) when dn = n ->
+           (* no need to encode 'dn', equal 'n' in model *)
+           let linfo = List.map2 (fun enc_mi di -> enc_mi di) enc_lm1 ld in
+           encoder_seq linfo
+        | _ -> assert false)
     | Cst m1 -> raise TODO
   in
-  enc
+  let enc_m = enc m in
+  fun d ->
+  let info = enc_m d in
+  dl_of_encoder_info info
 
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
@@ -311,10 +312,15 @@ let dl_parse_rank (rank : int) : dl =
 (* model encoding *)
 
 let size_model_ast (* for DL computing *)
+      ~(asd : ('t,'constr,'func) asd)
     : ('var,'constr,'func) model -> int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
-    | Pat (c,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
+    | Pat (c,args) ->
+       Array.fold_left
+         (fun res arg -> res + aux arg)
+         (if asd#is_default_constr c && args = [||] then 0 else 1)
+         args
     | Expr e -> Expr.size_expr_ast e
     | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
@@ -393,7 +399,7 @@ let dl
 
       ~(nb_env_vars : int)
       (k : 't kind) (m : ('var,'constr,'func) model) : dl =
-  let size = size_model_ast m in
+  let size = size_model_ast ~asd m in
   let nb = nb_model_ast ~asd k size in
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
