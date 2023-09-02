@@ -29,7 +29,7 @@ module type BASIC_TYPES =
 
     type generator_info
     type input
-    type encoder_info
+    type encoding
               
   end
 
@@ -77,7 +77,6 @@ module type TYPES =
 
     type generator = (generator_info,value,dconstr) Model.generator
     type parseur = (input,value,dconstr) Model.parseur
-    type encoder = (encoder_info,value,dconstr) Model.encoder
 
     type expr_index = (value,var,func) Expr.Index.t
 
@@ -135,7 +134,6 @@ module Defined_types (T : BASIC_TYPES) =
                      
     type generator = (generator_info,value,dconstr) Model.generator
     type parseur = (input,value,dconstr) Model.parseur
-    type encoder = (encoder_info,value,dconstr) Model.encoder
 
     type expr_index = (value,var,func) Expr.Index.t
 
@@ -178,10 +176,10 @@ module type DOMAIN =
 
     (* description lengths *)
       
-    val encoder_pat : constr -> (data -> encoder_info) array -> (data -> encoder_info)
-    val encoder_expr : data -> encoder_info
-    val encoder_seq : encoder_info list -> encoder_info
-    val dl_of_encoder_info : encoder_info -> dl
+    val encoding_pat : constr -> dconstr -> encoding array -> encoding
+    val encoding_expr : value -> encoding
+    val encoding_seq : encoding list -> encoding
+    val dl_of_encoding : encoding -> dl
 
     val dl_constr_params : constr -> dl
     val dl_func_params : func -> dl
@@ -241,14 +239,12 @@ module Make (Domain : DOMAIN) =
 
     (* description lengths *)
       
-    let encoder : model -> data -> dl =
-      Model.encoder
-        ~encoder_pat
-        ~encoder_expr
-        ~encoder_seq
-        ~dl_of_encoder_info
-
-    let dl_data (m : model) (d : data) : dl = encoder m d
+    let dl_data : model -> data -> dl =
+      Model.encode_data
+        ~encoding_pat
+        ~encoding_expr
+        ~encoding_seq
+        ~dl_of_encoding
 
     let dl_model : nb_env_vars:int -> kind -> model -> dl =
       Model.dl

@@ -274,36 +274,32 @@ let parseur
 
 (* model-based encoding of data *)
 
-type ('a,'value,'dconstr) encoder = ('value,'dconstr) data -> 'a
-
-let encoder
-      ~(encoder_pat : 'constr -> 'enc array -> 'enc)
-      ~(encoder_expr : ('info,'value,'dconstr) encoder as 'enc)
-      ~(encoder_seq : 'info list -> 'info)
-      ~(dl_of_encoder_info : 'info -> dl)
-      (m : ('var,'constr,'func) model) : (dl,'value,'dconstr) encoder =
-  let rec enc = function
-    | Def (x,m1) ->
-       enc m1
-    | Pat (c,args) ->
-       let enc_args = Array.map enc args in
-       encoder_pat c enc_args
-    | Expr e ->
-       encoder_expr
-    | Seq (n,lm1) ->
-       let enc_lm1 = List.map enc lm1 in
-       (function
-        | DSeq (dn, ld) when dn = n ->
-           (* no need to encode 'dn', equal 'n' in model *)
-           let linfo = List.map2 (fun enc_mi di -> enc_mi di) enc_lm1 ld in
-           encoder_seq linfo
-        | _ -> assert false)
-    | Cst m1 -> raise TODO
+let encode_data
+      ~(encoding_pat : 'constr -> 'dconstr -> 'encoding array -> 'encoding)
+      ~(encoding_expr : 'value -> 'encoding)
+      ~(encoding_seq : 'encoding list -> 'encoding)
+      ~(dl_of_encoding : 'encoding -> dl)
+      (m : ('var,'constr,'func) model) (d : ('value,'dconstr) data) : dl =
+  let rec aux m d =
+    match m, d with
+    | Def (x,m1), _ ->
+       aux m1 d
+    | Pat (c,args), DVal (_, DPat (dc, dargs)) ->
+       let encs = Array.map2 aux args dargs in
+       encoding_pat c dc encs
+    | Expr e, DVal (v, _) ->
+       encoding_expr v
+    | Expr e, DSeq _ -> assert false (* TODO *)
+    | Seq (n,lm1), DSeq (dn,ld1) ->
+       assert (n = dn);
+       let encs = List.map2 aux lm1 ld1 in
+       (* no need to encode 'dn', equal 'n' in model *)
+       encoding_seq encs
+    | Cst m1, _ -> raise TODO
+    | _ -> assert false
   in
-  let enc_m = enc m in
-  fun d ->
-  let info = enc_m d in
-  dl_of_encoder_info info
+  let enc = aux m d in
+  dl_of_encoding enc
 
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
