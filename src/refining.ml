@@ -167,7 +167,7 @@ let refinements
                      (map_reads
                         (fun read ->
                           match read.Model.data with
-                          | DVal (_, DPat (dc, args)) ->
+                          | D (_, DPat (dc, args)) ->
                              let di = try args.(i) with _ -> assert false in
                              {read with Model.data = di}
                           | _ -> assert false)
@@ -185,7 +185,7 @@ let refinements
                 (map_reads
                    (fun read ->
                      match read.Model.data with
-                     | DSeq (_,ld) -> {read with Model.data = List.nth ld i}
+                     | D (_, DSeq (_,ld)) -> {read with Model.data = List.nth ld i}
                      | _ -> assert false)
                    selected_reads)
                 other_reads_env)
@@ -200,7 +200,7 @@ let refinements
       let refs_pat = refinements_pat c args varseq in
       fun (read : _ Model.read) ->
       match read.data with
-      | DVal (v, DPat (dc, dargs)) as data ->
+      | D (v, DPat (dc, dargs)) as data ->
          let rs =
            List.filter_map
              (fun (m',varseq',input) ->
@@ -213,7 +213,7 @@ let refinements
           | Some k1 ->
              let es = Expr.Index.lookup v read.index in
              Myseq.fold_left
-               (fun rs e -> (Model.Expr e, varseq, Data.DVal (v, Data.DNone)) :: rs)
+               (fun rs e -> (Model.Expr e, varseq, Data.D (v, Data.DNone)) :: rs)
                rs (Expr.exprset_to_seq es))
       | _ -> assert false in
     let post = postprocessing c args in

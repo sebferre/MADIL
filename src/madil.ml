@@ -168,6 +168,8 @@ module type DOMAIN =
 
     (* model-based generation and parsing *)
 
+    val dseq_value : data list -> value (* value for a data sequence *)
+      
     val generator_pat : constr -> generator array -> generator
     val value_of_data : data -> value
 
@@ -232,10 +234,12 @@ module Make (Domain : DOMAIN) =
     let generator : model -> generator =
       Model.generator
         ~generator_pat
+        ~dseq_value
 
     let parseur : model -> parseur =
       Model.parseur
         ~parseur_pat
+        ~dseq_value
 
     (* description lengths *)
       

@@ -167,9 +167,9 @@ let get_bindings
     : ('var,'value) Expr.bindings =
   let rec aux m d acc =
     match m, d with
-    | Def (x,m1), DVal (v, _) ->
+    | Def (x,m1), D (v, _) ->
        Mymap.add x v acc
-    | Pat (c,args), DVal (v, DPat (dc, dargs)) ->
+    | Pat (c,args), D (_v, DPat (dc, dargs)) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
        let ref_acc = ref acc in (* missing Array.fold_right2 *)
@@ -179,7 +179,7 @@ let get_bindings
        done;
        !ref_acc
     | Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
-    | Seq (n,lm), DSeq (dn,ld) ->
+    | Seq (n,lm), D (_v, DSeq (dn,ld)) ->
        assert (n = dn);
        List.fold_right2 aux lm ld acc
     | Cst _, _ -> raise TODO
@@ -231,6 +231,7 @@ type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data
 
 let generator
       ~(generator_pat: 'constr -> 'gen array -> 'gen)
+      ~(dseq_value : ('value,'dconstr) data list -> 'value)
     : ('var,'constr,'func) model -> (('info,'value,'dconstr) generator as 'gen) =
   let rec gen = function
     | Def (x,m1) ->
@@ -243,7 +244,8 @@ let generator
        let gen_lm1 = List.map gen lm1 in
        (fun info ->
          let ld = List.map (fun gen_mi -> gen_mi info) gen_lm1 in
-         DSeq (n, ld))
+         let v = dseq_value ld in
+         D (v, DSeq (n, ld)))
     | Cst m1 -> raise TODO
   in
   gen
@@ -255,6 +257,7 @@ type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'inp
 
 let parseur
       ~(parseur_pat : 'constr -> 'parse array -> 'parse)
+      ~(dseq_value : ('value,'dconstr) data list -> 'value)
     : ('var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse = function
     | Def (x,m1) ->
@@ -267,7 +270,8 @@ let parseur
        let parse_lm1 = List.map parse lm1 in
        (fun input ->
          let* ld, input = Myseq.product_dependent_fair parse_lm1 input in
-         Myseq.return (DSeq (n, ld), input))
+         let v = dseq_value ld in
+         Myseq.return (D (v, (DSeq (n, ld))), input))
     | Cst m1 -> raise TODO
   in
   parse
@@ -284,13 +288,12 @@ let encode_data
     match m, d with
     | Def (x,m1), _ ->
        aux m1 d
-    | Pat (c,args), DVal (_, DPat (dc, dargs)) ->
+    | Pat (c,args), D (_, DPat (dc, dargs)) ->
        let encs = Array.map2 aux args dargs in
        encoding_pat c dc encs
-    | Expr e, DVal (v, _) ->
+    | Expr e, D (v, _) ->
        encoding_expr v
-    | Expr e, DSeq _ -> assert false (* TODO *)
-    | Seq (n,lm1), DSeq (dn,ld1) ->
+    | Seq (n,lm1), D (_, DSeq (dn,ld1)) ->
        assert (n = dn);
        let encs = List.map2 aux lm1 ld1 in
        (* no need to encode 'dn', equal 'n' in model *)
