@@ -82,6 +82,19 @@ and expritem_to_seq : ('var,'func) expritem -> ('var,'func) expr Myseq.t =
      let* e1 = exprset_to_seq es1 in
      Myseq.return (Fun e1)
 
+let rec exprset_mem (e : ('var,'func) expr) (es : ('var,'func) exprset) : bool =
+  List.exists (expritem_mem e) es
+and expritem_mem e item =
+  match e, item with
+  | Ref x, SRef y -> x=y
+  | Apply (f,args), SApply (g,es_args) ->
+     f = g
+     && Array.length args = Array.length es_args
+     && Array.for_all2 exprset_mem args es_args
+  | Arg, SArg -> true
+  | Fun e, SFun es -> exprset_mem e es
+  | _ -> false
+
 let rec exprset_inter (es1 : ('var,'func) exprset) (es2 : ('var,'func) exprset) : ('var,'func) exprset =
   List.fold_left
     (fun res item1 ->

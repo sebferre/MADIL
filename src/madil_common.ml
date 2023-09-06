@@ -101,6 +101,19 @@ let pp_endline xp x =
   pp xp x;
   print_newline ()
 
+let xp_brackets : (unit -> unit) html_xp =
+  fun ~html print p ->
+  if html then print#string "<div class=\"model-brackets\">" else print#string "(";
+  p ();
+  if html then print#string "</div>" else print#string ")"
+
+let xp_brackets_prio ~prio_ctx ~prio : (unit -> unit) html_xp =
+  fun ~html print p ->
+  if prio <= prio_ctx
+  then p ()
+  else xp_brackets ~html print p
+
+  
 (* combinatorics *)
 
 let rec sum_conv (lf : (int -> float) list) (n : int) : float =

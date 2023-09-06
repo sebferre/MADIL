@@ -3,9 +3,17 @@ open Madil_common
 open Kind
 open Data
 
+type ('var,'func) cond_model =
+  | Undet (* undetermined condition *)
+  | True (* always true condition *)
+  | False (* always false condition *)
+  | BoolExpr of ('var,'func) Expr.expr (* computed condition *)
+ 
 type ('var,'constr,'func) model =
   | Def of 'var * ('var,'constr,'func) model (* a var is an id for the value at this sub-model *)
   | Pat of 'constr * ('var,'constr,'func) model array (* constr type may be different from data constr *)
+  | Fail (* like an empty alternative *)
+  | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('var,'constr,'func) model * ('var,'constr,'func) model
   | Seq of int * ('var,'constr,'func) model list
   | Cst of ('var,'constr,'func) model
   | Expr of ('var,'func) Expr.expr
@@ -13,6 +21,7 @@ type ('var,'constr,'func) model =
 type 'constr path =
   | This
   | Field of 'constr * int * 'constr path
+  | Branch of bool * 'constr path
   | Item of int * 'constr path
 
 type 'constr ctx = 'constr path -> 'constr path
@@ -28,31 +37,66 @@ let xp_model
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
       ~(xp_func : 'func html_xp)
     : ('var,'constr,'func) model html_xp =
-  let rec aux ~html print m =
+  let rec aux ~prio_ctx ~html print m =
     match m with
     | Def (x,m1) ->
        if html then print#string "<span class=\"model-def\">";
-       xp_var ~html print x; print#string ": "; aux ~html print m1;
+       xp_var ~html print x; print#string ": "; aux ~prio_ctx ~html print m1;
        if html then print#string "</span>"
     | Pat (c,args) ->
        let xp_args =
          Array.map
-           (fun arg -> (fun ~html print () -> aux ~html print arg))
+           (fun arg -> (fun ~html print () -> aux ~prio_ctx:0 ~html print arg))
            args in
        xp_pat c xp_args ~html print ()
+
+    | Fail -> print#string "fail"
+    | Alt (xc,Undet,m1,m2) -> (* m1 | m2 *)
+       xp_brackets_prio ~prio_ctx ~prio:2 ~html print
+         (fun () ->
+           if html then print#string "<div class=\"model-alt\">";
+           xp_var ~html print xc; print#string "? ";
+           aux ~html ~prio_ctx:2 print m1;
+           print#string (if html then " <span class=\"model-meta-operator\">|</span> " else " | ");
+           aux ~html ~prio_ctx:2 print m2;
+           if html then print#string "</div>")
+    | Alt (xc,c,m1,m2) -> (* if c then m1 else m2 *)
+       xp_brackets_prio ~prio_ctx ~prio:2 ~html print
+         (fun () ->
+           if html then print#string "<div class=\"model-alt\">";
+           print#string (if html then "<span class=\"model-meta-operator\">if</span> " else "if ");
+           xp_var ~html print xc; print#string ": ";
+           aux_cond ~html print c;
+           print#string (if html then " <span class=\"model-meta-operator\">then</span> " else " then ");
+           aux ~html ~prio_ctx:2 print m1;
+           print#string (if html then " <span class=\"model-meta-operator\">else</span> " else " else ");
+           aux ~html ~prio_ctx:2 print m2;
+           if html then print#string "</div>")
+
     | Seq (n,lm1) ->
        Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
-         (Xprint.sep_list ", " (aux ~html))
+         (Xprint.sep_list ", " (aux ~prio_ctx:2 ~html))
          print lm1
     | Cst m1 ->
-       Xprint.bracket ("〈", " = 〉") (aux ~html)
+       Xprint.bracket ("〈", " = 〉") (aux ~prio_ctx:2 ~html)
          print m1
     | Expr e ->
        if html then print#string "<span class=\"model-expr\">";
        Expr.xp_expr ~xp_var ~xp_func ~html print e;
        if html then print#string "</span>"
+  and aux_cond ~html print = function
+    | Undet ->
+       print#string "?"
+    | True ->
+       print#string "true"
+    | False ->
+       print#string "false"
+    | BoolExpr e ->
+       if html then print#string "<span class=\"model-expr\">";
+       Expr.xp_expr ~xp_var ~xp_func ~html print e;
+       if html then print#string "</span>"
   in
-  aux
+  aux ~prio_ctx:2
 
 let xp_pat_default
       ~(xp_constr : 'constr html_xp)
@@ -80,6 +124,9 @@ let xp_path
        print#string ".";
        xp_field ~html print (c,i);
        aux ~html print p1
+    | Branch (b,p1) ->
+       print#string (if b then "#true" else "#false");
+       aux ~html print p1
     | Item (i,p1) ->
        print#string "["; print#int i; print#string "]";
        aux ~html print p1
@@ -93,8 +140,9 @@ class virtual ['t,'constr,'func] asd =
     method virtual is_default_constr : 'constr -> bool
     method virtual constr_args : 't -> 'constr -> 't kind array
     method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
-    method virtual expr_opt : 't kind -> 't kind option
     method virtual funcs : 't kind -> ('func * 't kind array) list (* None when expressions not allowed for this kind *)
+    method virtual expr_opt : 't kind -> 't kind option
+    method virtual alt_opt : 't kind -> bool
   end
 
 (*
@@ -153,15 +201,21 @@ let binding_vars
        Bintree.add x acc
     | Pat (c,args) ->
        Array.fold_right aux args acc
-    | Expr e -> acc
+    | Fail -> acc
+    | Alt (xc,cond,m1,m2) ->
+       let acc = aux m1 acc in
+       let acc = aux m2 acc in
+       Bintree.add xc acc
     | Seq (n,lm1) ->
        List.fold_right aux lm1 acc
     | Cst m1 -> raise TODO
+    | Expr e -> acc
   in
   aux m0 Bintree.empty
 
   
 let get_bindings
+      ~(value_of_bool : bool -> 'value)
       (m0 : ('var,'constr,'func) model)
       (d0 : ('value,'dconstr) data)
     : ('var,'value) Expr.bindings =
@@ -178,23 +232,29 @@ let get_bindings
          ref_acc := acc
        done;
        !ref_acc
-    | Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
+    | Fail, _ -> assert false (* because parsing and generation must have failed here *)
+    | Alt (xc,c,m1,m2), D (_v, DAlt (b,d12)) ->
+       let acc = aux (if b then m1 else m2) d12 acc in
+       Mymap.add xc (value_of_bool b) acc
     | Seq (n,lm), D (_v, DSeq (dn,ld)) ->
        assert (n = dn);
        List.fold_right2 aux lm ld acc
     | Cst _, _ -> raise TODO
+    | Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
     | _ -> assert false
   in
   aux m0 d0 Expr.bindings0
 
 let eval
       ~asd
-      ~eval_unbound_var ~eval_func ~eval_arg
+      ~eval_unbound_var ~eval_func ~eval_arg (* TODO: replace par eval_expr ? *)
       ~(model_of_value : 't kind -> 'value -> ('var,'constr,'func) model result)
+      ~(bool_of_value : 'value -> bool result)
       (k : 't kind)
       (m : ('var,'constr,'func) model)
       (bindings : ('var,'value) Expr.bindings)
     : ('var,'constr,'func) model result =
+  (* INV: eval must ensure that the resulting model has data that is compatible with the given model, so that encoding is well-defined. E.g. no Alt simplification when condition evaluates to True/False. *)
   let eval_expr = Expr.eval ~eval_unbound_var ~eval_func ~eval_arg in
   let rec aux k m =
     match k, m with
@@ -214,14 +274,31 @@ let eval
                  args)) in
        let args' = Array.of_list l_args' in
        Result.Ok (Pat (c,args'))
-    | _, Expr e ->
-       let| v = eval_expr e bindings in
-       model_of_value k v
+    | _, Fail ->
+       Result.Ok Fail
+    | _, Alt (xc,c,m1,m2) ->
+       let| c' = aux_cond c in
+       let m1' = match aux k m1 with Result.Ok m1' -> m1' | Result.Error _ -> Fail in
+       let m2' = match aux k m2 with Result.Ok m2' -> m2' | Result.Error _ -> Fail in
+       Result.Ok (Alt (xc,c',m1',m2'))
     | KSeq k1, Seq (n,lm1) ->
        let| lm1' = list_map_result (aux k1) lm1 in
        Result.Ok (Seq (n,lm1'))
     | _, Cst m1 -> raise TODO
+    | _, Expr e ->
+       let| v = eval_expr e bindings in
+       model_of_value k v
     | _ -> assert false
+  and aux_cond = function
+    | Undet -> Result.Ok Undet
+    | True -> Result.Ok True
+    | False -> Result.Ok False
+    | BoolExpr e ->
+       let| v = eval_expr e bindings in
+       let| b = bool_of_value v in
+       if b
+       then Result.Ok True
+       else Result.Ok False
   in
   aux k m
   
@@ -230,16 +307,29 @@ let eval
 type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data
 
 let generator
-      ~(generator_pat: 'constr -> 'gen array -> 'gen)
+      ~(generator_pat: 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
-    : ('var,'constr,'func) model -> (('info,'value,'dconstr) generator as 'gen) =
+    : ('var,'constr,'func) model -> 'gen =
   let rec gen = function
     | Def (x,m1) ->
        gen m1
     | Pat (c,args) ->
        let gen_args = Array.map gen args in
        generator_pat c gen_args
-    | Expr e -> assert false
+    | Fail ->
+       (fun info -> raise Not_found)
+    | Alt (xc,c,m1,m2) -> (* TODO: make stochastic *)
+       let b, m12 =
+         match c with
+         | Undet -> if m1=Fail then (false, m2) else (true, m1)
+         | True -> true, m1
+         | False -> false, m2
+         | BoolExpr _ -> assert false in
+       let gen_m12 = gen m12 in
+       (fun info ->
+         let d12 = gen_m12 info in
+         let v = value d12 in
+         D (v, DAlt (b, d12)))
     | Seq (n,lm1) ->
        let gen_lm1 = List.map gen lm1 in
        (fun info ->
@@ -247,9 +337,9 @@ let generator
          let v = dseq_value ld in
          D (v, DSeq (n, ld)))
     | Cst m1 -> raise TODO
+    | Expr e -> assert false
   in
   gen
-  
                                         
 (* model-based parsing *)
 
@@ -265,7 +355,26 @@ let parseur
     | Pat (c,args) ->
        let parse_args = Array.map parse args in
        parseur_pat c parse_args
-    | Expr e -> assert false
+    | Fail ->
+       (fun input -> Myseq.empty)
+    | Alt (xc,c,m1,m2) -> (* if-then-else *)
+       let parse_m1 = parse m1 in
+       let parse_m2 = parse m2 in
+       (fun input ->
+         let seq1 =
+           let* d1, input = parse_m1 input in
+           Myseq.return (D (value d1, DAlt (true,d1)), input) in
+         let seq2 =
+           let* d2, input = parse_m2 input in
+           Myseq.return (D (value d2, DAlt (false,d2)), input) in
+         match c with
+         | Undet ->
+            if Myseq.is_empty seq1
+            then seq2
+            else seq1 (* for exclusive alternatives, anticipating condition *)
+         | True -> seq1
+         | False -> seq2
+         | BoolExpr _ -> (fun () -> assert false))
     | Seq (n,lm1) ->
        let parse_lm1 = List.map parse lm1 in
        (fun input ->
@@ -273,17 +382,21 @@ let parseur
          let v = dseq_value ld in
          Myseq.return (D (v, (DSeq (n, ld))), input))
     | Cst m1 -> raise TODO
+    | Expr e -> assert false
   in
   parse
 
 (* model-based encoding of data *)
 
 let encode_data
+      ~(xp_model : 'model html_xp)
+      ~(xp_data : 'data html_xp)
       ~(encoding_pat : 'constr -> 'dconstr -> 'encoding array -> 'encoding)
       ~(encoding_expr : 'value -> 'encoding)
+      ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : 'encoding list -> 'encoding)
       ~(dl_of_encoding : 'encoding -> dl)
-      (m : ('var,'constr,'func) model) (d : ('value,'dconstr) data) : dl =
+      (m : ('var,'constr,'func) model as 'model) (d : ('value,'dconstr) data as 'data) : dl =
   let rec aux m d =
     match m, d with
     | Def (x,m1), _ ->
@@ -291,15 +404,27 @@ let encode_data
     | Pat (c,args), D (_, DPat (dc, dargs)) ->
        let encs = Array.map2 aux args dargs in
        encoding_pat c dc encs
-    | Expr e, D (v, _) ->
-       encoding_expr v
+    | Fail, _ -> assert false
+    | Alt (xc,c,m1,m2), D (_, DAlt (b,d12)) -> (* choice determined by model *)
+       let dl_choice =
+         match c with
+         | Undet -> Mdl.Code.usage (if b then 0.6 else 0.4)
+         | True | False | BoolExpr _ -> 0. in
+       let enc12 = aux (if b then m1 else m2) d12 in
+       encoding_alt dl_choice enc12
     | Seq (n,lm1), D (_, DSeq (dn,ld1)) ->
        assert (n = dn);
        let encs = List.map2 aux lm1 ld1 in
        (* no need to encode 'dn', equal 'n' in model *)
        encoding_seq encs
     | Cst m1, _ -> raise TODO
-    | _ -> assert false
+    | Expr e, D (v, _) ->
+       encoding_expr v
+    | _ ->
+       print_endline "ERROR in encode_data: (model, data)";
+       pp xp_model m; print_newline ();
+       pp xp_data d; print_newline ();
+       assert false
   in
   let enc = aux m d in
   dl_of_encoding enc
@@ -320,9 +445,15 @@ let size_model_ast (* for DL computing *)
          (fun res arg -> res + aux arg)
          (if asd#is_default_constr c && args = [||] then 0 else 1)
          args
-    | Expr e -> Expr.size_expr_ast e
+    | Fail -> 1
+    | Alt (xc,c,m1,m2) -> 1 + aux_cond c + aux m1 + aux m2
     | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
+    | Expr e -> Expr.size_expr_ast e
+  and aux_cond = function
+    | Undet -> 0
+    | True | False -> 1
+    | BoolExpr e -> Expr.size_expr_ast e
   in
   aux
 
@@ -338,7 +469,13 @@ let nb_model_ast (* for DL computing *)
          match asd#expr_opt k with
          | None -> 0.
          | Some k1 -> Expr.nb_expr_ast ~funcs:asd#funcs k1 size in
+       let nb = (* counting possible alternatives *)
+         if size > 0 && asd#alt_opt k
+         then nb +. sum_conv [aux_cond; aux k; aux k] (size-1)
+                             (* split between condition, left model, right model *)
+         else nb in
        match k with
+       | KBool -> nb (* no Boolean model construct *)
        | KVal t -> (* counting Pat (c,args) *)
           let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
           let nb =
@@ -365,6 +502,12 @@ let nb_model_ast (* for DL computing *)
               nb +. sum_conv (List.init n (fun _ -> aux_k1)) size1)
             1 (max 9 size1)
             nb
+  and aux_cond (size : int) : float =
+    if size = 0
+    then 1. (* Undet *)
+    else
+      let nb = if size = 1 then 2. (* True, False *) else 0. in
+      nb +. Expr.nb_expr_ast ~funcs:asd#funcs KBool size (* BoolExpr *)
   in
   aux
 
@@ -382,11 +525,17 @@ let dl_model_params
          Array.map aux args
          |> Array.fold_left (+.) 0. in
        dl_constr_params c +. dl_args_params
-    | Expr e -> dl_expr_params e
+    | Fail -> 0.
+    | Alt (xc,c,m1,m2) ->
+       aux_cond c +. aux m1 +. aux m2
     | Seq (n,lm1) ->
        List.map aux lm1
        |> List.fold_left (+.) 0.
     | Cst m1 -> raise TODO
+    | Expr e -> dl_expr_params e
+  and aux_cond = function
+    | Undet | True | False -> 0.
+    | BoolExpr e -> dl_expr_params e
   in
   aux
 
@@ -502,10 +651,11 @@ let read
 
 (* writing *)
 
+exception Generate_failure
+  
 let write
       ~(eval : 't kind -> ('var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('var,'constr,'func) model result)
       ~(generator : ('var,'constr,'func) model -> ('info,'value,'dconstr) generator)
-      ~(value_of_data : ('value,'dconstr) data -> 'value)
       
       ~(bindings : ('var,'value) Expr.bindings)
       (k : 't kind)
@@ -514,8 +664,10 @@ let write
     : (('value,'dconstr) data * 'value) result =
   Common.prof "Model.write" (fun () ->
   let| m = eval k m0 bindings in
-  let d = generator m info in
-  let v = value_of_data d in
+  let| d =
+    try Result.Ok (generator m info)
+    with Not_found -> Result.Error Generate_failure in
+  let v = value d in
   Result.Ok (d, v))
 
 
@@ -527,6 +679,9 @@ let reverse_path (p : 'constr path) : 'constr path =
     | Field (c,i,p1) ->
        let ctx1 = aux p1 in
        (fun rp -> ctx1 (Field (c,i,rp)))
+    | Branch (b,p1) ->
+       let ctx1 = aux p1 in
+       (fun rp -> ctx1 (Branch (b,rp)))
     | Item (i,p1) ->
        let ctx1 = aux p1 in
        (fun rp -> ctx1 (Item (i,rp)))
@@ -544,6 +699,7 @@ let path_kind
        let kind_args = asd#constr_args t c in
        let k1 = try kind_args.(i) with _ -> assert false in
        aux k1 p1
+    | _, Branch (b,p1) -> aux k p1
     | KSeq k1, Item (i,p1) -> aux k1 p1
     | _ -> assert false
   in
@@ -561,6 +717,12 @@ let refine (* replace submodel of [m] at [p] by [r] *)
        let new_args = Array.copy args in
        new_args.(i) <- aux p1 r args.(i);
        Pat (c, new_args)
+    | Branch (true,p1), Alt (xc,c,m1,m2) ->
+       let new_m1 = aux p1 r m1 in
+       Alt (xc,c,new_m1,m2)
+    | Branch (false,p1), Alt (xc,c,m1,m2) ->
+       let new_m2 = aux p1 r m2 in
+       Alt (xc,c,m1,new_m2)
     | Item (i,p1), Seq (n,lm1) when i < n ->
        let new_lm1 = list_update (fun mi -> aux p1 r mi) i lm1 in
        Seq (n,new_lm1)

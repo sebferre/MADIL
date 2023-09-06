@@ -159,6 +159,9 @@ module type DOMAIN =
 
     include TYPES
 
+    val bool_of_value : value -> bool result
+    val value_of_bool : bool -> value
+
     (* bindings and evaluation *)
 
     val eval_func : func -> value array -> value result
@@ -171,7 +174,6 @@ module type DOMAIN =
     val dseq_value : data list -> value (* value for a data sequence *)
       
     val generator_pat : constr -> generator array -> generator
-    val value_of_data : data -> value
 
     val input_of_value : value -> input
     val parseur_pat : constr -> parseur array -> parseur
@@ -180,6 +182,7 @@ module type DOMAIN =
       
     val encoding_pat : constr -> dconstr -> encoding array -> encoding
     val encoding_expr : value -> encoding
+    val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_seq : encoding list -> encoding
     val dl_of_encoding : encoding -> dl
 
@@ -220,6 +223,7 @@ module Make (Domain : DOMAIN) =
   
     let get_bindings : model -> data -> bindings =
       Model.get_bindings
+        ~value_of_bool
 
     let eval : kind -> model -> bindings -> model result =
       Model.eval
@@ -228,6 +232,7 @@ module Make (Domain : DOMAIN) =
         ~eval_unbound_var
         ~eval_arg
         ~model_of_value
+        ~bool_of_value
 
     (* model-based generation and parsing *)
       
@@ -245,8 +250,11 @@ module Make (Domain : DOMAIN) =
       
     let dl_data : model -> data -> dl =
       Model.encode_data
+        ~xp_model
+        ~xp_data
         ~encoding_pat
         ~encoding_expr
+        ~encoding_alt
         ~encoding_seq
         ~dl_of_encoding
 
@@ -279,7 +287,6 @@ module Make (Domain : DOMAIN) =
       Model.write
         ~eval
         ~generator
-        ~value_of_data
 
     (* refining *)
 
@@ -287,6 +294,7 @@ module Make (Domain : DOMAIN) =
       Refining.refinements
         ~xp_model
         ~asd
+        ~value_of_bool
         ~dl_model
         ~dl_data
         ~eval_parse_bests
@@ -299,6 +307,7 @@ module Make (Domain : DOMAIN) =
       Refining.refinements
         ~xp_model
         ~asd
+        ~value_of_bool
         ~dl_model
         ~dl_data
         ~eval_parse_bests

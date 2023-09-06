@@ -6,6 +6,7 @@ type ('value,'dconstr) data =
 and ('value,'dconstr) data_model =
   | DNone
   | DPat of 'dconstr * ('value,'dconstr) data array
+  | DAlt of bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
   | DSeq of int * ('value,'dconstr) data list (* inv: <int> = List.length <data list> *)
 
 (* TODO: consider adding DNil as nil data, for use as nil env *)
@@ -23,21 +24,27 @@ let xp_data
       ~(xp_value : 'value html_xp)
       ~(xp_dpat : 'dconstr -> unit html_xp array -> unit html_xp)
     : ('value,'dconstr) data html_xp =
-  let rec aux ~html print d =
+  let rec aux ~prio_ctx ~html print d =
     match d with
     | D (v, DNone) -> xp_value ~html print v
     | D (_v, DPat (dc,args)) ->
        let xp_args =
          Array.map
-           (fun arg -> (fun ~html print () -> aux ~html print arg))
+           (fun arg -> (fun ~html print () -> aux ~prio_ctx:0 ~html print arg))
            args in
        xp_dpat dc xp_args ~html print ()
+    | D (_v, DAlt (b,d12)) ->
+       xp_brackets_prio ~prio_ctx ~prio:2 ~html print
+         (fun () ->
+           if html then print#string "<div class=\"data-alt\">";
+           aux ~prio_ctx:2 ~html print d12;
+           if html then print#string "</div>")
     | D (_v, DSeq (n,items)) ->
        Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
-         (Xprint.sep_list ", " (aux ~html))
+         (Xprint.sep_list ", " (aux ~prio_ctx:2 ~html))
          print items
   in
-  aux
+  aux ~prio_ctx:2
   
 let xp_dpat_default
       ~(xp_dconstr : 'dconstr html_xp)
