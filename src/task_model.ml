@@ -60,11 +60,12 @@ let read_pairs
                ~env ~bindings:Expr.bindings0
                m.input_kind m.input_model input in (* no diff allowed during training *)
            let| pair_reads = 
-             let+|+ ri = Result.Ok input_reads in      
+             let+|+ ri = Result.Ok input_reads in
+             let bindings = get_bindings m.input_model ri.data in
              let+|+ ro =
                read
                  ~dl_assuming_contents_known:false
-                 ~env:ri.data ~bindings:(get_bindings m.input_model ri.data)
+                 ~env:ri.data ~bindings
                  m.output_kind m.output_model output in
              let dl = ri.dl +. ro.dl in
              Result.Ok [(ri,ro,dl)] in
@@ -149,7 +150,7 @@ let apply
       ~(env : 'data)
       (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
     : ('data * 'data * 'value) list result =
-  Common.prof "Model.apply" (fun () ->
+  Common.prof "Task_model.apply" (fun () ->
   let+|+ read_i =
     read
       ~dl_assuming_contents_known:true ~env ~bindings:Expr.bindings0

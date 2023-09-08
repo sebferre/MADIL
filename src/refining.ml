@@ -299,7 +299,7 @@ let refinements
           (fun read ->
             match read.data with
             | D (_, DAlt (b, _)) ->
-               if not b && Expr.exprset_mem e (Expr.Index.lookup (value_of_bool false) read.index)
+               if not b && not (Expr.exprset_mem e (Expr.Index.lookup (value_of_bool true) read.index))
                then Some (read, read.data)
                else None
             | _ -> assert false) in
@@ -319,6 +319,7 @@ let refinements
       Myseq.return (p, m_new, varseq', supp, dl_new)
     else Myseq.empty    
   in
+  Myseq.prof "Model.refinements" (
   let selected_reads = reads in
   let other_reads_env = [] in
   let* p, r, varseq', supp, dl' =
@@ -328,7 +329,7 @@ let refinements
     |> Myseq.unique
     |> Myseq.slice ~limit:max_refinements in
   let m' = Model.refine p r m in
-  Myseq.return (p, r, supp, dl', m', varseq')
+  Myseq.return (p, r, supp, dl', m', varseq'))
 
 
 let task_refinements

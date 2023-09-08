@@ -214,7 +214,7 @@ let binding_vars
   aux m0 Bintree.empty
 
   
-let get_bindings
+let get_bindings  (* QUICK *)
       ~(value_of_bool : bool -> 'value)
       (m0 : ('var,'constr,'func) model)
       (d0 : ('value,'dconstr) data)
@@ -245,7 +245,7 @@ let get_bindings
   in
   aux m0 d0 Expr.bindings0
 
-let eval
+let eval (* QUICK *)
       ~asd
       ~eval_unbound_var ~eval_func ~eval_arg (* TODO: replace par eval_expr ? *)
       ~(model_of_value : 't kind -> 'value -> ('var,'constr,'func) model result)
@@ -426,8 +426,9 @@ let encode_data
        pp xp_data d; print_newline ();
        assert false
   in
+  Common.prof "Model.encode_data" (fun () ->
   let enc = aux m d in
-  dl_of_encoding enc
+  dl_of_encoding enc)
 
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
@@ -435,9 +436,9 @@ let dl_parse_rank (rank : int) : dl =
   
 (* model encoding *)
 
-let size_model_ast (* for DL computing *)
+let size_model_ast (* for DL computing, QUICK *)
       ~(asd : ('t,'constr,'func) asd)
-    : ('var,'constr,'func) model -> int =
+    (m : ('var,'constr,'func) model) : int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Pat (c,args) ->
@@ -455,11 +456,10 @@ let size_model_ast (* for DL computing *)
     | True | False -> 1
     | BoolExpr e -> Expr.size_expr_ast e
   in
-  aux
+  aux m
 
 let nb_model_ast (* for DL computing *)
-      ~(asd : ('t,'constr,'func) asd)
-    : 't kind -> int (* AST size *) -> float = (* float to handle large numbers *)
+      ~(asd : ('t,'constr,'func) asd) =
   let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let rec aux (k : 't kind) (size : int) : float =
     match Hashtbl.find_opt tab (k,size) with
@@ -509,7 +509,9 @@ let nb_model_ast (* for DL computing *)
       let nb = if size = 1 then 2. (* True, False *) else 0. in
       nb +. Expr.nb_expr_ast ~funcs:asd#funcs KBool size (* BoolExpr *)
   in
-  aux
+  fun (k : 't kind) (size : int) (* AST size *) -> (* float to handle large numbers *)
+  Common.prof "Model.nb_model_ast" (fun () ->
+  aux k size)
 
 let dl_model_params
       ~(dl_constr_params : 'constr -> dl)
@@ -543,19 +545,21 @@ let dl
       ~(asd : ('t,'constr,'func) asd)
       ~(dl_constr_params : 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
-      ~(dl_var : nb_env_vars:int -> 'var -> dl)
-
-      ~(nb_env_vars : int)
-      (k : 't kind) (m : ('var,'constr,'func) model) : dl =
-  let size = size_model_ast ~asd m in
-  let nb = nb_model_ast ~asd k size in
+      ~(dl_var : nb_env_vars:int -> 'var -> dl) =
+  let size_model_ast = size_model_ast ~asd in
+  let nb_model_ast = nb_model_ast ~asd in
+  let dl_model_params = dl_model_params ~dl_constr_params ~dl_func_params in
+  fun
+    ~(nb_env_vars : int)
+    (k : 't kind) (m : ('var,'constr,'func) model) ->
+  Common.prof "Model.dl" (fun () ->
+  let size = size_model_ast m in
+  let nb = nb_model_ast k size in
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
   +. dl_model_params
-       ~dl_constr_params
-       ~dl_func_params
        ~dl_var:(dl_var ~nb_env_vars)
-       m
+       m)
 
        
 (* reading *)
