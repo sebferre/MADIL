@@ -139,7 +139,7 @@ type ('t,'value,'dconstr,'var,'constr,'func) refiner =
       * 'var Myseq.t (* remaining fresh vars *)
      ) Myseq.t
   (* result: a sequence of path-wise refinements with support and estimate DL *)
-     
+
 let refinements
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
@@ -149,13 +149,33 @@ let refinements
       ~(dl_model : nb_env_vars:int -> ('t Kind.kind as 'kind) -> (('var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : 'model -> (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval_parse_bests : 'kind -> 'model -> ('input,'value,'dconstr,'var) Model.eval_parse_bests)
-      ~(refinements_pat : 'constr -> 'model array -> 'var Myseq.t -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
+      ~(refinements_pat : 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
-    (* TODO: abstract on this: maybe combine a filtering predicate, 
-       and a globally-defined autorefinement process *)
     : ('t,'value,'dconstr,'var,'constr,'func) refiner =
-  fun ~nb_env_vars ~dl_M k m varseq reads ->
+  fun ~nb_env_vars ~dl_M k0 m0 varseq0 reads ->
+  let aux_gen (type r)
+        ctx k m selected_reads
+        (read_refs : 'read -> (r * 'varseq * 'data) list)
+        (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
+      : ('path * 'model * 'varseq * int * dl) Myseq.t =
+    let p = ctx Model.This in (* local path *)
+    let dl_m = dl_model ~nb_env_vars k m in
+    let dl_data_m = dl_data m in
+    let r_best_reads = inter_union_reads read_refs selected_reads in
+    let* r, (varseq', best_reads) = Mymap.to_seq r_best_reads in
+    let supp, nb = best_reads_stats best_reads in
+    let alt = (supp < nb) in
+    let* m_new, varseq', best_reads = postprocessing r varseq' ~supp ~nb ~alt best_reads in
+    let dl_m_new = dl_model ~nb_env_vars k m_new in
+    let dl_data_m_new = dl_data m_new in
+    let dl_new =
+      dl_M -. dl_m +. dl_m_new
+      +. alpha *. Mdl.sum best_reads
+                    (fun {matching; read; new_data} ->
+                      read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
+    Myseq.return (p, m_new, varseq', supp, dl_new)
+    in
   let rec aux ctx k m selected_reads other_reads_env =
   if selected_reads = [] then Myseq.empty
   else
@@ -184,9 +204,9 @@ let refinements
                  args))
     | _, Model.Fail -> Myseq.empty
     | _, Model.Alt (xc,c,m1,m2) ->
-       Myseq.interleave
+       Myseq.interleave (* TODO: add expressions *)
          [ (match c with
-            | Undet _ -> aux_alt_cond_undet ctx k xc c m1 m2 selected_reads
+            | Undet _ -> aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads
             | True | False | BoolExpr _ -> Myseq.empty);
            
            (let ctx1 = (fun p1 -> ctx (Model.Branch (true,p1))) in
@@ -235,108 +255,81 @@ let refinements
     | _, Model.Expr e -> Myseq.empty
     | _ -> assert false
   and aux_pat ctx k m c args selected_reads =
-    let p = ctx Model.This in (* local path *)
-    let dl_m = dl_model ~nb_env_vars k m in
-    let dl_data_m = dl_data m in
-    let refs =
-      let refs_pat = refinements_pat c args varseq in
-      fun (read : _ Model.read) ->
-      match read.data with
-      | D (v, DPat (dc, dargs)) as data ->
-         let rs =
-           List.filter_map
-             (fun (m',varseq',input) ->
-               match eval_parse_bests k m' read.bindings input with
-               | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
-               | _ -> None)
-             (refs_pat data) in
-         (match asd#expr_opt k with
-          | None -> rs (* no expression here *)
-          | Some k1 ->
-             let es = Expr.Index.lookup v read.index in
-             Myseq.fold_left
-               (fun rs e -> (Model.Expr e, varseq, Data.D (v, Data.DNone)) :: rs)
-               rs (Expr.exprset_to_seq es))
-      | _ -> assert false in
-    let post = postprocessing c args in
-    let r_best_reads = inter_union_reads refs selected_reads in
-    let* m', (varseq', best_reads) = Mymap.to_seq r_best_reads in
-    let supp, nb = best_reads_stats best_reads in
-    let alt = (supp < nb) in
-    let* m_new, best_reads = post m' ~supp ~nb ~alt best_reads in
-    let m_new, varseq', best_reads =
-      if alt then
-        let prob = float supp /. float nb in
-        make_alt prob m_new m varseq' best_reads
-      else m_new, varseq', best_reads in
-    let dl_m_new = dl_model ~nb_env_vars k m_new in
-    let dl_data_m_new = dl_data m_new in
-    let dl_new =
-      dl_M -. dl_m +. dl_m_new
-      +. alpha *. Mdl.sum best_reads
-                    (fun {matching; read; new_data} ->
-                      read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
-    Myseq.return (p, m_new, varseq', supp, dl_new)         
-  and aux_alt_cond_undet ctx k xc c m1 m2 selected_reads =
-    let p = ctx Model.This in (* path to the Alt *)
-    let m = Model.Alt (xc,c,m1,m2) in
-    let dl_m = dl_model ~nb_env_vars k m in
-    let dl_data_m = dl_data m in
-    let refs (read : _ Model.read) =
-      match read.data with
-      | Data.D (_, DAlt (true, _)) as d ->
-         let v = value_of_bool true in
-         let es : _ Expr.exprset = Expr.Index.lookup v read.index in
-         Myseq.fold_left
-           (fun rs e -> (e, varseq, d) :: rs)
-           [] (Expr.exprset_to_seq es)
-      | Data.D (_, DAlt (false, _)) ->
-         (* we only look for true expressions because the index does not contain all false expressions *)
-         (* extend_partial_best_reads below compensates for that *)
-         []
-      | _ -> assert false in
-    let r_best_reads = inter_union_reads refs selected_reads in
-    let* e, (varseq', best_reads) = Mymap.to_seq r_best_reads in
-    let supp0, nb0 = best_reads_stats best_reads in
-    let best_reads =
-      if supp0 <= 1
-      then best_reads (* the condition should be valid for at least two examples *)
-      else
-        extend_partial_best_reads
-          selected_reads best_reads
-          (fun read ->
-            match read.data with
-            | D (_, DAlt (b, _)) ->
-               if not b && not (Expr.exprset_mem e (Expr.Index.lookup (value_of_bool true) read.index))
-               then Some (read, read.data)
-               else None
-            | _ -> assert false) in
-    let supp, nb = best_reads_stats best_reads in
-    if supp0 < nb0 (* discriminating cond *)
-       && supp = nb (* valid cond for all examples *)
-    then
-      let c_new = Model.BoolExpr e in
-      let m_new = Model.Alt (xc, c_new, m1, m2) in
-      let dl_m_new = dl_model ~nb_env_vars k m_new in
-      let dl_data_m_new = dl_data m_new in
-      let dl_new =
-        dl_M -. dl_m +. dl_m_new
-        +. alpha *. Mdl.sum best_reads
-                      (fun {matching; read; new_data} ->
-                        read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
-      Myseq.return (p, m_new, varseq', supp0, dl_new)
-    else Myseq.empty    
+    aux_gen ctx k m selected_reads
+      (fun (read : _ Model.read) ->
+        match read.data with
+        | D (v, DPat (dc, dargs)) as data ->
+           let rs =
+             List.filter_map
+               (fun (m',varseq',input) ->
+                 match eval_parse_bests k m' read.bindings input with
+                 | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
+                 | _ -> None)
+               (refinements_pat c args varseq0 data) in
+           (match asd#expr_opt k with
+            | None -> rs (* no expression here *)
+            | Some k1 ->
+               let es = Expr.Index.lookup v read.index in
+               Myseq.fold_left
+                 (fun rs e -> (Model.Expr e, varseq0, Data.D (v, Data.DNone)) :: rs)
+                 rs (Expr.exprset_to_seq es))
+        | _ -> assert false)
+      (fun m' varseq' ~supp ~nb ~alt best_reads ->
+        let* m_new, best_reads = postprocessing c args m' ~supp ~nb ~alt best_reads in
+        let m_new, varseq', best_reads =
+          if alt then
+            let prob = float supp /. float nb in
+            make_alt prob m_new m varseq' best_reads
+          else m_new, varseq', best_reads in
+        Myseq.return (m_new, varseq', best_reads))
+  and aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads =
+    aux_gen ctx k m selected_reads
+      (fun (read : _ Model.read) ->
+        match read.data with
+        | Data.D (_, DAlt (true, _)) as d ->
+           let v = value_of_bool true in
+           let es : _ Expr.exprset = Expr.Index.lookup v read.index in
+           Myseq.fold_left
+             (fun rs e -> (e, varseq0, d) :: rs)
+             [] (Expr.exprset_to_seq es)
+        | Data.D (_, DAlt (false, _)) ->
+           (* we only look for true expressions because the index does not contain all false expressions *)
+           (* extend_partial_best_reads below compensates for that *)
+           []
+        | _ -> assert false)
+      (fun e varseq' ~supp ~nb ~alt best_reads ->
+        let best_reads =
+          if supp <= 1
+          then best_reads (* the condition should be valid for at least two examples *)
+          else
+            extend_partial_best_reads
+              selected_reads best_reads
+              (fun read ->
+                match read.data with
+                | D (_, DAlt (b, _)) ->
+                   if not b && not (Expr.exprset_mem e (Expr.Index.lookup (value_of_bool true) read.index))
+                   then Some (read, read.data)
+                   else None
+                | _ -> assert false) in
+        let supp1, nb1 = best_reads_stats best_reads in
+        if supp < nb (* discriminating cond *)
+           && supp1 = nb1 (* valid cond for all examples *)
+        then
+          let c_new = Model.BoolExpr e in
+          let m_new = Model.Alt (xc, c_new, m1, m2) in
+          Myseq.return (m_new, varseq', best_reads)
+        else Myseq.empty)
   in
   Myseq.prof "Model.refinements" (
   let selected_reads = reads in
   let other_reads_env = [] in
   let* p, r, varseq', supp, dl' =
-    aux Model.ctx0 k m selected_reads other_reads_env
+    aux Model.ctx0 k0 m0 selected_reads other_reads_env
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
            dl_compare dl1 dl2) (* support use for sorting in LIS UI *)
     |> Myseq.unique
     |> Myseq.slice ~limit:max_refinements in
-  let m' = Model.refine p r m in
+  let m' = Model.refine p r m0 in
   Myseq.return (p, r, supp, dl', m', varseq'))
 
 
