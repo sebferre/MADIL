@@ -96,23 +96,23 @@ object
                else
                  match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage r focus.env m focus.info_o with
                  | Result.Ok state ->
-                    if state.norm_dl < focus.norm_dl
-                    then (quota_compressive - 1, state::suggestions)
-                    else (quota_compressive, state::suggestions)
+                    let compressive = state.norm_dl < focus.norm_dl in
+                    (if compressive then quota_compressive - 1 else quota_compressive),
+                    (compressive,state)::suggestions
                  | Result.Error _ -> res)
              (!max_refinements, []) in
       let suggestions =
         suggestions
         |> List.rev (* to preserve ordering from sequence *) 
         |> List.sort (* sorting by decreasing support, then increasing DL *)
-             (fun s1 s2 -> Stdlib.compare
-                             ((*s2.refinement_support,*) s1.norm_dl)
-                             ((*s1.refinement_support,*) s2.norm_dl)) in
+             (fun (compr1,s1) (compr2,s2) ->
+               Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
+                 ((*compr2, s2.refinement_support,*) s1.norm_dl)
+                 ((*compr1, s1.refinement_support,*) s2.norm_dl)) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask
-        :: List.map (fun s ->
-               let compressive = s.norm_dl < focus.norm_dl in
+        :: List.map (fun (compressive,s) ->
                RefinedState ((s :> arc_state), compressive))
              suggestions
         @ (let new_stage =
