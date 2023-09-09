@@ -188,7 +188,7 @@ let xp_refinement
     xp_model ~html print r;
     if supp <> 0 (* undefined value *) then
       aux_support ~html print supp;
-    print#string " @ ";
+    print#string " → ";
     print#string in_out;
     xp_path ~html print p    
   and aux_support ~html print supp =

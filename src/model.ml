@@ -41,7 +41,7 @@ let xp_model
     match m with
     | Def (x,m1) ->
        if html then print#string "<span class=\"model-def\">";
-       xp_var ~html print x; print#string ": "; aux ~prio_ctx ~html print m1;
+       xp_var ~html print x; print#string ":"; aux ~prio_ctx ~html print m1;
        if html then print#string "</span>"
     | Pat (c,args) ->
        let xp_args =
@@ -447,18 +447,18 @@ let size_model_ast (* for DL computing, QUICK *)
          (if asd#is_default_constr c && args = [||] then 0 else 1)
          args
     | Fail -> 1
-    | Alt (xc,c,m1,m2) -> 1 + aux_cond c + aux m1 + aux m2
+    | Alt (xc,c,m1,m2) -> 2 + aux_cond c + aux m1 + aux m2
     | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
     | Expr e -> Expr.size_expr_ast e
   and aux_cond = function
     | Undet -> 0
-    | True | False -> 1
+    | True | False -> assert false
     | BoolExpr e -> Expr.size_expr_ast e
   in
   aux m
 
-let nb_model_ast (* for DL computing *)
+let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
       ~(asd : ('t,'constr,'func) asd) =
   let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let rec aux (k : 't kind) (size : int) : float =
@@ -470,8 +470,8 @@ let nb_model_ast (* for DL computing *)
          | None -> 0.
          | Some k1 -> Expr.nb_expr_ast ~funcs:asd#funcs k1 size in
        let nb = (* counting possible alternatives *)
-         if size > 0 && asd#alt_opt k
-         then nb +. sum_conv [aux_cond; aux k; aux k] (size-1)
+         if size >= 2 && asd#alt_opt k
+         then nb +. sum_conv [aux_cond; aux k; aux k] (size-2)
                              (* split between condition, left model, right model *)
          else nb in
        match k with
@@ -505,9 +505,7 @@ let nb_model_ast (* for DL computing *)
   and aux_cond (size : int) : float =
     if size = 0
     then 1. (* Undet *)
-    else
-      let nb = if size = 1 then 2. (* True, False *) else 0. in
-      nb +. Expr.nb_expr_ast ~funcs:asd#funcs KBool size (* BoolExpr *)
+    else Expr.nb_expr_ast ~funcs:asd#funcs KBool size (* BoolExpr *)
   in
   fun (k : 't kind) (size : int) (* AST size *) -> (* float to handle large numbers *)
   Common.prof "Model.nb_model_ast" (fun () ->
