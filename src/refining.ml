@@ -106,22 +106,28 @@ let new_var (varseq : 'var Myseq.t) : 'var * 'var Myseq.t =
   | Myseq.Cons (x,varseq') -> x, varseq'
   | Myseq.Nil -> failwith "No more fresh variable (should be an infinite sequence"
 
-let make_alt
-      (prob : float)
-      (m1 : (('var,'constr,'func) Model.model as 'model))
-      (m2 : 'model)
+let make_alt_if_allowed_and_needed
+      ~(allowed : bool) ~(nb : int) ~(supp : int)
+      (m_true : (('var,'constr,'func) Model.model as 'model))
+      (m_false : 'model)
       (varseq : 'var Myseq.t)
       (best_reads : (('value,'dconstr,'var,'func) best_read as 'best_read) list)
-    : 'model * 'var Myseq.t * 'best_read list =
-  (* making an alternative, model and data *)
-  let xc, varseq' = new_var varseq in
-  let m' = Model.Alt (xc, Undet prob, m1, m2) in
-  let best_reads' =
-    List.map
-      (fun {matching; read; new_data} ->
-        {matching; read; new_data = D (Data.value new_data, DAlt (matching, new_data))})
-      best_reads in
-  m', varseq', best_reads'
+    : ('model * 'var Myseq.t * 'best_read list) Myseq.t =
+  if supp = nb then (* no need for alternative *)
+    Myseq.return (m_true, varseq, best_reads)
+  else if allowed then
+    (* making an alternative, model and data *)
+    let xc, varseq' = new_var varseq in
+    let prob = float supp /. float nb in
+    let m' = Model.Alt (xc, Undet prob, m_true, m_false) in
+    let best_reads' =
+      List.map
+        (fun {matching; read; new_data} ->
+          {matching; read; new_data = D (Data.value new_data, DAlt (matching, new_data))})
+        best_reads in
+    Myseq.return (m', varseq', best_reads')
+  else (* alt not allowed *)
+    Myseq.empty
 
 type ('t,'value,'dconstr,'var,'constr,'func) refiner =
   nb_env_vars:int ->
@@ -175,7 +181,7 @@ let refinements
                     (fun {matching; read; new_data} ->
                       read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
     Myseq.return (p, m_new, varseq', supp, dl_new)
-    in
+  in
   let rec aux ctx k m selected_reads other_reads_env =
   if selected_reads = [] then Myseq.empty
   else
@@ -185,7 +191,8 @@ let refinements
     | Kind.KVal t, Model.Pat (c,args) ->
        let k_args = asd#constr_args t c in
        Myseq.interleave
-         (aux_pat ctx k m c args selected_reads
+         (aux_expr ctx k m selected_reads
+          :: aux_pat ctx k m c args selected_reads
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
@@ -205,7 +212,9 @@ let refinements
     | _, Model.Fail -> Myseq.empty
     | _, Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave (* TODO: add expressions *)
-         [ (match c with
+         [ aux_expr ctx k m selected_reads;
+           
+           (match c with
             | Undet _ -> aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads
             | True | False | BoolExpr _ -> Myseq.empty);
            
@@ -254,34 +263,40 @@ let refinements
     | _, Model.Cst m1 -> raise TODO
     | _, Model.Expr e -> Myseq.empty
     | _ -> assert false
+  and aux_expr ctx k m selected_reads =
+    aux_gen ctx k m selected_reads
+      (fun (read : _ Model.read) ->
+        let v = Data.value read.data in
+        match asd#expr_opt k with
+        | None -> [] (* no expression here *)
+        | Some k1 ->
+           let es = Expr.Index.lookup v read.index in
+           Myseq.fold_left
+             (fun rs e -> (e, varseq0, Data.D (v, Data.DNone)) :: rs)
+             [] (Expr.exprset_to_seq es))
+      (fun e varseq' ~supp ~nb ~alt best_reads ->
+        let m_new = Model.Expr e in
+        make_alt_if_allowed_and_needed
+          ~allowed:(asd#alt_opt k) ~supp ~nb
+          m_new m varseq' best_reads)
   and aux_pat ctx k m c args selected_reads =
     aux_gen ctx k m selected_reads
       (fun (read : _ Model.read) ->
         match read.data with
         | D (v, DPat (dc, dargs)) as data ->
-           let rs =
-             List.filter_map
-               (fun (m',varseq',input) ->
-                 match eval_parse_bests k m' read.bindings input with
-                 | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
-                 | _ -> None)
-               (refinements_pat c args varseq0 data) in
-           (match asd#expr_opt k with
-            | None -> rs (* no expression here *)
-            | Some k1 ->
-               let es = Expr.Index.lookup v read.index in
-               Myseq.fold_left
-                 (fun rs e -> (Model.Expr e, varseq0, Data.D (v, Data.DNone)) :: rs)
-                 rs (Expr.exprset_to_seq es))
+           List.filter_map
+             (fun (m',varseq',input) ->
+               match eval_parse_bests k m' read.bindings input with
+               | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
+               | _ -> None)
+             (refinements_pat c args varseq0 data)
         | _ -> assert false)
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
-        let* m_new, best_reads = postprocessing c args m' ~supp ~nb ~alt best_reads in
-        let m_new, varseq', best_reads =
-          if alt then
-            let prob = float supp /. float nb in
-            make_alt prob m_new m varseq' best_reads
-          else m_new, varseq', best_reads in
-        Myseq.return (m_new, varseq', best_reads))
+        let* m_new, best_reads =
+          postprocessing c args m' ~supp ~nb ~alt best_reads in
+        make_alt_if_allowed_and_needed
+          ~allowed:(asd#alt_opt k) ~supp ~nb
+          m_new m varseq' best_reads)
   and aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads =
     aux_gen ctx k m selected_reads
       (fun (read : _ Model.read) ->
