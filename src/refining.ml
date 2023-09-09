@@ -287,13 +287,18 @@ let refinements
          Myseq.fold_left
            (fun rs e -> (e, varseq, d) :: rs)
            [] (Expr.exprset_to_seq es)
-      | Data.D (_, DAlt (false, _)) -> [] (* TODO: explain why not merging with previous case *)
+      | Data.D (_, DAlt (false, _)) ->
+         (* we only look for true expressions because the index does not contain all false expressions *)
+         (* extend_partial_best_reads below compensates for that *)
+         []
       | _ -> assert false in
     let r_best_reads = inter_union_reads refs selected_reads in
     let* e, (varseq', best_reads) = Mymap.to_seq r_best_reads in
+    let supp0, nb0 = best_reads_stats best_reads in
     let best_reads =
-      (* if supp <= 1 (* and e = unary equality *) then best_reads
-      else *)
+      if supp0 <= 1
+      then best_reads (* the condition should be valid for at least two examples *)
+      else
         extend_partial_best_reads
           selected_reads best_reads
           (fun read ->
@@ -304,8 +309,8 @@ let refinements
                else None
             | _ -> assert false) in
     let supp, nb = best_reads_stats best_reads in
-    let alt = (supp < nb) in
-    if not alt
+    if supp0 < nb0 (* discriminating cond *)
+       && supp = nb (* valid cond for all examples *)
     then
       let c_new = Model.BoolExpr e in
       let m_new = Model.Alt (xc, c_new, m1, m2) in
@@ -316,7 +321,7 @@ let refinements
         +. alpha *. Mdl.sum best_reads
                       (fun {matching; read; new_data} ->
                         read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
-      Myseq.return (p, m_new, varseq', supp, dl_new)
+      Myseq.return (p, m_new, varseq', supp0, dl_new)
     else Myseq.empty    
   in
   Myseq.prof "Model.refinements" (
