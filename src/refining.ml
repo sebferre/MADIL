@@ -107,6 +107,7 @@ let new_var (varseq : 'var Myseq.t) : 'var * 'var Myseq.t =
   | Myseq.Nil -> failwith "No more fresh variable (should be an infinite sequence"
 
 let make_alt
+      (prob : float)
       (m1 : (('var,'constr,'func) Model.model as 'model))
       (m2 : 'model)
       (varseq : 'var Myseq.t)
@@ -114,7 +115,7 @@ let make_alt
     : 'model * 'var Myseq.t * 'best_read list =
   (* making an alternative, model and data *)
   let xc, varseq' = new_var varseq in
-  let m' = Model.Alt (xc, Undet, m1, m2) in
+  let m' = Model.Alt (xc, Undet prob, m1, m2) in
   let best_reads' =
     List.map
       (fun {matching; read; new_data} ->
@@ -185,7 +186,7 @@ let refinements
     | _, Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave
          [ (match c with
-            | Undet -> aux_alt_cond_undet ctx k xc c m1 m2 selected_reads
+            | Undet _ -> aux_alt_cond_undet ctx k xc c m1 m2 selected_reads
             | True | False | BoolExpr _ -> Myseq.empty);
            
            (let ctx1 = (fun p1 -> ctx (Model.Branch (true,p1))) in
@@ -264,7 +265,9 @@ let refinements
     let alt = (supp < nb) in
     let* m_new, best_reads = post m' ~supp ~nb ~alt best_reads in
     let m_new, varseq', best_reads =
-      if alt then make_alt m_new m varseq' best_reads
+      if alt then
+        let prob = float supp /. float nb in
+        make_alt prob m_new m varseq' best_reads
       else m_new, varseq', best_reads in
     let dl_m_new = dl_model ~nb_env_vars k m_new in
     let dl_data_m_new = dl_data m_new in

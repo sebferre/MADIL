@@ -4,7 +4,7 @@ open Kind
 open Data
 
 type ('var,'func) cond_model =
-  | Undet (* undetermined condition *)
+  | Undet of float (* undetermined condition, probability for left choice *)
   | True (* always true condition *)
   | False (* always false condition *)
   | BoolExpr of ('var,'func) Expr.expr (* computed condition *)
@@ -51,11 +51,13 @@ let xp_model
        xp_pat c xp_args ~html print ()
 
     | Fail -> print#string "fail"
-    | Alt (xc,Undet,m1,m2) -> (* m1 | m2 *)
+    | Alt (xc, Undet prob, m1, m2) -> (* m1 | m2 *)
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
            if html then print#string "<div class=\"model-alt\">";
-           xp_var ~html print xc; print#string "? ";
+           xp_var ~html print xc; print#string ": ";
+           aux_prob ~html print prob;
+           print#string "? ";
            aux ~html ~prio_ctx:2 print m1;
            print#string (if html then " <span class=\"model-meta-operator\">|</span> " else " | ");
            aux ~html ~prio_ctx:2 print m2;
@@ -85,8 +87,8 @@ let xp_model
        Expr.xp_expr ~xp_var ~xp_func ~html print e;
        if html then print#string "</span>"
   and aux_cond ~html print = function
-    | Undet ->
-       print#string "?"
+    | Undet prob ->
+       aux_prob ~html print prob
     | True ->
        print#string "true"
     | False ->
@@ -95,6 +97,10 @@ let xp_model
        if html then print#string "<span class=\"model-expr\">";
        Expr.xp_expr ~xp_var ~xp_func ~html print e;
        if html then print#string "</span>"
+  and aux_prob ~html print prob =
+    let p1 = int_of_float (prob *. 10.) in
+    let p2 = 10 - p1 in
+    print#int p1; print#string "-"; print#int p2
   in
   aux ~prio_ctx:2
 
@@ -290,7 +296,7 @@ let eval (* QUICK *)
        model_of_value k v
     | _ -> assert false
   and aux_cond = function
-    | Undet -> Result.Ok Undet
+    | Undet prob -> Result.Ok (Undet prob)
     | True -> Result.Ok True
     | False -> Result.Ok False
     | BoolExpr e ->
@@ -321,7 +327,12 @@ let generator
     | Alt (xc,c,m1,m2) -> (* TODO: make stochastic *)
        let b, m12 =
          match c with
-         | Undet -> if m1=Fail then (false, m2) else (true, m1)
+         | Undet prob ->
+            (match m1, m2 with
+             | Fail, Fail -> true, Fail
+             | Fail, _ -> false, m2
+             | _, Fail -> true, m1
+             | _ -> if prob >= 0.5 then true, m1 else false, m2)
          | True -> true, m1
          | False -> false, m2
          | BoolExpr _ -> assert false in
@@ -368,7 +379,7 @@ let parseur
            let* d2, input = parse_m2 input in
            Myseq.return (D (value d2, DAlt (false,d2)), input) in
          match c with
-         | Undet ->
+         | Undet prob ->
             if Myseq.is_empty seq1
             then seq2
             else seq1 (* for exclusive alternatives, anticipating condition *)
@@ -408,7 +419,7 @@ let encode_data
     | Alt (xc,c,m1,m2), D (_, DAlt (b,d12)) -> (* choice determined by model *)
        let dl_choice =
          match c with
-         | Undet -> Mdl.Code.usage (if b then 0.6 else 0.4)
+         | Undet prob -> Mdl.Code.usage (if b then prob else 1. -. prob)
          | True | False | BoolExpr _ -> 0. in
        let enc12 = aux (if b then m1 else m2) d12 in
        encoding_alt dl_choice enc12
@@ -452,7 +463,7 @@ let size_model_ast (* for DL computing, QUICK *)
     | Cst m1 -> 1 + aux m1
     | Expr e -> Expr.size_expr_ast e
   and aux_cond = function
-    | Undet -> 0
+    | Undet _ -> 0
     | True | False -> assert false
     | BoolExpr e -> Expr.size_expr_ast e
   in
@@ -534,7 +545,8 @@ let dl_model_params
     | Cst m1 -> raise TODO
     | Expr e -> dl_expr_params e
   and aux_cond = function
-    | Undet | True | False -> 0.
+    | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
+    | True | False -> 0.
     | BoolExpr e -> dl_expr_params e
   in
   aux
