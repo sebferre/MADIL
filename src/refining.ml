@@ -273,7 +273,7 @@ let refinements
            let es = Expr.Index.lookup v read.index in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, Data.D (v, Data.DNone)) :: rs)
-             [] (Expr.exprset_to_seq es))
+             [] (Expr.Exprset.to_seq es))
       (fun e varseq' ~supp ~nb ~alt best_reads ->
         let m_new = Model.Expr e in
         make_alt_if_allowed_and_needed
@@ -303,10 +303,10 @@ let refinements
         match read.data with
         | Data.D (_, DAlt (true, _)) as d ->
            let v = value_of_bool true in
-           let es : _ Expr.exprset = Expr.Index.lookup v read.index in
+           let es : _ Expr.Exprset.t = Expr.Index.lookup v read.index in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, d) :: rs)
-             [] (Expr.exprset_to_seq es)
+             [] (Expr.Exprset.to_seq es)
         | Data.D (_, DAlt (false, _)) ->
            (* we only look for true expressions because the index does not contain all false expressions *)
            (* extend_partial_best_reads below compensates for that *)
@@ -322,7 +322,7 @@ let refinements
               (fun read ->
                 match read.data with
                 | D (_, DAlt (b, _)) ->
-                   if not b && not (Expr.exprset_mem e (Expr.Index.lookup (value_of_bool true) read.index))
+                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (value_of_bool true) read.index))
                    then Some (read, read.data)
                    else None
                 | _ -> assert false) in

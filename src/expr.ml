@@ -58,115 +58,131 @@ let eval
 
   
 (* expression sets : idea taken from FlashMeta *)
-    
-type ('var,'func) exprset = ('var,'func) expritem list
-and ('var,'func) expritem =
-  | SRef of 'var
-  | SApply of 'func * ('var,'func) exprset array
-  | SArg
-  | SFun of ('var,'func) exprset
 
-let rec exprset_to_seq (es : ('var,'func) exprset) : ('var,'func) expr Myseq.t =
+module type EXPRSET =
+  sig
+    type ('var,'func) t
+    val to_seq : ('var,'func) t -> ('var,'func) expr Myseq.t
+    val mem : ('var,'func) expr -> ('var,'func) t -> bool
+    val empty : ('var,'func) t
+    val add_ref : 'var -> ('var,'func) t -> ('var,'func) t
+    val add_apply : 'func -> ('var,'func) t array -> ('var,'func) t -> ('var,'func) t
+    val union : ('var,'func) t -> ('var,'func) t -> ('var,'func) t
+    val inter : ('var,'func) t -> ('var,'func) t -> ('var,'func) t
+  end
+  
+module Exprset : EXPRSET =
+  struct
+  
+type ('var,'func) t = ('var,'func) item list
+and ('var,'func) item =
+  | SRef of 'var
+  | SApply of 'func * ('var,'func) t array
+  | SArg
+  | SFun of ('var,'func) t
+
+let rec to_seq (es : ('var,'func) t) : ('var,'func) expr Myseq.t =
   let* item = Myseq.from_list es in
-  expritem_to_seq item
-and expritem_to_seq : ('var,'func) expritem -> ('var,'func) expr Myseq.t =
+  item_to_seq item
+and item_to_seq : ('var,'func) item -> ('var,'func) expr Myseq.t =
   function
   | SRef x -> Myseq.return (Ref x)
   | SApply (f,es_args) ->
-     let seq_args = Array.map exprset_to_seq es_args in
+     let seq_args = Array.map to_seq es_args in
      let* l_args = Myseq.product (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
      let args = Array.of_list l_args in
      Myseq.return (Apply (f,args))
   | SArg -> Myseq.return Arg
   | SFun es1 ->
-     let* e1 = exprset_to_seq es1 in
+     let* e1 = to_seq es1 in
      Myseq.return (Fun e1)
 
-let rec exprset_mem (e : ('var,'func) expr) (es : ('var,'func) exprset) : bool =
-  List.exists (expritem_mem e) es
-and expritem_mem e item =
+let rec mem (e : ('var,'func) expr) (es : ('var,'func) t) : bool =
+  List.exists (item_mem e) es
+and item_mem e item =
   match e, item with
   | Ref x, SRef y -> x=y
   | Apply (f,args), SApply (g,es_args) ->
      f = g
      && Array.length args = Array.length es_args
-     && Array.for_all2 exprset_mem args es_args
+     && Array.for_all2 mem args es_args
   | Arg, SArg -> true
-  | Fun e, SFun es -> exprset_mem e es
+  | Fun e, SFun es -> mem e es
   | _ -> false
 
-let rec exprset_inter (es1 : ('var,'func) exprset) (es2 : ('var,'func) exprset) : ('var,'func) exprset =
+let empty : ('var,'func) t = []
+       
+let add_ref (x : 'var) (es : ('var,'func) t) : ('var,'func) t =
+  SRef x :: es
+
+let add_apply (f : 'func) (es_args : ('var,'func) t array) (es : ('var,'func) t) : ('var,'func) t =
+  SApply (f,es_args) :: es
+
+let union (es1 : ('var,'func) t) (es2 : ('var,'func) t) : ('var,'func) t =
+  List.rev_append es1 es2
+  
+let rec inter (es1 : ('var,'func) t) (es2 : ('var,'func) t) : ('var,'func) t =
   List.fold_left
     (fun res item1 ->
       List.fold_left
         (fun res item2 ->
-          match expritem_inter item1 item2 with
+          match item_inter item1 item2 with
           | None -> res
           | Some item -> item::res)
         res es2)
     [] es1
-and expritem_inter (item1 : ('var,'func) expritem) (item2 : ('var,'func) expritem) : ('var,'func) expritem option =
+and item_inter (item1 : ('var,'func) item) (item2 : ('var,'func) item) : ('var,'func) item option =
   match item1, item2 with
   | SRef x1, SRef x2 when x1 = x2 -> Some (SRef x1)
   | SApply (f1,es_args1), SApply (f2,es_args2) when f1 = f2 ->
-     let es_args = Array.map2 exprset_inter es_args1 es_args2 in
+     let es_args = Array.map2 inter es_args1 es_args2 in
      if Array.exists (fun es -> es = []) es_args
      then None
      else Some (SApply (f1, es_args))
   | SArg, SArg -> Some SArg
   | SFun es1, SFun es2 ->
-     (match exprset_inter es1 es2 with
+     (match inter es1 es2 with
       | [] -> None
       | es -> Some (SFun es))
   | _ -> None
 
-let rec exprset_inter_list (esl1 : ('var,'func) exprset list) (esl2 : ('var,'func) exprset list) : ('var,'func) exprset list =
-  List.fold_left
-    (fun res es1 ->
-      List.fold_left
-        (fun res es2 ->
-          match exprset_inter es1 es2 with
-          | [] -> res
-          | es -> es::res)
-        res esl2)
-    [] esl1
-
+  end
 
 (* indexes : idea inspired from FlashMeta *)
 
 module Index =
   struct
-    type ('value,'var,'func) t = ('value, ('var,'func) exprset) Mymap.t
+    type ('value,'var,'func) t = ('value, ('var,'func) Exprset.t) Mymap.t
 
     let empty = Mymap.empty
                 
-    let bind (v : 'value) (item : ('var,'func) expritem) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
+    let bind_ref (v : 'value) (x : 'var) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
       Mymap.update v
         (function
-         | None -> Some [item]
-         | Some exprs -> Some (item :: exprs))
+         | None -> Some (Exprset.add_ref x Exprset.empty)
+         | Some es -> Some (Exprset.add_ref x es))
         index
-
-    let bind_set (v : 'value) (es : ('var,'func) exprset) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
+      
+    let bind_apply (v : 'value) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
       Mymap.update v
         (function
-         | None -> Some es
-         | Some exprs -> Some (List.rev_append es exprs))
+         | None -> Some (Exprset.add_apply f es_args Exprset.empty)
+         | Some es -> Some (Exprset.add_apply f es_args es))
         index
-
+      
     let find_opt = Mymap.find_opt
 
     let fold = Mymap.fold
                 
-    let lookup (v : 'value) (index : ('value,'var,'func) t) : ('var,'func) exprset =
+    let lookup (v : 'value) (index : ('value,'var,'func) t) : ('var,'func) Exprset.t =
       match find_opt v index with
-      | None -> []
+      | None -> Exprset.empty
       | Some exprs -> exprs
   end
            
 let index_add_bindings index (bindings : ('var,'value) bindings) : ('value,'var,'func) Index.t =
   Mymap.fold
-    (fun x v res -> Index.bind v (SRef x) res)
+    (fun x v res -> Index.bind_ref v x res)
     bindings index
 
 let index_apply_functions
@@ -179,7 +195,7 @@ let index_apply_functions
       |> List.fold_left
            (fun res f ->
              match eval_func f args_k with
-             | Result.Ok v -> Index.bind v (SApply (f, es_args_k)) res
+             | Result.Ok v -> Index.bind_apply v f es_args_k res
              | Result.Error _ -> res)
            res in
     if k >= max_arity
