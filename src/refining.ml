@@ -3,45 +3,52 @@ open Madil_common
 
 (* computing model refinements from parsing data *)
    
-let map_reads (f : 'a -> 'b) (reads : 'a list list) : 'b list list  =
+let map_reads (f : 'read -> 'read) (reads : ('read list * bool) list) : ('read list * bool) list  =
   List.map
-    (fun example_reads ->
-      List.map f example_reads)
+    (fun (example_reads, unselected_reads) ->
+      List.map f example_reads, unselected_reads)
     reads
 
-let filter_map_reads (f : 'a -> 'b option) (selected_reads : 'a list list) : 'b list list =
+let filter_map_reads (f : 'read -> 'read option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
   (* returns: the result of applying [f] on [selected_reads] when [f] is defined *)
   List.filter_map
-    (fun example_reads ->
-      let defined_example_reads = List.filter_map f example_reads in
+    (fun (example_reads, unselected_reads) ->
+      let defined_example_reads, undefined_reads =
+        List.partition_map
+          (fun read ->
+            match f read with
+            | Some defined_read -> Either.Left defined_read
+            | None -> Either.Right ())
+          example_reads in
       if defined_example_reads = []
       then None
-      else Some defined_example_reads)
+      else Some (defined_example_reads, unselected_reads || undefined_reads <> []))
     selected_reads
 
 type ('value,'dconstr,'var,'func) best_read =
-  { matching : bool; (* matching flag *)
-    read : ('value,'dconstr,'var,'func) Model.read; (* the selected best read *)
-    new_data : ('value,'dconstr) Data.data } (* the new data *)
+  { unselected_reads : bool; (* flag for out-of-branch alt reads *)
+    matching : bool; (* matching flag *)
+    read : ('value,'dconstr,'var,'func) Model.read; (* the selected best read, first one when matching=false *)
+    new_data : ('value,'dconstr) Data.data } (* the new data, the old data when matching=false *)
 
 let best_reads_stats (best_reads : ('value,'dconstr,'var,'func) best_read list) : int * int = (* support, total *)
   List.fold_left
     (fun (supp,nb) best_read ->
-      if best_read.matching
-      then supp+1, nb+1
-      else supp, nb+1)
+      if best_read.matching then supp+1, nb+1 (* positive *)
+      else if best_read.unselected_reads then supp, nb (* out of scope *)
+      else supp, nb+1) (* negative *)
     (0,0) best_reads
 
 let inter_union_reads
       (get_rs : ('value,'dconstr,'var,'func) Model.read -> ('ref * 'var Myseq.t * ('value,'dconstr) Data.data) list)
-      (reads : ('value,'dconstr,'var,'func) Model.read list list)
+      (reads : (('value,'dconstr,'var,'func) Model.read list * bool) list)
     : ('ref, 'var Myseq.t * ('value,'dconstr,'var,'func) best_read list) Mymap.t =
   (* given a function extracting refinements (submodels) from each read,
      return a set of such refinements, each mapped to the dl-shortest reads supporting it, along with new data *)
-  let process_example reads =
+  let process_example reads unselected_reads =
     assert (reads <> []);
     let read0 = List.hd reads in
-    let alt_read = {matching = false; read = read0; new_data = read0.Model.data} in
+    let alt_read = {unselected_reads; matching = false; read = read0; new_data = read0.Model.data} in
     let refs =
       List.fold_left
         (fun refs read ->
@@ -50,21 +57,21 @@ let inter_union_reads
             (fun refs (r,varseq',data') ->
               if Mymap.mem r refs
               then refs
-              else Mymap.add r (varseq', {matching = true; read; new_data = data'}) refs)
+              else Mymap.add r (varseq', {unselected_reads; matching = true; read; new_data = data'}) refs)
             refs refs_read)
         Mymap.empty reads in
     alt_read, refs
   in
   match List.rev reads with (* rev to have best_reads in right order at the end *)
   | [] -> assert false
-  | example0_reads :: other_reads ->
-     let alt_read0, refs0 = process_example example0_reads in
+  | (example0_reads, example0_unselected_reads) :: other_reads ->
+     let alt_read0, refs0 = process_example example0_reads example0_unselected_reads in
      let alt_reads = [alt_read0] in
      let refs = refs0 |> Mymap.map (fun (varseq', best_read) -> varseq', [best_read]) in
-     let alt_reads, refs =
+     let alt_reads, refs = (* TODO: is alt_read(s) necessary here? *)
        List.fold_left
-         (fun (alt_reads,refs) exampleI_reads ->
-           let alt_readI, refsI = process_example exampleI_reads in
+         (fun (alt_reads,refs) (exampleI_reads, exampleI_unselected_reads) ->
+           let alt_readI, refsI = process_example exampleI_reads exampleI_unselected_reads in
            let refs =
              Mymap.merge (* intersection(refs, refsI) *)
                (fun r varseq_best_reads_opt varseq_best_readI_opt ->
@@ -82,19 +89,20 @@ let inter_union_reads
          (alt_reads, refs) other_reads in
      refs
 
-let extend_partial_best_reads 
-      (selected_reads : (('value,'dconstr,'var,'func) Model.read as 'read) list list)
+let extend_partial_best_reads
+      (selected_reads : ((('value,'dconstr,'var,'func) Model.read as 'read) list * bool) list)
       (best_reads : (('value,'dconstr,'var,'func) best_read as 'best_read) list)
       (check_alt_read : 'read -> ('read * ('value,'dconstr) Data.data) option)
     : 'best_read list =
   List.map2
-    (fun reads best_read ->
+    (fun (reads, unselected_reads) best_read ->
       if best_read.matching
       then best_read (* already matches some refinement *)
       else
         (match List.find_map check_alt_read reads with
          | Some (best_read', data') ->
-            {matching = true; read = best_read'; new_data = data'} (* new match *)
+            {unselected_reads = best_read.unselected_reads;
+             matching = true; read = best_read'; new_data = data'} (* new match *)
          | None -> best_read)) (* no change *)
     selected_reads best_reads
 
@@ -119,8 +127,8 @@ let make_alt_if_allowed_and_needed
     let m' = Model.Alt (xc, Undet prob, m_true, m_false) in
     let best_reads' =
       List.map
-        (fun {matching; read; new_data} ->
-          {matching; read; new_data = D (Data.value new_data, DAlt (matching, new_data))})
+        (fun {unselected_reads; matching; read; new_data} ->
+          {unselected_reads; matching; read; new_data = D (Data.value new_data, DAlt (matching, new_data))})
         best_reads in
     Myseq.return (m', varseq', best_reads')
   else (* alt not allowed *)
@@ -176,7 +184,9 @@ let refinements
       dl_M -. dl_m +. dl_m_new
       +. alpha *. Mdl.sum best_reads
                     (fun {matching; read; new_data} ->
-                      read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
+                      if matching
+                      then read.dl -. dl_data_m read.data +. dl_data_m_new new_data
+                      else 0.) (* no change in this case *) in
     Myseq.return (p, m_new, varseq', supp, dl_new)
   in
   let rec aux ctx k m selected_reads =
@@ -329,7 +339,9 @@ let refinements
         else Myseq.empty)
   in
   Myseq.prof "Model.refinements" (
-  let selected_reads = reads in
+  let selected_reads =
+    (* the flag for each example indicates whether there are other reads, used with Alt *)
+    List.map (fun example_reads -> (example_reads, false)) reads in
   let* p, r, varseq', supp, dl' =
     aux Model.ctx0 k0 m0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
