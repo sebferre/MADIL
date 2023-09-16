@@ -447,6 +447,8 @@ let dl_parse_rank (rank : int) : dl =
   
 (* model encoding *)
 
+let size_alt = 3
+  
 let size_model_ast (* for DL computing, QUICK *)
       ~(asd : ('t,'constr,'func) asd)
     (m : ('var,'constr,'func) model) : int =
@@ -458,7 +460,7 @@ let size_model_ast (* for DL computing, QUICK *)
          (if asd#is_default_constr c && args = [||] then 0 else 1)
          args
     | Fail -> 1
-    | Alt (xc,c,m1,m2) -> 2 + aux_cond c + aux m1 + aux m2
+    | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
     | Seq (n,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
     | Expr e -> Expr.size_expr_ast e
@@ -481,8 +483,8 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
          | None -> 0.
          | Some k1 -> Expr.nb_expr_ast ~funcs:asd#funcs k1 size in
        let nb = (* counting possible alternatives *)
-         if size >= 2 && asd#alt_opt k
-         then nb +. sum_conv [aux_cond; aux k; aux k] (size-2)
+         if size >= size_alt && asd#alt_opt k
+         then nb +. sum_conv [aux_cond; aux k; aux k] (size - size_alt)
                              (* split between condition, left model, right model *)
          else nb in
        match k with
