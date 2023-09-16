@@ -187,7 +187,7 @@ let xml_of_focus focus =
       [Syntax.Kwd (Printf.sprintf "DL = %f" focus.norm_dl)];
       [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi + %.3fdo) = %.3fi + %.3fo" md m d mi mo di do_ mdi mdo)];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.input_model)];
-      [Syntax.Kwd " ➜ "];
+      [Syntax.Kwd " ⬇ "];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.output_model)]]]
   
 let html_of_word (w : arc_word) : Html.t = assert false
@@ -226,27 +226,33 @@ let html_of_row_from_data data =
   Xprint.to_string (xp_data ~html) data
 
 let html_row_pair html_i html_o =
-  html_i ^ "<br/> ➜ <br/>" ^ html_o
+  html_i ^ "<br/> ⬇ <br/>" ^ html_o
     
 type col = ColExample | ColDescr | ColPred
 type cell =
   | Example of value * value
-  | Descr of read * read
+  | Descr of (read * read * dl) list
   | Pred of value * (data * data * value) list (* expected value, all preds (input data, output data, output value) *)
   | Error of string
-                                    
+
+let html_read_pair (ri,ro,dl : read * read * dl) =
+  html_row_pair
+    (html_of_row_from_data ri.data)
+    (html_of_row_from_data ro.data)
+  ^ Printf.sprintf "<br/>DL = %.3f = %.3fi + %.3fo" dl ri.dl ro.dl
+           
 let html_of_cell : cell -> Html.t = function
   | Example (vi,vo) ->
      html_row_pair
        (html_of_value vi)
        (html_of_value vo)
-  | Descr (ri,ro) ->
-     html_row_pair
-       (html_of_row_from_data ri.data)
-       (html_of_row_from_data ro.data)
-     ^ Printf.sprintf "<br/>DL = %.3f = %.3fi + %.3fo" (ri.dl +. ro.dl) ri.dl ro.dl
+  | Descr [] ->
+     Jsutils.escapeHTML "No valid description"
+  | Descr (read1::other_reads) ->
+     String.concat "<hr/>"
+       (List.map html_read_pair (read1::other_reads))
   | Pred (expected_vo, l_di_do_vo) ->
-     String.concat (if html then "<br/>" else "\n")
+     String.concat "<hr/>"
        (List.map
           (fun (di,_do,vo) ->
             let html_di = html_of_row_from_data di in
@@ -311,10 +317,7 @@ let render_place place k =
         List.fold_right2
           (fun pair reads l_bindings ->
             let {Task.input=vi; output=vo} = pair in
-            let descr =
-              match reads with
-              | (in_r,out_r,dl)::_ -> Descr (in_r,out_r) (* using only first read *)
-              | [] -> Error "No valid description" in
+            let descr = Descr reads in
             let pred = get_pred ~test:false ext.model vi vo in
             let row =
               [ ColExample, Example (vi,vo);
