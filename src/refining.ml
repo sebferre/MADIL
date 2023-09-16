@@ -9,18 +9,15 @@ let map_reads (f : 'a -> 'b) (reads : 'a list list) : 'b list list  =
       List.map f example_reads)
     reads
 
-let partition_map_reads (f : 'a -> ('b,'c) Result.t) (selected_reads : 'a list list) (other_reads : 'c list list) : 'b list list * 'c list list =
-  (* returns: 1) the result of applying [f] on [selected_reads] when [f] is defined, 
-     and 2) the complement part of [selected_reads] to [others] *)
-  list_partition_map
+let filter_map_reads (f : 'a -> 'b option) (selected_reads : 'a list list) : 'b list list =
+  (* returns: the result of applying [f] on [selected_reads] when [f] is defined *)
+  List.filter_map
     (fun example_reads ->
-      let defined_example_reads, example_reads_env =
-        list_partition_map f example_reads [] in
+      let defined_example_reads = List.filter_map f example_reads in
       if defined_example_reads = []
-      then Result.Error example_reads_env
-      else Result.Ok defined_example_reads)
+      then None
+      else Some defined_example_reads)
     selected_reads
-    other_reads
 
 type ('value,'dconstr,'var,'func) best_read =
   { matching : bool; (* matching flag *)
@@ -182,12 +179,12 @@ let refinements
                       read.dl -. dl_data_m read.data +. dl_data_m_new new_data) in
     Myseq.return (p, m_new, varseq', supp, dl_new)
   in
-  let rec aux ctx k m selected_reads other_reads_env =
+  let rec aux ctx k m selected_reads =
   if selected_reads = [] then Myseq.empty
   else
     match k, m with
     | _, Model.Def (x,m1) ->
-       aux ctx k m1 selected_reads other_reads_env
+       aux ctx k m1 selected_reads
     | Kind.KVal t, Model.Pat (c,args) ->
        let k_args = asd#constr_args t c in
        Myseq.interleave
@@ -206,8 +203,7 @@ let refinements
                              let di = try args.(i) with _ -> assert false in
                              {read with Model.data = di}
                           | _ -> assert false)
-                        selected_reads)
-                     other_reads_env)
+                        selected_reads))
                  args))
     | _, Model.Fail -> Myseq.empty
     | _, Model.Alt (xc,c,m1,m2) ->
@@ -219,32 +215,30 @@ let refinements
             | True | False | BoolExpr _ -> Myseq.empty);
            
            (let ctx1 = (fun p1 -> ctx (Model.Branch (true,p1))) in
-            let sel1, other1 =
-              partition_map_reads
+            let sel1 =
+              filter_map_reads
                 (fun (read : _ Model.read) ->
                   match read.data with
                   | D (_, DAlt (b,d12)) ->
                      if b
-                     then Result.Ok {read with data=d12}
-                     else Result.Error read.env
+                     then Some {read with data=d12}
+                     else None
                   | _ -> assert false)
-                selected_reads
-                other_reads_env in
-            aux ctx1 k m1 sel1 other1);
+                selected_reads in
+            aux ctx1 k m1 sel1);
                         
            (let ctx2 = (fun p1 -> ctx (Model.Branch (false,p1))) in
-            let sel2, other2 =
-              partition_map_reads
+            let sel2 =
+              filter_map_reads
                 (fun (read : _ Model.read) ->
                   match read.data with
                   | D (_, DAlt (b,d12)) ->
                      if not b
-                     then Result.Ok {read with data=d12}
-                     else Result.Error read.env
+                     then Some {read with data=d12}
+                     else None
                   | _ -> assert false)
-                selected_reads
-                other_reads_env in
-            aux ctx2 k m2 sel2 other2) ]
+                selected_reads in
+            aux ctx2 k m2 sel2) ]
                         
     | Kind.KSeq k1, Model.Seq (n,lm1) ->
        Myseq.interleave
@@ -257,8 +251,7 @@ let refinements
                      match read.Model.data with
                      | D (_, DSeq (_,ld)) -> {read with Model.data = List.nth ld i}
                      | _ -> assert false)
-                   selected_reads)
-                other_reads_env)
+                   selected_reads))
             lm1)
     | _, Model.Cst m1 -> raise TODO
     | _, Model.Expr e -> Myseq.empty
@@ -337,9 +330,8 @@ let refinements
   in
   Myseq.prof "Model.refinements" (
   let selected_reads = reads in
-  let other_reads_env = [] in
   let* p, r, varseq', supp, dl' =
-    aux Model.ctx0 k0 m0 selected_reads other_reads_env
+    aux Model.ctx0 k0 m0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
            dl_compare dl1 dl2) (* support use for sorting in LIS UI *)
     |> Myseq.unique
