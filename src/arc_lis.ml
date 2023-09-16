@@ -249,9 +249,15 @@ let html_of_cell : cell -> Html.t = function
      String.concat (if html then "<br/>" else "\n")
        (List.map
           (fun (di,_do,vo) ->
-            html_row_pair
-              (html_of_row_from_data di)
-              (html_of_value vo))
+            let html_di = html_of_row_from_data di in
+            let html_vo = html_of_value vo in
+            let html_vo =
+              let cl =
+                if vo = expected_vo
+                then "pred-correct"
+                else "pred-incorrect" in
+              Html.span ~classe:cl html_vo in
+            html_row_pair html_di html_vo)
           l_di_do_vo)
   | Error msg -> Jsutils.escapeHTML msg
         
