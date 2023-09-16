@@ -67,11 +67,9 @@ module type EXPRSET =
     val empty : ('var,'func) t
     val add_ref : 'var -> ('var,'func) t -> ('var,'func) t
     val add_apply : 'func -> ('var,'func) t array -> ('var,'func) t -> ('var,'func) t
-    val union : ('var,'func) t -> ('var,'func) t -> ('var,'func) t
-    val inter : ('var,'func) t -> ('var,'func) t -> ('var,'func) t
   end
   
-module Exprset : EXPRSET =
+module Exprset_old : EXPRSET =
   struct
   
 type ('var,'func) t = ('var,'func) item list
@@ -146,6 +144,113 @@ and item_inter (item1 : ('var,'func) item) (item2 : ('var,'func) item) : ('var,'
       | es -> Some (SFun es))
   | _ -> None
 
+  end
+
+module Exprset : EXPRSET =
+  struct
+    type ('var,'func) t =
+      { refs : 'var Bintree.t;
+        applies : ('func, ('var,'func) t array Bintree.t) Mymap.t;
+        args : bool;
+        funs : ('var,'func) t option }
+
+    let rec to_seq es : ('var,'func) expr Myseq.t =
+      Myseq.concat
+        [ (let* x = Myseq.from_bintree es.refs in
+           Myseq.return (Ref x));
+
+          (if es.args then Myseq.return Arg
+           else Myseq.empty);
+          
+          (Myseq.interleave
+             (List.map
+                (fun (f, es_args_set) ->
+                  let* es_args = Myseq.from_bintree es_args_set in
+                  let seq_args = Array.map to_seq es_args in
+                  let* l_args = Myseq.product_fair (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
+                  let args = Array.of_list l_args in
+                  Myseq.return (Apply (f,args)))
+                (Mymap.bindings es.applies)));
+          
+          (let* es1 = Myseq.from_option es.funs in
+           let* e = to_seq es1 in
+           Myseq.return (Fun e))
+        ]
+      
+    let rec mem e es =
+      match e with
+      | Ref x -> Bintree.mem x es.refs
+      | Apply (f,args) ->
+         (match Mymap.find_opt f es.applies with
+          | None -> false
+          | Some es_args_set ->
+             Bintree.exists
+               (fun es_args ->
+                 Array.length args = Array.length es_args
+                 && Array.for_all2 mem args es_args)
+               es_args_set)
+      | Arg -> es.args
+      | Fun e ->
+         (match es.funs with
+          | None -> false
+          | Some es1 -> mem e es1)
+
+    let empty =
+      { refs = Bintree.empty;
+        applies = Mymap.empty;
+        args = false;
+        funs = None }
+
+    let add_ref x es =
+      { es with
+        refs = Bintree.add x es.refs }
+
+    let add_apply f es_args es =
+      { es with
+        applies =
+          Mymap.update f
+            (function
+             | None -> Some (Bintree.singleton es_args)
+             | Some es_args_set -> Some (Bintree.add es_args es_args_set))
+            es.applies }
+
+    let rec union es1 es2 =
+      { refs = Bintree.union es1.refs es2.refs;
+        applies =
+          Mymap.merge
+            (fun f es_args_set1_opt es_args_set2_opt ->
+              match es_args_set1_opt, es_args_set2_opt with
+              | None, None -> assert false
+              | Some s1, None -> Some s1
+              | None, Some s2 -> Some s2
+              | Some s1, Some s2 -> Some (Bintree.union s1 s2))
+            es1.applies es2.applies;
+        args = es1.args || es2.args;
+        funs =
+          (match es1.funs, es2.funs with
+           | None, None -> None
+           | None, Some es2 -> Some es2
+           | Some es1, None -> Some es1
+           | Some es1, Some es2 -> Some (union es1 es2)) } 
+                  
+    let rec inter es1 es2 =
+      { refs = Bintree.inter es1.refs es2.refs;
+        applies =
+          Mymap.merge
+            (fun f es_args_set1_opt es_args_set2_opt ->
+              match es_args_set1_opt, es_args_set2_opt with
+              | None, None -> assert false
+              | Some s1, None -> None
+              | None, Some s2 -> None
+              | Some s1, Some s2 -> Some (Bintree.inter s1 s2))
+            es1.applies es2.applies;
+        args = es1.args && es2.args;
+        funs =
+          (match es1.funs, es2.funs with
+           | None, None -> None
+           | None, Some es2 -> None
+           | Some es1, None -> None
+           | Some es1, Some es2 -> Some (inter es1 es2)) } 
   end
 
 (* indexes : idea inspired from FlashMeta *)

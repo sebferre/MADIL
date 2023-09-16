@@ -358,7 +358,7 @@ let task_refinements
       (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
       (dsro : ('value,'dconstr,'var,'func) Task_model.reads)
     : (('var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t =
-  Myseq.concat (* TODO: rather order by estimated dl *)
+  Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseqi =
          input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
            m.input_kind m.input_model m.input_varseq dsri.reads in
