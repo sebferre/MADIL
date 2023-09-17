@@ -156,9 +156,10 @@ let apply
       ~dl_assuming_contents_known:true ~env ~bindings:Expr.bindings0
       m.input_kind m.input_model v_i in
   let data_i = read_i.data in
+  let bindings = get_bindings m.input_model data_i in
   let| data_o, v_o =
     write
-      ~bindings:(get_bindings m.input_model data_i)
+      ~bindings
       m.output_kind m.output_model info_o in
   Result.Ok [(data_i, data_o, v_o)])
 

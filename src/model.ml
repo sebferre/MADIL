@@ -227,7 +227,8 @@ let get_bindings  (* QUICK *)
     : ('var,'value) Expr.bindings =
   let rec aux m d acc =
     match m, d with
-    | Def (x,m1), D (v, _) ->
+    | Def (x,m1), D (v,_) ->
+       let acc = aux m1 d acc in
        Mymap.add x v acc
     | Pat (c,args), D (_v, DPat (dc, dargs)) ->
        let n = Array.length args in
