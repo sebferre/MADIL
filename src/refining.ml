@@ -217,12 +217,16 @@ let refinements
                  args))
     | _, Model.Fail -> Myseq.empty
     | _, Model.Alt (xc,c,m1,m2) ->
-       Myseq.interleave (* TODO: add expressions *)
+       Myseq.interleave
          [ aux_expr ctx k m selected_reads;
            
            (match c with
-            | Undet _ -> aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads
-            | True | False | BoolExpr _ -> Myseq.empty);
+            | Undet _ ->
+               Myseq.concat
+                 [ aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads;
+                   aux_alt_prune ctx k m m1 m2 selected_reads ]
+            | True | False -> assert false
+            | BoolExpr _ -> Myseq.empty);
            
            (let ctx1 = (fun p1 -> ctx (Model.Branch (true,p1))) in
             let sel1 =
@@ -300,6 +304,19 @@ let refinements
         make_alt_if_allowed_and_needed
           ~allowed:(asd#alt_opt k) ~supp ~nb
           m_new m varseq' best_reads)
+  and aux_alt_prune ctx k m m1 m2 selected_reads =
+    aux_gen ctx k m selected_reads
+      (fun (read : _ Model.read) ->
+        match read.data with
+        | Data.D (_, DAlt (b, d12)) ->
+           if b
+           then [m1, varseq0, d12]
+           else [m2, varseq0, d12]
+        | _ -> assert false)
+      (fun m' varseq' ~supp ~nb ~alt best_reads ->
+        if supp = nb
+        then Myseq.return (m', varseq', best_reads)
+        else Myseq.empty)
   and aux_alt_cond_undet ctx k m xc c m1 m2 selected_reads =
     aux_gen ctx k m selected_reads
       (fun (read : _ Model.read) ->
