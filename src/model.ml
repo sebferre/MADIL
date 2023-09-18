@@ -403,45 +403,59 @@ let parseur
 let encode_data
       ~(xp_model : 'model html_xp)
       ~(xp_data : 'data html_xp)
-      ~(encoding_pat : 'constr -> 'dconstr -> 'encoding array -> 'encoding)
+      ~(encoding_pat : 'constr -> ('dconstr * 'encoding array -> 'encoding))
       ~(encoding_expr : 'value -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : 'encoding list -> 'encoding)
       ~(dl_of_encoding : 'encoding -> dl)
-      (m : ('var,'constr,'func) model as 'model) (d : ('value,'dconstr) data as 'data) : dl =
-  let rec aux m d =
-    match m, d with
-    | Def (x,m1), _ ->
-       aux m1 d
-    | Pat (c,args), D (_, DPat (dc, dargs)) ->
-       let encs = Array.map2 aux args dargs in
-       encoding_pat c dc encs
-    | Fail, _ -> assert false
-    | Alt (xc,c,m1,m2), D (_, DAlt (b,d12)) -> (* choice determined by model *)
-       let dl_choice =
+      (m : ('var,'constr,'func) model as 'model)
+       : (('value,'dconstr) data as 'data) -> dl =
+  let rec aux m =
+    match m with
+    | Def (x,m1) ->
+       let encoder_m1 = aux m1 in
+       (fun d -> encoder_m1 d)
+    | Pat (c,args) ->
+       let encoding_c = encoding_pat c in
+       let encoder_args = Array.map aux args in
+       (function
+        | D (_, DPat (dc, dargs)) ->
+           let encs = Array.map2 (@@) encoder_args dargs in
+           encoding_c (dc, encs)
+        | _ -> assert false)
+    | Fail ->
+       (fun _ -> assert false)
+    | Alt (xc,c,m1,m2) ->
+       let encoder_choice =
          match c with
-         | Undet prob -> Mdl.Code.usage (if b then prob else 1. -. prob)
-         | True | False | BoolExpr _ -> 0. in
-       let enc12 = aux (if b then m1 else m2) d12 in
-       encoding_alt dl_choice enc12
-    | Seq (n,lm1), D (_, DSeq (dn,ld1)) ->
-       assert (n = dn);
-       let encs = List.map2 aux lm1 ld1 in
-       (* no need to encode 'dn', equal 'n' in model *)
-       encoding_seq encs
-    | Cst m1, _ -> raise TODO
-    | Expr e, D (v, _) ->
-       encoding_expr v
-    | _ ->
-       print_endline "ERROR in encode_data: (model, data)";
-       pp xp_model m; print_newline ();
-       pp xp_data d; print_newline ();
-       assert false
+         | Undet prob -> (fun b -> Mdl.Code.usage (if b then prob else 1. -. prob))
+         | True | False | BoolExpr _ -> (fun b -> 0.) in
+       let encoder_m1 = aux m1 in
+       let encoder_m2 = aux m2 in
+       (function
+        | D (_, DAlt (b,d12)) -> (* choice determined by model *)
+           let dl_choice = encoder_choice b in
+           let enc12 = if b then encoder_m1 d12 else encoder_m2 d12 in
+           encoding_alt dl_choice enc12
+        | _ -> assert false)
+    | Seq (n,lm1) ->
+       let encoder_lm1 = List.map aux lm1 in
+       (function
+        | D (_, DSeq (dn,ld1)) ->
+           assert (n = dn);
+           let encs = List.map2 (@@) encoder_lm1 ld1 in
+           (* no need to encode 'dn', equal 'n' in model *)
+           encoding_seq encs
+        | _ -> assert false)
+    | Cst m1 -> raise TODO
+    | Expr e ->
+       (fun (D (v, _)) -> encoding_expr v)
   in
-  Common.prof "Model.encode_data" (fun () ->
-  let enc = aux m d in
+  let encoder = aux m in
+  fun d -> Common.prof "Model.encode_data/data" (fun () ->
+  let enc = encoder d in
   dl_of_encoding enc)
-
+  
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
   Mdl.Code.universal_int_star rank -. 1.

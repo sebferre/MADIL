@@ -180,7 +180,7 @@ module type DOMAIN =
 
     (* description lengths *)
       
-    val encoding_pat : constr -> dconstr -> encoding array -> encoding
+    val encoding_pat : constr -> (dconstr * encoding array -> encoding)
     val encoding_expr : value -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_seq : encoding list -> encoding
