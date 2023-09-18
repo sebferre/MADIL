@@ -133,6 +133,7 @@ object
 
   method activate = function
     | InputTask i ->
+       reset_memoization ();
        let name, task = i#get in
        let state = initial_focus name task in
        Some (new arc_place lis state)

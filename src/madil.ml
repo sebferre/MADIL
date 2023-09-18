@@ -258,12 +258,29 @@ module Make (Domain : DOMAIN) =
         ~encoding_seq
         ~dl_of_encoding
 
-    let dl_model : nb_env_vars:int -> kind -> model -> dl =
+    let (dl_model, reset_dl_model) : (nb_env_vars:int -> kind -> model -> dl) * (unit -> unit) =
+      let nb_expr_ast, reset_nb_expr_ast =
+        Expr.nb_expr_ast
+          ~funcs:asd#funcs in
+      let size_model_ast =
+        Model.size_model_ast
+          ~asd in
+      let nb_model_ast, reset_nb_model_ast =
+        Model.nb_model_ast
+          ~asd
+          ~nb_expr_ast in
+      let dl_model_params =
+        Model.dl_model_params
+          ~dl_constr_params
+          ~dl_func_params in
       Model.dl
-        ~asd
-        ~dl_constr_params
-        ~dl_func_params
-        ~dl_var
+        ~size_model_ast
+        ~nb_model_ast
+        ~dl_model_params
+        ~dl_var,
+      (fun () ->
+        reset_nb_expr_ast ();
+        reset_nb_model_ast ())
 
     (* reading and writing *)
 
@@ -368,5 +385,10 @@ module Make (Domain : DOMAIN) =
     let task_from_file : string -> task =
       Task.from_file
         ~value_of_json
+
+    (* memory management *)
+      
+    let reset_memoization () =
+      reset_dl_model ()
 
   end

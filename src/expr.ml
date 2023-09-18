@@ -332,12 +332,13 @@ let size_expr_ast (* for DL computing *)
 
 let nb_expr_ast (* for DL computing *)
       ~(funcs : 't kind -> ('func * 't kind array) list)
-    : 't kind -> int -> float =
+    : ('t kind -> int -> float) * (unit -> unit) =
   let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
+  let reset () = Hashtbl.clear tab in
   let rec aux (k : 't kind) (size : int) : float =
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
-    | None ->
+    | None -> (* QUICK *)
        let nb =
          List.fold_left
            (fun nb (f,k_args) ->
@@ -351,7 +352,7 @@ let nb_expr_ast (* for DL computing *)
        Hashtbl.add tab (k,size) nb;
        nb
   in
-  aux
+  aux, reset
   
 let dl_expr_params
       ~(dl_func_params : 'func -> dl)

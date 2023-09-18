@@ -144,38 +144,3 @@ let dl_compare (dl1 : float) (dl2 : float) =
   if dl1 < dl2 then -1
   else if dl1 = dl2 then 0
   else 1 [@@inline]
-
-type 't asd = ASD of ('t -> (string * int * 't list) list) (* constructor name, size, and args *)
-(* there must be a single AST at most with size=0 *)
-(* typical constructor size is 1 *)
-    
-let make_dl_ast (ASD asd : 't asd)
-    : 't (* AST type *) -> int (* AST size *) -> dl (* dl of ASTs of that size *) =
-  let tab : ('t * int, float) Hashtbl.t = Hashtbl.create 1013 in
-  let rec aux (t : 't) (n : int) : float =
-    match Hashtbl.find_opt tab (t,n) with
-    | Some card -> card
-    | None ->
-       let prods = asd t in
-       let card =
-         List.fold_left (* sum over productions *)
-           (fun res (_name, size, args) ->
-             let card_prod =
-               if args = [] then (* leaf node *)
-                 if n = size then 1. else 0.
-               else (* internal node *)
-                 if n >= size
-                 then sum_conv (List.map aux args) (n-size)
-                 else 0. in
-             res +. card_prod)
-           0. prods
-       in
-       Hashtbl.add tab (t,n) card;
-       card
-  in
-  fun t n ->
-  let card =
-    if n = 0 then 1. (* only one empty ast *)
-    else aux t n in
-  assert (card > 0.);
-  Mdl.log2 card

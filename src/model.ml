@@ -473,30 +473,32 @@ let size_model_ast (* for DL computing, QUICK *)
   aux m
 
 let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
-      ~(asd : ('t,'constr,'func) asd) =
+      ~(asd : ('t,'constr,'func) asd)
+      ~(nb_expr_ast : 't kind -> int -> float) =
   let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
-  let rec aux (k : 't kind) (size : int) : float =
+  let reset () = Hashtbl.clear tab in
+  let rec aux (k : 't kind) (size : int) : float (* float to handle large numbers *) =
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
-    | None ->
+    | None -> (* QUICK *)
        let nb = (* counting possible expressions *)
          match asd#expr_opt k with
          | None -> 0.
-         | Some k1 -> Expr.nb_expr_ast ~funcs:asd#funcs k1 size in
+         | Some k1 -> nb_expr_ast k1 size in
        let nb = (* counting possible alternatives *)
          if size >= size_alt && asd#alt_opt k
          then nb +. sum_conv [aux_cond; aux k; aux k] (size - size_alt)
                              (* split between condition, left model, right model *)
          else nb in
-       match k with
-       | KBool -> nb (* no Boolean model construct *)
-       | KVal t -> (* counting Pat (c,args) *)
-          let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
-          let nb =
-            if size = 0 && default_constr_opt <> None
-            then nb +. 1.
-            else nb in
-          let nb =
+       let nb =
+         match k with
+         | KBool -> nb (* no Boolean model construct *)
+         | KVal t -> (* counting Pat (c,args) *)
+            let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
+            let nb =
+              if size = 0 && default_constr_opt <> None
+              then nb +. 1.
+              else nb in
             List.fold_left
               (fun nb (c,k_args) ->
                 if k_args = [||] (* leaf node *)
@@ -505,25 +507,23 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
                   if size >= 1
                   then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
                   else nb)
-              nb other_constr_args in
-          Hashtbl.add tab (k,size) nb;
-          nb
-       | KSeq k1 -> (* counting Seq (n,lm1) *)
-          let aux_k1 = aux k1 in
-          let size1 = size-1 in
-          Common.fold_for
-            (fun n nb ->
-              nb +. sum_conv (List.init n (fun _ -> aux_k1)) size1)
-            1 (max 9 size1)
-            nb
+              nb other_constr_args
+         | KSeq k1 -> (* counting Seq (n,lm1) *)
+            let aux_k1 = aux k1 in
+            let size1 = size-1 in
+            Common.fold_for
+              (fun n nb ->
+                nb +. sum_conv (List.init n (fun _ -> aux_k1)) size1)
+              1 (max 9 size1)
+              nb in
+       Hashtbl.add tab (k,size) nb;
+       nb
   and aux_cond (size : int) : float =
     if size = 0
     then 1. (* Undet *)
-    else Expr.nb_expr_ast ~funcs:asd#funcs KBool size (* BoolExpr *)
+    else nb_expr_ast KBool size (* BoolExpr *)
   in
-  fun (k : 't kind) (size : int) (* AST size *) -> (* float to handle large numbers *)
-  Common.prof "Model.nb_model_ast" (fun () ->
-  aux k size)
+  aux, reset
 
 let dl_model_params
       ~(dl_constr_params : 'constr -> dl)
@@ -555,13 +555,10 @@ let dl_model_params
   aux
 
 let dl
-      ~(asd : ('t,'constr,'func) asd)
-      ~(dl_constr_params : 'constr -> dl)
-      ~(dl_func_params : 'func -> dl)
+      ~(size_model_ast : ('var,'constr,'func) model -> int)
+      ~(nb_model_ast : 't kind -> int -> float)
+      ~(dl_model_params : dl_var:('var -> dl) -> ('var,'constr,'func) model -> dl)
       ~(dl_var : nb_env_vars:int -> 'var -> dl) =
-  let size_model_ast = size_model_ast ~asd in
-  let nb_model_ast = nb_model_ast ~asd in
-  let dl_model_params = dl_model_params ~dl_constr_params ~dl_func_params in
   fun
     ~(nb_env_vars : int)
     (k : 't kind) (m : ('var,'constr,'func) model) ->
