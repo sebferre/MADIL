@@ -97,7 +97,7 @@ let score_learned_model
             | `TEST -> read
                          ~dl_assuming_contents_known:false
                          ~env ~bindings:Expr.bindings0
-                         m.Task_model.input_kind m.Task_model.input_model input in
+                         m.Task_model.input_model input in
           ( match input_reads with
             | Result.Ok reads ->
                List.iter

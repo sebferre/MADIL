@@ -7,17 +7,15 @@ open Model
 (* task models *)
    
 type ('t,'var,'constr,'func) task_model =
-  { input_kind : 't kind;
-    input_model : ('var,'constr,'func) model; (* no reference *)
+  { input_model : ('t,'var,'constr,'func) model; (* no reference *)
     input_varseq : 'var Myseq.t;
     nb_env_vars : int; (* nb of visible vars in input model *)
-    output_kind : 't kind;
-    output_model : ('var,'constr,'func) model;
+    output_model : ('t,'var,'constr,'func) model;
     output_varseq : 'var Myseq.t
   }
        
 let xp_task_model
-      ~(xp_model : ('var,'constr,'func) model html_xp)
+      ~(xp_model : ('t,'var,'constr,'func) model html_xp)
     :  ('t,'var,'constr,'func) task_model html_xp =
   fun ~html print m ->
   xp_model ~html print m.input_model;
@@ -39,7 +37,7 @@ let read_pairs
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
-               't kind -> (('var,'constr,'func) model as 'model) -> 'value -> 'read list result)
+               (('t,'var,'constr,'func) model as 'model) -> 'value -> 'read list result)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       
       ~(pruning : bool)
@@ -58,7 +56,7 @@ let read_pairs
              read
                ~dl_assuming_contents_known:pruning
                ~env ~bindings:Expr.bindings0
-               m.input_kind m.input_model input in (* no diff allowed during training *)
+               m.input_model input in (* no diff allowed during training *)
            let| pair_reads = 
              let+|+ ri = Result.Ok input_reads in
              let bindings = get_bindings m.input_model ri.data in
@@ -66,7 +64,7 @@ let read_pairs
                read
                  ~dl_assuming_contents_known:false
                  ~env:ri.data ~bindings
-                 m.output_kind m.output_model output in
+                 m.output_model output in
              let dl = ri.dl +. ro.dl in
              Result.Ok [(ri,ro,dl)] in
            let pair_reads =
@@ -142,11 +140,11 @@ let apply
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
-               't kind -> (('var,'constr,'func) model as 'model) -> 'value ->
+               (('t,'var,'constr,'func) model as 'model) -> 'value ->
                ('value,'dconstr,'var,'func) read list result)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
-                't kind -> 'model -> 'info -> ('data * 'value) result)
+                'model -> 'info -> ('data * 'value) result)
       ~(env : 'data)
       (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
     : ('data * 'data * 'value) list result =
@@ -154,31 +152,31 @@ let apply
   let+|+ read_i =
     read
       ~dl_assuming_contents_known:true ~env ~bindings:Expr.bindings0
-      m.input_kind m.input_model v_i in
+      m.input_model v_i in
   let data_i = read_i.data in
   let bindings = get_bindings m.input_model data_i in
   let| data_o, v_o =
     write
       ~bindings
-      m.output_kind m.output_model info_o in
+      m.output_model info_o in
   Result.Ok [(data_i, data_o, v_o)])
 
 (* refinements *)
   
-type ('var,'constr,'func) refinement =
+type ('t,'var,'constr,'func) refinement =
   | RInit
-  | Rinput of 'constr path * ('var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
-  | Routput of 'constr path * ('var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Rinput of 'constr path * ('t,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Routput of 'constr path * ('t,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
 
-let refinement_support : ('var,'constr,'func) refinement -> int = function
+let refinement_support : ('t,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
   | Rinput (_,_,supp,_) -> supp
   | Routput (_,_,supp,_) -> supp             
 
 let xp_refinement
       ~(xp_path : 'constr path html_xp)
-      ~(xp_model : ('var,'constr,'func) model html_xp)
-    : ('var,'constr,'func) refinement html_xp =
+      ~(xp_model : ('t,'var,'constr,'func) model html_xp)
+    : ('t,'var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
     | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
@@ -197,8 +195,8 @@ let xp_refinement
   in
   aux
 
-let refine (r : ('var,'constr,'func) refinement) (m : ('t,'var,'constr,'func) task_model)
-    : (('var,'constr,'func) refinement * ('t,'var,'constr,'func) task_model) result =
+let refine (r : ('t,'var,'constr,'func) refinement) (m : ('t,'var,'constr,'func) task_model)
+    : (('t,'var,'constr,'func) refinement * ('t,'var,'constr,'func) task_model) result =
   match r with
   | RInit -> Result.Error (Failure "Task_model.refine")
   | Rinput (p,ri,supp,dl') ->

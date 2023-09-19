@@ -14,7 +14,7 @@ let learn
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
           (('value,'dconstr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
-          ((('var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
+          ((('t,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
       ~(task_prunings :
           'task_model -> 'reads ->
           ('refinement * 'task_model) Myseq.t)

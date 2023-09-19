@@ -60,7 +60,7 @@ module type TYPES =
     type expr = (var,func) Expr.expr
     val xp_expr : expr html_xp
 
-    type model = (var,constr,func) Model.model
+    type model = (t,var,constr,func) Model.model
     val xp_model : model html_xp
 
     type asd = (t,constr,func) Model.asd
@@ -68,7 +68,7 @@ module type TYPES =
     type task_model = (t,var,constr,func) Task_model.task_model
     val xp_task_model : task_model html_xp
 
-    type refinement = (var,constr,func) Task_model.refinement
+    type refinement = (t,var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
     type read = (value,dconstr,var,func) Model.read
@@ -117,7 +117,7 @@ module Defined_types (T : BASIC_TYPES) =
     type expr = (var,func) Expr.expr
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
 
-    type model = (var,constr,func) Model.model
+    type model = (t,var,constr,func) Model.model
     let xp_model : model html_xp = Model.xp_model ~xp_var ~xp_pat ~xp_func
 
     type asd = (t,constr,func) Model.asd
@@ -125,7 +125,7 @@ module Defined_types (T : BASIC_TYPES) =
     type task_model = (t,var,constr,func) Task_model.task_model
     let xp_task_model : task_model html_xp = Task_model.xp_task_model ~xp_model
 
-    type refinement = (var,constr,func) Task_model.refinement
+    type refinement = (t,var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
     type read = (value,dconstr,var,func) Model.read
@@ -225,7 +225,7 @@ module Make (Domain : DOMAIN) =
       Model.get_bindings
         ~value_of_bool
 
-    let eval : kind -> model -> bindings -> model result =
+    let eval : model -> bindings -> model result =
       Model.eval
         ~asd
         ~eval_func
@@ -258,7 +258,7 @@ module Make (Domain : DOMAIN) =
         ~encoding_seq
         ~dl_of_encoding
 
-    let (dl_model, reset_dl_model) : (nb_env_vars:int -> kind -> model -> dl) * (unit -> unit) =
+    let (dl_model, reset_dl_model) : (nb_env_vars:int -> model -> dl) * (unit -> unit) =
       let nb_expr_ast, reset_nb_expr_ast =
         Expr.nb_expr_ast
           ~funcs:asd#funcs in
@@ -337,9 +337,9 @@ module Make (Domain : DOMAIN) =
 
     let dl_task_model (m : task_model) : dl * dl =
       dl_model ~nb_env_vars:0
-        m.input_kind m.input_model,
+        m.input_model,
       dl_model ~nb_env_vars:m.nb_env_vars
-        m.output_kind m.output_model
+        m.output_model
     
     let read_pairs =
       Task_model.read_pairs
