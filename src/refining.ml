@@ -185,7 +185,10 @@ let refinements
       +. alpha *. Mdl.sum best_reads
                     (fun {matching; read; new_data} ->
                       if matching
-                      then read.dl -. dl_data_m read.data +. dl_data_m_new new_data
+                      then
+                        let dl_d = dl_data_m read.data in
+                        let dl_d_new = dl_data_m_new new_data in
+                        read.dl -. dl_d +. dl_d_new
                       else 0.) (* no change in this case *) in
     Myseq.return (p, m_new, varseq', supp, dl_new)
   in

@@ -339,7 +339,11 @@ let nb_expr_ast (* for DL computing *)
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
     | None -> (* QUICK *)
-       let nb =
+       let nb = (* counting Ref *)
+         if size = 1
+         then 1.
+         else 0. in
+       let nb = (* counting Apply-s *)
          List.fold_left
            (fun nb (f,k_args) ->
              if k_args = [||] (* leaf node *)
@@ -348,7 +352,8 @@ let nb_expr_ast (* for DL computing *)
                if size >= 1
                then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
-           0. (funcs k) in
+           nb (funcs k) in
+       (* not yet counting Arg and Fun-s *)
        Hashtbl.add tab (k,size) nb;
        nb
   in

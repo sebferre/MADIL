@@ -184,8 +184,8 @@ let xp_refinement
     | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
     | Routput (p,ro,supp,dl') -> aux2 ~html print " Out" p ro supp dl' "o"
   and aux2 ~html print in_out p r supp dl' i_o =
-    (*if dl' <> 0. (* undefined value *) then
-      print#string (Printf.sprintf " / ~%.3f%s)  " dl' i_o); *)
+    (* if dl' <> 0. (* undefined value *) then (* showing DL estimate *)
+      print#string (Printf.sprintf " (~%.3f) " dl'); *)
     xp_model ~html print r;
     if supp <> 0 (* undefined value *) then
       aux_support ~html print supp;

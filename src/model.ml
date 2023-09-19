@@ -579,6 +579,7 @@ let dl
   Common.prof "Model.dl" (fun () ->
   let size = size_model_ast m in
   let nb = nb_model_ast k size in
+  assert (nb > 0.); (* as [m] has this size, the nb of AST of this size must not be zero *)
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
   +. dl_model_params
