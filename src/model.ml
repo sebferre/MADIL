@@ -268,7 +268,7 @@ let eval (* QUICK *)
     | _, Def (x,m1) ->
        let| m1' = aux k m1 in
        Result.Ok (Def (x,m1'))
-    | KVal t, Pat (c,args) ->
+    | KPat t, Pat (c,args) ->
        let k_args = asd#constr_args t c in
        let| l_args' =
          list_map_result
@@ -507,7 +507,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
        let nb =
          match k with
          | KBool -> nb (* no Boolean model construct *)
-         | KVal t -> (* counting Pat (c,args) *)
+         | KPat t -> (* counting Pat (c,args) *)
             let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
             let nb =
               if size = 0 && default_constr_opt <> None
@@ -724,7 +724,7 @@ let path_kind
   let rec aux k p =
     match k, p with
     | _, This -> k
-    | KVal t, Field (c,i,p1) ->
+    | KPat t, Field (c,i,p1) ->
        let kind_args = asd#constr_args t c in
        let k1 = try kind_args.(i) with _ -> assert false in
        aux k1 p1

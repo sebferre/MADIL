@@ -3,7 +3,7 @@ open Madil_common
 
 type 't kind =
   | KBool
-  | KVal of 't
+  | KPat of 't
   | KSeq of 't kind
 
 type 't signature = { res : 't kind; args : 't kind array }
@@ -13,7 +13,7 @@ let xp_kind
     : 't kind html_xp =
   let rec aux ~html print = function
     | KBool -> print#string "bool"
-    | KVal t -> xp_type ~html print t
+    | KPat t -> xp_type ~html print t
     | KSeq k1 -> aux ~html print k1; print#string "+"
   in
   aux

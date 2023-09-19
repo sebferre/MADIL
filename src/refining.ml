@@ -198,7 +198,7 @@ let refinements
     match k, m with
     | _, Model.Def (x,m1) ->
        aux ctx k m1 selected_reads
-    | Kind.KVal t, Model.Pat (c,args) ->
+    | Kind.KPat t, Model.Pat (c,args) ->
        let k_args = asd#constr_args t c in
        Myseq.interleave
          (aux_expr ctx k m selected_reads
