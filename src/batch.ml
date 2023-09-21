@@ -113,7 +113,8 @@ let score_learned_model
 	  match apply_model ~env m input info_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
-               (fun (score,rank,label,failed_derived_grids) (gdi, gdo, derived) ->
+               (fun (score,rank,label,failed_derived_grids) (gdi, gdo) ->
+                 let derived = Data.value gdo in
                  if score=1 then
                    score, rank, label, failed_derived_grids (* already success *)
                  else if rank > 3 then

@@ -154,6 +154,7 @@ module type DOMAIN =
     val max_nb_parse : int ref
     val max_parse_dl_factor : float ref
     val max_nb_reads : int ref
+    val max_nb_writes : int ref
     val alpha : float ref
     val max_refinements : int ref
 
@@ -306,6 +307,7 @@ module Make (Domain : DOMAIN) =
 
     let write =
       Model.write
+        ~max_nb_writes:(!max_nb_writes)
         ~eval
         ~generator
 

@@ -144,10 +144,10 @@ let apply
                ('value,'dconstr,'var,'func) read list result)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
-                'model -> 'info -> ('data * 'value) result)
+                'model -> 'info -> 'data list result)
       ~(env : 'data)
       (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
-    : ('data * 'data * 'value) list result =
+    : ('data * 'data) list result =
   Common.prof "Task_model.apply" (fun () ->
   let+|+ read_i =
     read
@@ -155,11 +155,11 @@ let apply
       m.input_model v_i in
   let data_i = read_i.data in
   let bindings = get_bindings m.input_model data_i in
-  let| data_o, v_o =
+  let+|+ data_o =
     write
       ~bindings
       m.output_model info_o in
-  Result.Ok [(data_i, data_o, v_o)])
+  Result.Ok [(data_i, data_o)])
 
 (* refinements *)
   

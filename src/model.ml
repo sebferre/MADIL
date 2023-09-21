@@ -313,7 +313,7 @@ let eval (* QUICK *)
   
 (* model-based generation *)
 
-type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data
+type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 
 let generator
       ~(generator_pat: 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
@@ -326,30 +326,37 @@ let generator
        let gen_args = Array.map gen args in
        generator_pat c gen_args
     | Fail ->
-       (fun info -> raise Not_found)
-    | Alt (xc,c,m1,m2) -> (* TODO: make stochastic *)
-       let b, m12 =
+       (fun info -> Myseq.empty)
+    | Alt (xc,c,m1,m2) ->
+       let gen_b_d1 =
+         let gen_m1 = gen m1 in
+         (fun info ->
+           let* d1 = gen_m1 info in
+           Myseq.return (true, d1)) in
+       let gen_b_d2 =
+         let gen_m2 = gen m2 in
+         (fun info ->
+           let* d2 = gen_m2 info in
+           Myseq.return (false, d2)) in
+       let gen_b_d12 =
          match c with
          | Undet prob ->
-            (match m1, m2 with
-             | Fail, Fail -> true, Fail
-             | Fail, _ -> false, m2
-             | _, Fail -> true, m1
-             | _ -> if prob >= 0.5 then true, m1 else false, m2)
-         | True -> true, m1
-         | False -> false, m2
+            if prob >= 0.5
+            then (fun info -> Myseq.interleave [gen_b_d1 info; gen_b_d2 info])
+            else (fun info -> Myseq.interleave [gen_b_d2 info; gen_b_d1 info])
+         | True -> gen_b_d1
+         | False -> gen_b_d2
          | BoolExpr _ -> assert false in
-       let gen_m12 = gen m12 in
        (fun info ->
-         let d12 = gen_m12 info in
+         let* b, d12 = gen_b_d12 info in
          let v = value d12 in
-         D (v, DAlt (b, d12)))
+         Myseq.return (D (v, DAlt (b, d12))))
     | Seq (n,k1,lm1) ->
        let gen_lm1 = List.map gen lm1 in
        (fun info ->
-         let ld = List.map (fun gen_mi -> gen_mi info) gen_lm1 in
+         let* ld = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_lm1) in
          let v = dseq_value ld in
-         D (v, DSeq (n, ld)))
+         Myseq.return (D (v, DSeq (n, ld))))
     | Cst m1 -> raise TODO
     | Expr (k,e) -> assert false
   in
@@ -684,21 +691,20 @@ let read
 exception Generate_failure
   
 let write
+      ~(max_nb_writes : int)
       ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
       ~(generator : ('t,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
       
       ~(bindings : ('var,'value) Expr.bindings)
       (m0 : ('t,'var,'constr,'func) model)
       (info : 'info)
-    : (('value,'dconstr) data * 'value) result =
+    : ('value,'dconstr) data list result =
   Common.prof "Model.write" (fun () ->
   let| m = eval m0 bindings in
-  let| d =
-    try Result.Ok (generator m info)
-    with Not_found -> Result.Error Generate_failure in
-  let v = value d in
-  Result.Ok (d, v))
-
+  let ld, _ = Myseq.take max_nb_writes (generator m info) in
+  if ld = []
+  then Result.Error Generate_failure
+  else Result.Ok ld)
 
 (* paths and model refinement *)
 
