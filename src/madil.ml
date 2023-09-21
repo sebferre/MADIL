@@ -209,7 +209,11 @@ module type DOMAIN =
     val log_refining : refinement -> task_model -> pairs_reads -> dl -> unit
 
     val default_name_task : string * task
+
+    (* memoization *)
       
+    val reset_memoization : unit -> unit
+
   end
 
 module Make (Domain : DOMAIN) =
@@ -389,6 +393,7 @@ module Make (Domain : DOMAIN) =
     (* memory management *)
       
     let reset_memoization () =
-      reset_dl_model ()
+      reset_dl_model ();
+      reset_memoization ()
 
   end
