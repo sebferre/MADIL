@@ -338,9 +338,9 @@ let refinements
         | _ -> assert false)
       (fun e varseq' ~supp ~nb ~alt best_reads ->
         let best_reads =
-          if supp <= 1
+          (*if supp <= 1
           then best_reads (* the condition should be valid for at least two examples *)
-          else
+          else*) (* too strict, given low number of examples *)
             extend_partial_best_reads
               selected_reads best_reads
               (fun read ->
