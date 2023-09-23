@@ -229,12 +229,16 @@ module Make (Domain : DOMAIN) =
       Model.get_bindings
         ~value_of_bool
 
+    let eval_expr : expr -> bindings -> value result =
+      Expr.eval
+        ~eval_unbound_var
+        ~eval_func
+        ~eval_arg
+      
     let eval : model -> bindings -> model result =
       Model.eval
         ~asd
-        ~eval_func
-        ~eval_unbound_var
-        ~eval_arg
+        ~eval_expr
         ~model_of_value
         ~bool_of_value
 

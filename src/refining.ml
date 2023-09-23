@@ -215,7 +215,7 @@ let refinements
                           | _ -> assert false)
                         selected_reads))
                  args))
-    | Model.Fail -> Myseq.empty
+    | Model.Fail -> assert false
     | Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave
          [ aux_expr ctx m selected_reads;

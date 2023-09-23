@@ -5,18 +5,18 @@ open Data
 
 type ('var,'func) cond_model =
   | Undet of float (* undetermined condition, probability for left choice *)
-  | True (* always true condition *)
-  | False (* always false condition *)
-  | BoolExpr of ('var,'func) Expr.expr (* computed condition *)
+  | True (* always true condition - only in evaluated model *)
+  | False (* always false condition - only in evaluated model *)
+  | BoolExpr of ('var,'func) Expr.expr (* computed condition - not in evaluated model *)
  
 type ('t,'var,'constr,'func) model =
-  | Def of 'var * ('t,'var,'constr,'func) model (* a var is an id for the value at this sub-model *)
+  | Def of 'var * ('t,'var,'constr,'func) model (* a var is an id for the value at this sub-model - not in evaluated model *)
   | Pat of 't * 'constr * ('t,'var,'constr,'func) model array (* constr type may be different from data constr *)
-  | Fail (* like an empty alternative *)
+  | Fail (* like an empty alternative - only in evaluated model *)
   | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('t,'var,'constr,'func) model * ('t,'var,'constr,'func) model
   | Seq of int * 't kind (* elt kind *) * ('t,'var,'constr,'func) model list
   | Cst of ('t,'var,'constr,'func) model
-  | Expr of 't kind * ('var,'func) Expr.expr
+  | Expr of 't kind * ('var,'func) Expr.expr (* not in evaluated model *)
 
 type 'constr path =
   | This
@@ -61,7 +61,7 @@ let xp_model
            args in
        xp_pat c xp_args ~html print ()
 
-    | Fail -> print#string "fail"
+    | Fail -> assert false
     | Alt (xc, Undet prob, m1, m2) -> (* m1 | m2 *)
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
@@ -100,10 +100,8 @@ let xp_model
   and aux_cond ~html print = function
     | Undet prob ->
        aux_prob ~html print prob
-    | True ->
-       print#string "true"
-    | False ->
-       print#string "false"
+    | True -> assert false
+    | False -> assert false
     | BoolExpr e ->
        if html then print#string "<span class=\"model-expr\">";
        Expr.xp_expr ~xp_var ~xp_func ~html print e;
@@ -160,50 +158,6 @@ class virtual ['t,'constr,'func] asd =
     method virtual expr_opt : 't kind -> 't kind option
     method virtual alt_opt : 't kind -> bool
   end
-
-(*
-let make_asd
-      ~(all_constrs : ('t (* for each type *)
-                      * 'constr option (* is there a default constr? *)
-                      * ('constr * 't kind array) list (* other constrs and their arg kind *)
-                     ) list)
-      ~(all_funcs : ('t kind (* for each kind *)
-                     * 't kind option (* can it be an expr? *)
-                     * ('func * 't kind array) list (* funcs resulting in this kind, and their arg kind *)
-                    ) list) : ('t,'constr,'func) asd =
-  let map_constr =
-    List.fold_left
-      (fun m (t, default_constr_opt, other_constr_args) ->
-        Mymap.add t (default_constr_opt, other_constr_args) m)
-      Mymap.empty all_constrs in
-  let map_expr, map_funcs =
-    List.fold_left
-      (fun (me,mf) (k, expr_opt, l_f_args) ->
-        (match expr_opt with None -> me | Some k1 -> Mymap.add k k1 me),
-        Mymap.add k l_f_args mf)
-      (Mymap.empty, Mymap.empty) all_funcs in
-  object
-    method default_and_other_pats t =
-      match Mymap.find_opt t map_constr with
-      | Some default_others -> default_others
-      | None -> None, []
-    method constr_args t c =
-      match Mymap.find_opt t map_constr with
-      | Some (default,others) ->
-         if default = Some c then [||]
-         else
-           (match List.assoc_opt c others with
-            | Some args -> args
-            | None -> failwith "Model.asd#constr_args: unexpected constr for type")
-      | None -> failwith "Model.asd#constr_args: unexpected type"
-    method expr_opt k =
-      Mymap.find_opt k map_expr
-    method funcs k =
-      match Mymap.find_opt k map_funcs with
-      | Some funcs -> funcs
-      | None -> []
-  end
- *)
         
 (* model evaluation *)
 
@@ -217,7 +171,7 @@ let binding_vars
        Bintree.add x acc
     | Pat (t,c,args) ->
        Array.fold_right aux args acc
-    | Fail -> acc
+    | Fail -> assert false
     | Alt (xc,cond,m1,m2) ->
        let acc = aux m1 acc in
        let acc = aux m2 acc in
@@ -249,7 +203,7 @@ let get_bindings  (* QUICK *)
          ref_acc := acc
        done;
        !ref_acc
-    | Fail, _ -> assert false (* because parsing and generation must have failed here *)
+    | Fail, _ -> assert false (* because Fail only occurs in evaluated models *)
     | Alt (xc,c,m1,m2), D (_v, DAlt (_prob,b,d12)) ->
        let acc = aux (if b then m1 else m2) d12 acc in
        Mymap.add xc (value_of_bool b) acc
@@ -257,26 +211,25 @@ let get_bindings  (* QUICK *)
        assert (n = dn);
        List.fold_right2 aux lm1 ld1 acc
     | Cst _, _ -> raise TODO
-    | Expr _, _ -> acc (* expressions only in task output but TODO in general expression values should be accessible *)
+    | Expr _, _ -> acc
     | _ -> assert false
   in
   aux m0 d0 Expr.bindings0
 
-let eval (* QUICK *)
+exception EmptyAlt
+  
+let eval (* from model to evaluated model: resolving expr, ignoring def *)
       ~asd
-      ~eval_unbound_var ~eval_func ~eval_arg (* TODO: replace par eval_expr ? *)
+      ~(eval_expr : ('var,'func) Expr.expr -> ('var,'value) Expr.bindings -> 'value result)
       ~(model_of_value : 't kind -> 'value -> ('t,'var,'constr,'func) model result)
       ~(bool_of_value : 'value -> bool result)
       (m : ('t,'var,'constr,'func) model)
       (bindings : ('var,'value) Expr.bindings)
     : ('t,'var,'constr,'func) model result =
   (* INV: eval must ensure that the resulting model has data that is compatible with the given model, so that encoding is well-defined. E.g. no Alt simplification when condition evaluates to True/False. *)
-  let eval_expr = Expr.eval ~eval_unbound_var ~eval_func ~eval_arg in
-  let rec aux m =
+  let rec aux m = (* QUICK *)
     match m with
-    | Def (x,m1) ->
-       let| m1' = aux m1 in
-       Result.Ok (Def (x,m1'))
+    | Def (x,m1) -> aux m1
     | Pat (t,c,args) ->
        let| l_args' =
          list_map_result
@@ -284,13 +237,16 @@ let eval (* QUICK *)
            (Array.to_list args) in
        let args' = Array.of_list l_args' in
        Result.Ok (Pat (t,c,args'))
-    | Fail ->
-       Result.Ok Fail
+    | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        let| c' = aux_cond c in
        let m1' = match aux m1 with Result.Ok m1' -> m1' | Result.Error _ -> Fail in
        let m2' = match aux m2 with Result.Ok m2' -> m2' | Result.Error _ -> Fail in
-       Result.Ok (Alt (xc,c',m1',m2'))
+       (match c', m1', m2' with
+        | Undet _, Fail, Fail
+          | True, Fail, _
+          | False, _, Fail -> Result.Error EmptyAlt
+        | _ -> Result.Ok (Alt (xc,c',m1',m2')))
     | Seq (n,k1,lm1) ->
        let| lm1' = list_map_result aux lm1 in
        Result.Ok (Seq (n,k1,lm1'))
@@ -300,14 +256,11 @@ let eval (* QUICK *)
        model_of_value k v
   and aux_cond = function
     | Undet prob -> Result.Ok (Undet prob)
-    | True -> Result.Ok True
-    | False -> Result.Ok False
+    | True | False -> assert false
     | BoolExpr e ->
        let| v = eval_expr e bindings in
        let| b = bool_of_value v in
-       if b
-       then Result.Ok True
-       else Result.Ok False
+       Result.Ok (if b then True else False)
   in
   aux m
   
@@ -315,13 +268,12 @@ let eval (* QUICK *)
 
 type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 
-let generator
+let generator (* on evaluated models: no expr, no def *)
       ~(generator_pat: 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
     : ('t,'var,'constr,'func) model -> 'gen =
   let rec gen = function
-    | Def (x,m1) ->
-       gen m1
+    | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
        let gen_args = Array.map gen args in
        generator_pat c gen_args
@@ -368,13 +320,12 @@ let generator
 
 type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'input) Myseq.t
 
-let parseur
+let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_pat : 'constr -> 'parse array -> 'parse)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
     : ('t,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse = function
-    | Def (x,m1) ->
-       parse m1
+    | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
        let parse_args = Array.map parse args in
        parseur_pat c parse_args
@@ -453,7 +404,7 @@ let size_model_ast (* for DL computing, QUICK *)
          (fun res arg -> res + aux arg)
          (if asd#is_default_constr c && args = [||] then 0 else 1)
          args
-    | Fail -> 1
+    | Fail -> assert false
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
     | Seq (n,k1,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
@@ -532,7 +483,7 @@ let dl_model_params
          Array.map aux args
          |> Array.fold_left (+.) 0. in
        dl_constr_params c +. dl_args_params
-    | Fail -> 0.
+    | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
     | Seq (n,k1,lm1) ->
@@ -542,7 +493,7 @@ let dl_model_params
     | Expr (k,e) -> dl_expr_params e
   and aux_cond = function
     | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
-    | True | False -> 0.
+    | True | False -> assert false
     | BoolExpr e -> dl_expr_params e
   in
   aux
