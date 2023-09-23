@@ -293,11 +293,13 @@ let generator (* on evaluated models: no expr, no def *)
        let gen_b_d12 =
          match c with
          | Undet prob ->
-            if prob >= 0.5
-            then (fun info -> Myseq.interleave [gen_b_d1 prob info;
-                                                gen_b_d2 (1. -. prob) info])
-            else (fun info -> Myseq.interleave [gen_b_d2 (1. -. prob) info;
-                                                gen_b_d1 prob info])
+            if prob >= 0.5 (* TODO: weight interleave according to prob *)
+            then (fun info ->
+              Myseq.interleave [gen_b_d1 prob info;
+                                gen_b_d2 (1. -. prob) info])
+            else (fun info ->
+              Myseq.interleave [gen_b_d2 (1. -. prob) info;
+                                gen_b_d1 prob info])
          | True -> gen_b_d1 1.
          | False -> gen_b_d2 1.
          | BoolExpr _ -> assert false in
@@ -332,24 +334,28 @@ let parseur (* on evaluated models: no expr, no def *)
     | Fail ->
        (fun input -> Myseq.empty)
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
-       let parse_m1 = parse m1 in
-       let parse_m2 = parse m2 in
-       let seq1 prob input =
-         let* d1, input = parse_m1 input in
-         Myseq.return (D (value d1, DAlt (prob,true,d1)), input) in
-       let seq2 prob input =
-         let* d2, input = parse_m2 input in
-         Myseq.return (D (value d2, DAlt (prob,false,d2)), input) in
-       (fun input ->
-         match c with
-         | Undet prob ->
-            let s1 = seq1 prob input in
-            if Myseq.is_empty s1
-            then seq2 (1. -. prob) input
-            else s1 (* for exclusive alternatives, anticipating condition *)
-         | True -> seq1 1. input
-         | False -> seq2 1. input
-         | BoolExpr _ -> (fun () -> assert false))
+       let seq1 prob =
+         let parse_m1 = parse m1 in
+         (fun input ->
+           let* d1, input = parse_m1 input in
+           Myseq.return (D (value d1, DAlt (prob,true,d1)), input)) in
+       let seq2 prob =
+         let parse_m2 = parse m2 in
+         (fun input ->
+           let* d2, input = parse_m2 input in
+           Myseq.return (D (value d2, DAlt (prob,false,d2)), input)) in
+       (match c with
+        | Undet prob ->
+           if prob >= 0.5 (* TODO: weight interleave according to prob *)
+           then (fun input ->
+             Myseq.interleave [seq1 prob input;
+                               seq2 (1. -. prob) input])
+           else (fun input ->
+             Myseq.interleave [seq2 (1. -. prob) input;
+                               seq1 prob input])
+        | True -> seq1 1.
+        | False -> seq2 1.
+        | BoolExpr _ -> assert false)
     | Seq (n,k1,lm1) ->
        let parse_lm1 = List.map parse lm1 in
        (fun input ->
