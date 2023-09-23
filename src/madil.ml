@@ -181,8 +181,7 @@ module type DOMAIN =
 
     (* description lengths *)
       
-    val encoding_pat : constr -> (dconstr * encoding array -> encoding)
-    val encoding_expr : value -> encoding
+    val encoding_dpat : dconstr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_seq : encoding list -> encoding
     val dl_of_encoding : encoding -> dl
@@ -253,12 +252,9 @@ module Make (Domain : DOMAIN) =
 
     (* description lengths *)
       
-    let dl_data : model -> data -> dl =
-      Model.encode_data
-        ~xp_model
-        ~xp_data
-        ~encoding_pat
-        ~encoding_expr
+    let dl_data : data -> dl =
+      Model.dl_data
+        ~encoding_dpat
         ~encoding_alt
         ~encoding_seq
         ~dl_of_encoding

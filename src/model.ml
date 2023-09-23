@@ -250,7 +250,7 @@ let get_bindings  (* QUICK *)
        done;
        !ref_acc
     | Fail, _ -> assert false (* because parsing and generation must have failed here *)
-    | Alt (xc,c,m1,m2), D (_v, DAlt (b,d12)) ->
+    | Alt (xc,c,m1,m2), D (_v, DAlt (_prob,b,d12)) ->
        let acc = aux (if b then m1 else m2) d12 acc in
        Mymap.add xc (value_of_bool b) acc
     | Seq (n,k1,lm1), D (_v, DSeq (dn,ld1)) ->
@@ -328,29 +328,31 @@ let generator
     | Fail ->
        (fun info -> Myseq.empty)
     | Alt (xc,c,m1,m2) ->
-       let gen_b_d1 =
+       let gen_b_d1 prob =
          let gen_m1 = gen m1 in
          (fun info ->
            let* d1 = gen_m1 info in
-           Myseq.return (true, d1)) in
-       let gen_b_d2 =
+           Myseq.return (prob, true, d1)) in
+       let gen_b_d2 prob =
          let gen_m2 = gen m2 in
          (fun info ->
            let* d2 = gen_m2 info in
-           Myseq.return (false, d2)) in
+           Myseq.return (prob, false, d2)) in
        let gen_b_d12 =
          match c with
          | Undet prob ->
             if prob >= 0.5
-            then (fun info -> Myseq.interleave [gen_b_d1 info; gen_b_d2 info])
-            else (fun info -> Myseq.interleave [gen_b_d2 info; gen_b_d1 info])
-         | True -> gen_b_d1
-         | False -> gen_b_d2
+            then (fun info -> Myseq.interleave [gen_b_d1 prob info;
+                                                gen_b_d2 (1. -. prob) info])
+            else (fun info -> Myseq.interleave [gen_b_d2 (1. -. prob) info;
+                                                gen_b_d1 prob info])
+         | True -> gen_b_d1 1.
+         | False -> gen_b_d2 1.
          | BoolExpr _ -> assert false in
        (fun info ->
-         let* b, d12 = gen_b_d12 info in
+         let* prob, b, d12 = gen_b_d12 info in
          let v = value d12 in
-         Myseq.return (D (v, DAlt (b, d12))))
+         Myseq.return (D (v, DAlt (prob, b, d12))))
     | Seq (n,k1,lm1) ->
        let gen_lm1 = List.map gen lm1 in
        (fun info ->
@@ -381,20 +383,21 @@ let parseur
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let parse_m1 = parse m1 in
        let parse_m2 = parse m2 in
+       let seq1 prob input =
+         let* d1, input = parse_m1 input in
+         Myseq.return (D (value d1, DAlt (prob,true,d1)), input) in
+       let seq2 prob input =
+         let* d2, input = parse_m2 input in
+         Myseq.return (D (value d2, DAlt (prob,false,d2)), input) in
        (fun input ->
-         let seq1 =
-           let* d1, input = parse_m1 input in
-           Myseq.return (D (value d1, DAlt (true,d1)), input) in
-         let seq2 =
-           let* d2, input = parse_m2 input in
-           Myseq.return (D (value d2, DAlt (false,d2)), input) in
          match c with
          | Undet prob ->
-            if Myseq.is_empty seq1
-            then seq2
-            else seq1 (* for exclusive alternatives, anticipating condition *)
-         | True -> seq1
-         | False -> seq2
+            let s1 = seq1 prob input in
+            if Myseq.is_empty s1
+            then seq2 (1. -. prob) input
+            else s1 (* for exclusive alternatives, anticipating condition *)
+         | True -> seq1 1. input
+         | False -> seq2 1. input
          | BoolExpr _ -> (fun () -> assert false))
     | Seq (n,k1,lm1) ->
        let parse_lm1 = List.map parse lm1 in
@@ -409,62 +412,29 @@ let parseur
 
 (* model-based encoding of data *)
 
-let encode_data
-      ~(xp_model : 'model html_xp)
-      ~(xp_data : 'data html_xp)
-      ~(encoding_pat : 'constr -> ('dconstr * 'encoding array -> 'encoding))
-      ~(encoding_expr : 'value -> 'encoding)
+let dl_data
+      ~(encoding_dpat : 'dconstr -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : 'encoding list -> 'encoding)
       ~(dl_of_encoding : 'encoding -> dl)
-      (m : ('t,'var,'constr,'func) model as 'model)
-       : (('value,'dconstr) data as 'data) -> dl =
-  let rec aux m =
-    match m with
-    | Def (x,m1) ->
-       let encoder_m1 = aux m1 in
-       (fun d -> encoder_m1 d)
-    | Pat (t,c,args) ->
-       let encoding_c = encoding_pat c in
-       let encoder_args = Array.map aux args in
-       (function
-        | D (_, DPat (dc, dargs)) ->
-           let encs = Array.map2 (@@) encoder_args dargs in
-           encoding_c (dc, encs)
-        | _ -> assert false)
-    | Fail ->
-       (fun _ -> assert false)
-    | Alt (xc,c,m1,m2) ->
-       let encoder_choice =
-         match c with
-         | Undet prob -> (fun b -> Mdl.Code.usage (if b then prob else 1. -. prob))
-         | True | False | BoolExpr _ -> (fun b -> 0.) in
-       let encoder_m1 = aux m1 in
-       let encoder_m2 = aux m2 in
-       (function
-        | D (_, DAlt (b,d12)) -> (* choice determined by model *)
-           let dl_choice = encoder_choice b in
-           let enc12 = if b then encoder_m1 d12 else encoder_m2 d12 in
-           encoding_alt dl_choice enc12
-        | _ -> assert false)
-    | Seq (n,k1,lm1) ->
-       let encoder_lm1 = List.map aux lm1 in
-       (function
-        | D (_, DSeq (dn,ld1)) ->
-           assert (n = dn);
-           let encs = List.map2 (@@) encoder_lm1 ld1 in
-           (* no need to encode 'dn', equal 'n' in model *)
-           encoding_seq encs
-        | _ -> assert false)
-    | Cst m1 -> raise TODO
-    | Expr (k,e) ->
-       (fun (D (v, _)) -> encoding_expr v)
+    : (('value,'dconstr) data as 'data) -> dl =
+  let rec aux (D (v, dm)) =
+    match dm with
+    | DPat (dc, dargs) ->
+       let encs = Array.map aux dargs in
+       encoding_dpat dc encs
+    | DAlt (prob,b,d12) ->
+       let dl_choice = Mdl.Code.usage prob in
+       let enc12 = aux d12 in
+       encoding_alt dl_choice enc12
+    | DSeq (dn,ld1) ->
+       let encs = List.map aux ld1 in
+       encoding_seq encs
   in
-  let encoder = aux m in
-  fun d -> Common.prof "Model.encode_data/data" (fun () ->
-  let enc = encoder d in
+  fun d -> Common.prof "Model.dl_data" (fun () ->
+  let enc = aux d in
   dl_of_encoding enc)
-  
+
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
   Mdl.Code.universal_int_star rank -. 1.
@@ -622,18 +592,17 @@ let eval_parse_bests
       ~(max_nb_parse : int)
       ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
       ~(parseur : ('t,'var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
-      ~(dl_data : ('t,'var,'constr,'func) model -> ('value,'dconstr) data -> dl)
+      ~(dl_data : ('value,'dconstr) data -> dl)
 
       (m0 : ('t,'var,'constr,'func) model)
     : ('input,'value,'dconstr,'var) eval_parse_bests =
-  let dl_data_m0 = dl_data m0 in
   fun bindings input ->
   Common.prof "Model.eval_parse_bests" (fun () ->
   let| m = eval m0 bindings in (* resolving expressions *)
   let parses =
     let* data, _ = parseur m input in
     let dl = (* QUICK *)
-      dl_round (dl_data_m0 data) in
+      dl_round (dl_data data) in
       (* rounding before sorting to absorb float error accumulation *)
     Myseq.return (data, dl) in
   let l_parses =

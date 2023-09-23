@@ -128,7 +128,9 @@ let make_alt_if_allowed_and_needed
     let best_reads' =
       List.map
         (fun {unselected_reads; matching; read; new_data} ->
-          {unselected_reads; matching; read; new_data = D (Data.value new_data, DAlt (matching, new_data))})
+          let prob = if matching then prob else 1. -. prob in
+          let new_data = Data.D (Data.value new_data, DAlt (prob, matching, new_data)) in
+          {unselected_reads; matching; read; new_data})
         best_reads in
     Myseq.return (m', varseq', best_reads')
   else (* alt not allowed *)
@@ -157,7 +159,7 @@ let refinements
       ~(asd : ('t,'constr,'func) Model.asd)
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> (('t,'var,'constr,'func) Model.model as 'model) -> dl)
-      ~(dl_data : 'model -> (('value,'dconstr) Data.data as 'data) -> dl)
+      ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval_parse_bests : 'model -> ('input,'value,'dconstr,'var) Model.eval_parse_bests)
       ~(refinements_pat : 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
       ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
@@ -171,22 +173,20 @@ let refinements
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
     let p = ctx Model.This in (* local path *)
     let dl_m = dl_model ~nb_env_vars m in
-    let dl_data_m = dl_data m in
     let r_best_reads = inter_union_reads read_refs selected_reads in
     let* r, (varseq', best_reads) = Mymap.to_seq r_best_reads in
     let supp, nb = best_reads_stats best_reads in
     let alt = (supp < nb) in
     let* m_new, varseq', best_reads = postprocessing r varseq' ~supp ~nb ~alt best_reads in
     let dl_m_new = dl_model ~nb_env_vars m_new in
-    let dl_data_m_new = dl_data m_new in
     let dl_new =
       dl_M -. dl_m +. dl_m_new
       +. alpha *. Mdl.sum best_reads
                     (fun {matching; read; new_data} ->
                       if matching
                       then
-                        let dl_d = dl_data_m read.data in
-                        let dl_d_new = dl_data_m_new new_data in
+                        let dl_d = dl_data read.data in
+                        let dl_d_new = dl_data new_data in
                         read.dl -. dl_d +. dl_d_new
                       else 0.) (* no change in this case *) in
     Myseq.return (p, m_new, varseq', supp, dl_new)
@@ -233,7 +233,7 @@ let refinements
               filter_map_reads
                 (fun (read : _ Model.read) ->
                   match read.data with
-                  | D (_, DAlt (b,d12)) ->
+                  | D (_, DAlt (prob,b,d12)) ->
                      if b
                      then Some {read with data=d12}
                      else None
@@ -246,7 +246,7 @@ let refinements
               filter_map_reads
                 (fun (read : _ Model.read) ->
                   match read.data with
-                  | D (_, DAlt (b,d12)) ->
+                  | D (_, DAlt (prob,b,d12)) ->
                      if not b
                      then Some {read with data=d12}
                      else None
@@ -312,7 +312,7 @@ let refinements
     aux_gen ctx m selected_reads
       (fun (read : _ Model.read) ->
         match read.data with
-        | Data.D (_, DAlt (b, d12)) ->
+        | Data.D (_, DAlt (prob, b, d12)) ->
            if b
            then [m1, varseq0, d12]
            else [m2, varseq0, d12]
@@ -325,13 +325,13 @@ let refinements
     aux_gen ctx m selected_reads
       (fun (read : _ Model.read) ->
         match read.data with
-        | Data.D (_, DAlt (true, _)) as d ->
+        | Data.D (_, DAlt (_prob, true, _)) as d ->
            let v = value_of_bool true in
            let es : _ Expr.Exprset.t = Expr.Index.lookup v read.index in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, d) :: rs)
              [] (Expr.Exprset.to_seq es)
-        | Data.D (_, DAlt (false, _)) ->
+        | Data.D (_, DAlt (_, false, _)) ->
            (* we only look for true expressions because the index does not contain all false expressions *)
            (* extend_partial_best_reads below compensates for that *)
            []
@@ -345,7 +345,7 @@ let refinements
               selected_reads best_reads
               (fun read ->
                 match read.data with
-                | D (_, DAlt (b, _)) ->
+                | D (_, DAlt (_, b, _)) ->
                    if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (value_of_bool true) read.index))
                    then Some (read, read.data)
                    else None

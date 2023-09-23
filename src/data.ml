@@ -1,11 +1,11 @@
 
 open Madil_common
 
-type ('value,'dconstr) data =
+type ('value,'dconstr) data = (* data according to model, must be self-contained for encoding *)
   D of 'value * ('value,'dconstr) data_model
 and ('value,'dconstr) data_model =
   | DPat of 'dconstr * ('value,'dconstr) data array
-  | DAlt of bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
+  | DAlt of float (* prob *) * bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
   | DSeq of int * ('value,'dconstr) data list (* inv: <int> = List.length <data list> *)
 
 (* TODO: consider adding DNil as nil data, for use as nil env *)
@@ -28,7 +28,7 @@ let xp_data
            (fun arg -> (fun ~html print () -> aux ~prio_ctx:0 ~html print arg))
            args in
        xp_dpat dc xp_args ~html print ()
-    | D (_v, DAlt (b,d12)) ->
+    | D (_v, DAlt (_prob,_b,d12)) ->
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
            if html then print#string "<div class=\"data-alt\">";
