@@ -281,7 +281,7 @@ let refinements
         | Some k1 ->
            let es = Expr.Index.lookup v read.index in
            Myseq.fold_left
-             (fun rs e -> (e, varseq0, Data.D (v, Data.DNone)) :: rs)
+             (fun rs e -> (e, varseq0, read.data) :: rs)
              [] (Expr.Exprset.to_seq es))
       (fun e varseq' ~supp ~nb ~alt best_reads ->
         let m_new = Model.Expr (k,e) in

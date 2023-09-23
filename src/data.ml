@@ -4,7 +4,6 @@ open Madil_common
 type ('value,'dconstr) data =
   D of 'value * ('value,'dconstr) data_model
 and ('value,'dconstr) data_model =
-  | DNone
   | DPat of 'dconstr * ('value,'dconstr) data array
   | DAlt of bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
   | DSeq of int * ('value,'dconstr) data list (* inv: <int> = List.length <data list> *)
@@ -15,18 +14,14 @@ let value (d : ('value,'dconstr) data) : 'value =
   match d with
   | D (v, _) -> v
 
-let make_dval (value : 'value) : ('value,'dconstr) data =
-  D (value, DNone)
 let make_dpat (value : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data array) : ('value,'dconstr) data =
   D (value, DPat (dc, args))
           
 let xp_data
-      ~(xp_value : 'value html_xp)
       ~(xp_dpat : 'dconstr -> unit html_xp array -> unit html_xp)
     : ('value,'dconstr) data html_xp =
   let rec aux ~prio_ctx ~html print d =
     match d with
-    | D (v, DNone) -> xp_value ~html print v
     | D (_v, DPat (dc,args)) ->
        let xp_args =
          Array.map

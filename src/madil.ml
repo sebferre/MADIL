@@ -106,7 +106,7 @@ module Defined_types (T : BASIC_TYPES) =
     let xp_signature : signature html_xp = Kind.xp_signature ~xp_type
           
     type data = (value,dconstr) Data.data
-    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dpat
+    let xp_data : data html_xp = Data.xp_data ~xp_dpat
                                
     type path = constr Model.path
     let xp_path : path html_xp = Model.xp_path ~xp_field
