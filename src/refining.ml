@@ -189,6 +189,7 @@ let refinements
                         let dl_d_new = dl_data new_data in
                         read.dl -. dl_d +. dl_d_new
                       else 0.) (* no change in this case *) in
+    let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
     Myseq.return (p, m_new, varseq', supp, dl_new)
   in
   let rec aux ctx m selected_reads =
@@ -366,8 +367,7 @@ let refinements
   let* p, r, varseq', supp, dl' =
     aux Model.ctx0 m0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
-           dl_compare dl1 dl2) (* support use for sorting in LIS UI *)
-    |> Myseq.unique
+           dl_compare dl1 dl2)
     |> Myseq.slice ~limit:max_refinements in
   let m' = Model.refine p r m0 in
   Myseq.return (p, r, supp, dl', m', varseq'))
