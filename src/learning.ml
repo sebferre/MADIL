@@ -69,7 +69,8 @@ let learn
       ~code:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) -> lmd)
       ~refinements:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) dl ->
         log_refining r m prs dl;
-        task_refinements m prs dsri dsro) in
+        Common.prof "Learning.task_refinements" (fun () ->
+            task_refinements m prs dsri dsro)) in
   match lm_refine with
   | [] -> assert false
   | ((_,m_refine), (psr_refine,_,_,_,_), _)::_ ->
@@ -88,7 +89,8 @@ let learn
            (* only parse ranks counted for input grids *)
            ~refinements:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) dl ->
              log_refining r m prs dl;
-             task_prunings m dsri)
+             Common.prof "Learning.task_prunings" (fun () ->
+                 task_prunings m dsri))
        ) in
      match lm_prune with
      | [] -> assert false

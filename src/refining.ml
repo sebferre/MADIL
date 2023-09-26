@@ -272,23 +272,22 @@ let refinements
     | Model.Expr (k,e) -> Myseq.empty
   and aux_expr ctx m selected_reads =
     let k = Model.kind m in
-    let k1_opt = asd#expr_opt k in
-    let allowed = asd#alt_opt k in
-    aux_gen ctx m selected_reads
-      (fun (read : _ Model.read) ->
-        let v = Data.value read.data in
-        match k1_opt with
-        | None -> [] (* no expression here *)
-        | Some k1 ->
-           let es = Expr.Index.lookup v read.index in
+    match asd#expr_opt k with
+    | None -> Myseq.empty (* no expression here *)
+    | Some k1 ->
+       let allowed = asd#alt_opt k in
+       aux_gen ctx m selected_reads
+         (fun (read : _ Model.read) ->
+           let v = Data.value read.data in
+           let es = Expr.Index.lookup v (Lazy.force read.lazy_index) in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, read.data) :: rs)
              [] (Expr.Exprset.to_seq es))
-      (fun e varseq' ~supp ~nb ~alt best_reads ->
-        let m_new = Model.Expr (k,e) in
-        make_alt_if_allowed_and_needed
-          ~allowed ~supp ~nb
-          m_new m varseq' best_reads)
+         (fun e varseq' ~supp ~nb ~alt best_reads ->
+           let m_new = Model.Expr (k,e) in
+           make_alt_if_allowed_and_needed
+             ~allowed ~supp ~nb
+             m_new m varseq' best_reads)
   and aux_pat ctx m t c args selected_reads =
     let k = Kind.KPat t in
     let allowed = asd#alt_opt k in
@@ -328,7 +327,7 @@ let refinements
         match read.data with
         | Data.D (_, DAlt (_prob, true, _)) as d ->
            let v = value_of_bool true in
-           let es : _ Expr.Exprset.t = Expr.Index.lookup v read.index in
+           let es : _ Expr.Exprset.t = Expr.Index.lookup v (Lazy.force read.lazy_index) in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, d) :: rs)
              [] (Expr.Exprset.to_seq es)
@@ -347,7 +346,7 @@ let refinements
               (fun read ->
                 match read.data with
                 | D (_, DAlt (_, b, _)) ->
-                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (value_of_bool true) read.index))
+                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (value_of_bool true) (Lazy.force read.lazy_index)))
                    then Some (read, read.data)
                    else None
                 | _ -> assert false) in
@@ -360,7 +359,6 @@ let refinements
           Myseq.return (m_new, varseq', best_reads)
         else Myseq.empty)
   in
-  Myseq.prof "Model.refinements" (
   let selected_reads =
     (* the flag for each example indicates whether there are other reads, used with Alt *)
     List.map (fun example_reads -> (example_reads, false)) reads in
@@ -370,9 +368,9 @@ let refinements
            dl_compare dl1 dl2)
     |> Myseq.slice ~limit:max_refinements in
   let m' = Model.refine p r m0 in
-  Myseq.return (p, r, supp, dl', m', varseq'))
+  Myseq.return (p, r, supp, dl', m', varseq')
 
-
+  
 let task_refinements
       ~(binding_vars : ('t,'var,'constr,'func) Model.model -> 'var Expr.binding_vars)
       ~(input_refinements : ('t,'value,'dconstr,'var,'constr,'func) refiner)
@@ -382,7 +380,7 @@ let task_refinements
       (prs : ('value,'dconstr,'var,'func) Task_model.pairs_reads)
       (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
       (dsro : ('value,'dconstr,'var,'func) Task_model.reads)
-    : (('t,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t =
+    : (('t,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseqi =
          input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
@@ -403,7 +401,7 @@ let task_prunings
       
       (m : (('t,'var,'constr,'func) Task_model.task_model as 'task_model))
       (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
-    : (('t,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t =
+    : (('t,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   let* pi, ri, suppi, dli', mi', varseqi' =
     input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m
       m.input_model m.input_varseq dsri.reads in

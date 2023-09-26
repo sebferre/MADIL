@@ -511,8 +511,7 @@ let dl
       ~(dl_var : nb_env_vars:int -> 'var -> dl) =
   fun
     ~(nb_env_vars : int)
-    (m : ('t,'var,'constr,'func) model) ->
-  Common.prof "Model.dl" (fun () ->
+    (m : ('t,'var,'constr,'func) model) -> (* QUICK *)
   let size = size_model_ast m in
   let k = kind m in    
   let nb = nb_model_ast k size in
@@ -521,19 +520,18 @@ let dl
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
   +. dl_model_params
        ~dl_var:(dl_var ~nb_env_vars)
-       m)
-
+       m
        
 (* reading *)
 
 type ('value,'dconstr,'var,'func) read =
   { env : ('value,'dconstr) data;
     bindings : ('var,'value) Expr.bindings;
-    index : ('value,'var,'func) Expr.Index.t;
+    lazy_index : ('value,'var,'func) Expr.Index.t Lazy.t;
     data : ('value,'dconstr) data;
     dl : dl }
 
-let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a list =
+let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a list = (* QUICK *)
   match l with
   | [] -> []
   | x0::_ ->
@@ -582,18 +580,17 @@ let read
       ~(input_of_value : 'value -> 'input)
       ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
       ~(eval_parse_bests : ('t,'var,'constr,'func) model -> ('input,'value,'dconstr,'var) eval_parse_bests)
-      ~(make_index : ('var,'value) Expr.bindings -> ('value,'var,'func) Expr.Index.t)
 
       ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('var,'value) Expr.bindings)
+      ~(lazy_index : ('value,'var,'func) Expr.Index.t Lazy.t)
       (m0 : ('t,'var,'constr,'func) model)
       (v : 'value)
     : ('value,'dconstr,'var,'func) read list result =
   Common.prof "Model.read" (fun () ->
   let input = input_of_value v in
   let| best_parses = eval_parse_bests m0 bindings input in
-  let index = lazy (make_index bindings) in
   let reads =
     best_parses
     |> (fun l -> Common.sub_list l 0 max_nb_reads)
@@ -606,7 +603,7 @@ let read
              else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
            { env;
              bindings;
-             index=Lazy.force index;
+             lazy_index;
              data;
              dl }) in
   Result.Ok reads)

@@ -96,7 +96,7 @@ let score_learned_model
             | `TRAIN psr -> Result.Ok (List.nth psr.Task_model.inputs_reads (i-1))
             | `TEST -> read
                          ~dl_assuming_contents_known:false
-                         ~env ~bindings:Expr.bindings0
+                         ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
                          m.Task_model.input_model input in
           ( match input_reads with
             | Result.Ok reads ->

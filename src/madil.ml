@@ -303,7 +303,6 @@ module Make (Domain : DOMAIN) =
         ~input_of_value
         ~eval
         ~eval_parse_bests
-        ~make_index
 
     let write =
       Model.write
@@ -352,6 +351,7 @@ module Make (Domain : DOMAIN) =
         ~dl_task_model
         ~read
         ~get_bindings
+        ~make_index
 
     let apply =
       Task_model.apply
