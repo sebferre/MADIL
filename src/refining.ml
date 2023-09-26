@@ -157,6 +157,7 @@ let refinements
       ~(alpha : float)
       ~(max_refinements : int)
       ~(asd : ('t,'constr,'func) Model.asd)
+      ~(data_of_value : 't Kind.kind -> 'value -> 'data result)
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> (('t,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
@@ -279,10 +280,13 @@ let refinements
        aux_gen ctx m selected_reads
          (fun (read : _ Model.read) ->
            let v = Data.value read.data in
-           let es = Expr.Index.lookup v (Lazy.force read.lazy_index) in
-           Myseq.fold_left
-             (fun rs e -> (e, varseq0, read.data) :: rs)
-             [] (Expr.Exprset.to_seq es))
+           match data_of_value k v with (* new data for an expression *)
+           | Result.Ok dv ->
+              let es = Expr.Index.lookup v (Lazy.force read.lazy_index) in
+              Myseq.fold_left
+                (fun rs e -> (e, varseq0, dv) :: rs)
+                [] (Expr.Exprset.to_seq es)
+           | Result.Error _ -> assert false)
          (fun e varseq' ~supp ~nb ~alt best_reads ->
            let m_new = Model.Expr (k,e) in
            make_alt_if_allowed_and_needed

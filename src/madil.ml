@@ -168,6 +168,7 @@ module type DOMAIN =
     val eval_func : func -> value array -> value result
     val eval_unbound_var : var -> value result
     val eval_arg : unit -> value result
+    val data_of_value : kind -> value -> data result
     val model_of_value : kind -> value -> model result
 
     (* model-based generation and parsing *)
@@ -316,6 +317,7 @@ module Make (Domain : DOMAIN) =
       Refining.refinements
         ~xp_model
         ~asd
+        ~data_of_value
         ~value_of_bool
         ~dl_model
         ~dl_data
@@ -329,6 +331,7 @@ module Make (Domain : DOMAIN) =
       Refining.refinements
         ~xp_model
         ~asd
+        ~data_of_value
         ~value_of_bool
         ~dl_model
         ~dl_data
