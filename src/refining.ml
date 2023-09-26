@@ -325,11 +325,11 @@ let refinements
     aux_gen ctx m selected_reads
       (fun (read : _ Model.read) ->
         match read.data with
-        | Data.D (_, DAlt (_prob, true, _)) as d ->
-           let v = value_of_bool true in
-           let es : _ Expr.Exprset.t = Expr.Index.lookup v (Lazy.force read.lazy_index) in
+        | Data.D (v, DAlt (_prob, true, d1)) ->
+           let vc = value_of_bool true in
+           let es : _ Expr.Exprset.t = Expr.Index.lookup vc (Lazy.force read.lazy_index) in
            Myseq.fold_left
-             (fun rs e -> (e, varseq0, d) :: rs)
+             (fun rs e -> (e, varseq0, Data.D (v, DAlt (1., true, d1))) :: rs)
              [] (Expr.Exprset.to_seq es)
         | Data.D (_, DAlt (_, false, _)) ->
            (* we only look for true expressions because the index does not contain all false expressions *)
@@ -345,9 +345,9 @@ let refinements
               selected_reads best_reads
               (fun read ->
                 match read.data with
-                | D (_, DAlt (_, b, _)) ->
+                | D (v, DAlt (_prob, b, d1)) ->
                    if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (value_of_bool true) (Lazy.force read.lazy_index)))
-                   then Some (read, read.data)
+                   then Some (read, D (v, DAlt (1., false, d1)))
                    else None
                 | _ -> assert false) in
         let supp1, nb1 = best_reads_stats best_reads in
