@@ -374,7 +374,7 @@ let dl_data
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : 'encoding list -> 'encoding)
       ~(dl_of_encoding : 'encoding -> dl)
-    : (('value,'dconstr) data as 'data) -> dl =
+    : (('value,'dconstr) data as 'data) -> dl = (* QUICK *)
   let rec aux (D (v, dm)) =
     match dm with
     | DPat (dc, dargs) ->
@@ -388,9 +388,9 @@ let dl_data
        let encs = List.map aux ld1 in
        encoding_seq encs
   in
-  fun d -> Common.prof "Model.dl_data" (fun () ->
+  fun d ->
   let enc = aux d in
-  dl_of_encoding enc)
+  dl_of_encoding enc
 
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
