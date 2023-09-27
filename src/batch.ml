@@ -94,10 +94,16 @@ let score_learned_model
           let input_reads =
             match train_test with
             | `TRAIN psr -> Result.Ok (List.nth psr.Task_model.inputs_reads (i-1))
-            | `TEST -> read
-                         ~dl_assuming_contents_known:false
-                         ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
-                         m.Task_model.input_model input in
+            | `TEST ->
+               let input_reads, _ =
+                 Myseq.take (!max_nb_reads)
+                   (read
+                      ~dl_assuming_contents_known:false
+                      ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
+                      m.Task_model.input_model input) in
+               if input_reads = []
+               then Result.Error Not_found
+               else Result.Ok input_reads in
           ( match input_reads with
             | Result.Ok reads ->
                List.iter

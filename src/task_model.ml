@@ -33,12 +33,13 @@ type ('value,'dconstr,'var,'func) pairs_reads =
   }
 
 let read_pairs
+      ~(max_nb_reads : int)
       ~(dl_task_model : (('t,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
                lazy_index:(('value,'var,'func) Expr.Index.t Lazy.t) ->
-               (('t,'var,'constr,'func) model as 'model) -> 'value -> 'read list result)
+               (('t,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(make_index : ('var,'value) Expr.bindings -> ('value,'var,'func) Expr.Index.t)
       
@@ -48,34 +49,39 @@ let read_pairs
       (pairs : 'value Task.pair list)
     : ('value,'dconstr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
-  (* takes model, input env+docs, output docs *)
   let dl_mi, dl_mo = dl_task_model m in
   let| inputs_reads_reads =
     pairs
     |> list_map_result
          (fun {Task.input; output} ->
-           let| input_reads =
-             read
-               ~dl_assuming_contents_known:pruning
-               ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
-               m.input_model input in (* no diff allowed during training *)
-           let| pair_reads = 
-             let+|+ ri = Result.Ok input_reads in
-             let bindings = get_bindings m.input_model ri.data in
-             let+|+ ro =
-               read
-                 ~dl_assuming_contents_known:false
-                 ~env:ri.data ~bindings
-                 ~lazy_index:(lazy (Common.prof "Task_model.read_pairs/make_index" (fun () ->
-                                        make_index bindings)))
-                 m.output_model output in
-             let dl = ri.dl +. ro.dl in
-             Result.Ok [(ri,ro,dl)] in
-           let pair_reads =
-             pair_reads
-             |> List.stable_sort (fun (_,_,dl1) (_,_,dl2) -> dl_compare dl1 dl2)
-           (* TODO |> limit_dl (fun (_,_,dl) -> dl) *) in (* bounding by dl_factor *) 
-           Result.Ok (input_reads, pair_reads)) in
+           let _, input_reads, pair_reads =
+             myseq_bind_sample_fair
+               ~size1:max_nb_reads ~size2:max_nb_reads
+               (read
+                  ~dl_assuming_contents_known:pruning
+                  ~env
+                  ~bindings:Expr.bindings0
+                  ~lazy_index:(lazy Expr.Index.empty)
+                  m.input_model input)
+               (fun ri ->
+                 let bindings = get_bindings m.input_model ri.data in
+                 let* ro =
+                   read
+                     ~dl_assuming_contents_known:false
+                     ~env:ri.data
+                     ~bindings
+                     ~lazy_index:(lazy (Common.prof "Task_model.read_pairs/make_index" (fun () ->
+                                            make_index bindings)))
+                     m.output_model output in
+                 Myseq.return (ri, ro, ri.dl +. ro.dl)) in
+           if input_reads = [] (* implies pair_reads = [] *)
+           then Result.Error Model.Parse_failure (* TODO: distinguish source *)
+           else
+             let pair_reads =
+               List.stable_sort
+                 (fun (_,_,dl1) (_,_,dl2) -> dl_compare dl1 dl2)
+                 pair_reads in
+             Result.Ok (input_reads, pair_reads)) in
   let inputs_reads, reads = List.split inputs_reads_reads in
   Result.Ok {dl_mi; dl_mo; inputs_reads; reads})
 
@@ -141,31 +147,42 @@ let make_norm_dl_model_data
 (* applying a task model to an input *)
 
 let apply
+      ~(max_nb_reads : int)
+      ~(max_nb_writes : int)
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
                lazy_index:(('value,'var,'func) Expr.Index.t Lazy.t) ->
                (('t,'var,'constr,'func) model as 'model) -> 'value ->
-               ('value,'dconstr,'var,'func) read list result)
+               ('value,'dconstr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
-                'model -> 'info -> 'data list result)
+                'model -> 'info -> 'data Myseq.t)
       ~(env : 'data)
       (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
     : ('data * 'data) list result =
   Common.prof "Task_model.apply" (fun () ->
-  let+|+ read_i =
-    read
-      ~dl_assuming_contents_known:true
-      ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
-      m.input_model v_i in
-  let data_i = read_i.data in
-  let bindings = get_bindings m.input_model data_i in
-  let+|+ data_o =
-    write
-      ~bindings
-      m.output_model info_o in
-  Result.Ok [(data_i, data_o)])
+  let some_parse, _lri, l_di_do =
+    myseq_bind_sample_fair
+      ~size1:max_nb_reads ~size2:max_nb_writes
+      (read
+         ~dl_assuming_contents_known:true
+         ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
+         m.input_model v_i)
+      (fun read_i ->
+        let data_i = read_i.data in
+        let bindings = get_bindings m.input_model data_i in
+        let* data_o = 
+          write
+            ~bindings
+            m.output_model info_o in
+        Myseq.return (data_i, data_o)) in
+  if l_di_do = []
+  then Result.Error (if some_parse
+                     then Model.Generate_failure
+                     else Model.Parse_failure)
+  else Result.Ok l_di_do)
+
 
 (* refinements *)
   

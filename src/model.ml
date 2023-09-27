@@ -531,13 +531,13 @@ type ('value,'dconstr,'var,'func) read =
     data : ('value,'dconstr) data;
     dl : dl }
 
-let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a list = (* QUICK *)
+(* let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a list = (* QUICK *)
   match l with
   | [] -> []
   | x0::_ ->
      let dl0 = f_dl x0 in
      let min_dl = max_parse_dl_factor *. dl0 in
-     List.filter (fun x -> f_dl x <= min_dl) l
+     List.filter (fun x -> f_dl x <= min_dl) l *)
 
 exception Parse_failure
 
@@ -572,11 +572,9 @@ let eval_parse_bests
       l_parses (* QUICK *)
       |> List.stable_sort (fun (_,dl1) (_,dl2) -> dl_compare dl1 dl2) in
     Result.Ok best_parses)
-
+  (* TODO: take into account max_parse_dl_factor? *)
 
 let read
-      ~(max_parse_dl_factor : float)
-      ~(max_nb_reads : int)
       ~(input_of_value : 'value -> 'input)
       ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
       ~(eval_parse_bests : ('t,'var,'constr,'func) model -> ('input,'value,'dconstr,'var) eval_parse_bests)
@@ -587,26 +585,17 @@ let read
       ~(lazy_index : ('value,'var,'func) Expr.Index.t Lazy.t)
       (m0 : ('t,'var,'constr,'func) model)
       (v : 'value)
-    : ('value,'dconstr,'var,'func) read list result =
-  Common.prof "Model.read" (fun () ->
+    : ('value,'dconstr,'var,'func) read Myseq.t =
+  Myseq.prof "Model.read" (
   let input = input_of_value v in
-  let| best_parses = eval_parse_bests m0 bindings input in
-  let reads =
-    best_parses
-    |> (fun l -> Common.sub_list l 0 max_nb_reads)
-    |> limit_dl ~max_parse_dl_factor (fun (_,dl) -> dl)
-    |> List.mapi (fun rank (data,dl) ->
-           let dl_rank = dl_parse_rank rank in
-           let dl =
-             if dl_assuming_contents_known
-             then dl_rank
-             else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
-           { env;
-             bindings;
-             lazy_index;
-             data;
-             dl }) in
-  Result.Ok reads)
+  let* best_parses = Myseq.from_result (eval_parse_bests m0 bindings input) in
+  let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
+  let dl_rank = dl_parse_rank rank in
+  let dl =
+    if dl_assuming_contents_known
+    then dl_rank
+    else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
+  Myseq.return { env; bindings; lazy_index; data; dl })
 
 
 (* writing *)
@@ -614,21 +603,18 @@ let read
 exception Generate_failure
   
 let write
-      ~(max_nb_writes : int)
       ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
       ~(generator : ('t,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
       
       ~(bindings : ('var,'value) Expr.bindings)
       (m0 : ('t,'var,'constr,'func) model)
       (info : 'info)
-    : ('value,'dconstr) data list result =
-  Common.prof "Model.write" (fun () ->
-  let| m = eval m0 bindings in
-  let ld, _ = Myseq.take max_nb_writes (generator m info) in
-  if ld = []
-  then Result.Error Generate_failure
-  else Result.Ok ld)
+    : ('value,'dconstr) data Myseq.t =
+  Myseq.prof "Model.write" (
+  let* m = Myseq.from_result (eval m0 bindings) in
+  generator m info)
 
+  
 (* paths and model refinement *)
 
 let reverse_path (p : 'constr path) : 'constr path =

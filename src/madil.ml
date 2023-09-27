@@ -152,7 +152,6 @@ module type DOMAIN =
     (* parameters *)
 
     val max_nb_parse : int ref
-    val max_parse_dl_factor : float ref
     val max_nb_reads : int ref
     val max_nb_writes : int ref
     val alpha : float ref
@@ -299,15 +298,12 @@ module Make (Domain : DOMAIN) =
 
     let read =
       Model.read
-        ~max_parse_dl_factor:(!max_parse_dl_factor)
-        ~max_nb_reads:(!max_nb_reads)
         ~input_of_value
         ~eval
         ~eval_parse_bests
 
     let write =
       Model.write
-        ~max_nb_writes:(!max_nb_writes)
         ~eval
         ~generator
 
@@ -351,6 +347,7 @@ module Make (Domain : DOMAIN) =
     
     let read_pairs =
       Task_model.read_pairs
+        ~max_nb_reads:(!max_nb_reads)
         ~dl_task_model
         ~read
         ~get_bindings
@@ -358,6 +355,8 @@ module Make (Domain : DOMAIN) =
 
     let apply =
       Task_model.apply
+        ~max_nb_reads:(!max_nb_reads)
+        ~max_nb_writes:(!max_nb_writes)
         ~read
         ~get_bindings
         ~write

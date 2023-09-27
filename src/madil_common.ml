@@ -90,6 +90,32 @@ let myseq_concat_if cond seq1 seq2 =
   then Myseq.concat [seq1; seq2]
   else seq2
 
+let myseq_bind_sample_fair ~(size1 : int) ~(size2 : int) (s : 'a Myseq.t) (f : 'a -> 'b Myseq.t) : bool (* s is not empty? *) * 'a list * 'b list =
+(* sample size1 ['a] from [s] for which there is some ['b], and sample size2 such ['b] per ['a], hence returns at most size1 x size2 ['b] *)
+  let rec aux quota1 ok1 rev_acc1 rev_acc12 s =
+    if quota1 <= 0
+    then ok1, rev_acc1, rev_acc12
+    else
+      match s () with
+      | Myseq.Nil -> ok1, rev_acc1, rev_acc12
+      | Myseq.Cons (x,next) ->
+         let s2 = f x in
+         let ok2, rev_acc12 = aux2 size2 false rev_acc12 x s2 in
+         if ok2
+         then aux (quota1 - 1) true (x::rev_acc1) rev_acc12 next
+         else aux quota1 true rev_acc1 rev_acc12 next
+  and aux2 quota2 ok2 rev_acc12 x s2 =
+    if quota2 <= 0
+    then ok2, rev_acc12
+    else
+      match s2 () with
+      | Myseq.Nil -> ok2, rev_acc12
+      | Myseq.Cons (y,next2) -> aux2 (quota2 - 1) true (y::rev_acc12) x next2
+  in
+  let ok1, rev_acc1, rev_acc12 = aux size1 false [] [] s in
+  ok1, List.rev rev_acc1, List.rev rev_acc12
+
+  
 (* xprint *)
 
 type 'a html_xp = html:bool -> 'a Xprint.xp
