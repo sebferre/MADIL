@@ -119,7 +119,7 @@ let score_learned_model
 	  match apply_model ~env m input info_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
-               (fun (score,rank,label,failed_derived_grids) (gdi, gdo) ->
+               (fun (score,rank,label,failed_derived_grids) (gdi, gdo, dl) ->
                  let derived = Data.value gdo in
                  if score=1 then
                    score, rank, label, failed_derived_grids (* already success *)
@@ -131,7 +131,8 @@ let score_learned_model
                    Printf.printf ">> Trial %d\n" rank;
                    if !training then (
                      print_string "di: "; pp_data gdi; print_newline ();
-                     print_string "do: "; pp_data gdo; print_newline ()
+                     print_string "do: "; pp_data gdo; print_newline ();
+                     Printf.printf "DL = %.3f\n" dl; 
                    (* TODO if !grid_viz then Grid.pp_grids [Model2.grid_of_data_as_template gdi.data] *)
                    );
 	           ( if derived = output

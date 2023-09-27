@@ -233,7 +233,7 @@ type col = ColExample | ColDescr | ColPred
 type cell =
   | Example of value * value
   | Descr of (read * read * dl) list
-  | Pred of value * (data * data) list (* expected value, all preds (input data, output data) *)
+  | Pred of value * (data * data * dl) list (* expected value, all preds (input data, output data, global DL) *)
   | Error of string
 
 let html_read_pair (ri,ro,dl : read * read * dl) =
@@ -252,10 +252,10 @@ let html_of_cell : cell -> Html.t = function
   | Descr (read1::other_reads) ->
      String.concat "<hr/>"
        (List.map html_read_pair (read1::other_reads))
-  | Pred (expected_vo, l_di_do) ->
+  | Pred (expected_vo, l_di_do_dl) ->
      String.concat "<hr/>"
        (List.map
-          (fun (di,do_) ->
+          (fun (di,do_,dl) ->
             let vo = Data.value do_ in
             let html_di = html_of_row_from_data di in
             let html_vo = html_of_value vo in
@@ -265,8 +265,9 @@ let html_of_cell : cell -> Html.t = function
                 then "pred-correct"
                 else "pred-incorrect" in
               Html.span ~classe:cl html_vo in
-            html_row_pair html_di html_vo)
-          l_di_do)
+            html_row_pair html_di html_vo
+            ^ Printf.sprintf "<br/>DL = %.3f" dl)
+          l_di_do_dl)
   | Error msg -> Jsutils.escapeHTML msg
         
 let w_focus : (arc_word, unit, arc_focus) Widget_focus.widget =
@@ -298,7 +299,7 @@ let render_place place k =
     let focus = place#focus in
     match apply ~env:focus.env m vi focus.info_o with
     | Result.Ok [] -> Error "No valid prediction"
-    | Result.Ok l_di_do -> Pred (vo, l_di_do)
+    | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
     | Result.Error exn -> Error (Printexc.to_string exn)
   in
  Jsutils.jquery "#lis-suggestions" (fun elt_lis ->

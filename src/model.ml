@@ -605,14 +605,17 @@ exception Generate_failure
 let write
       ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
       ~(generator : ('t,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
+      ~(dl_data : ('value,'dconstr) data -> dl)
       
       ~(bindings : ('var,'value) Expr.bindings)
       (m0 : ('t,'var,'constr,'func) model)
       (info : 'info)
-    : ('value,'dconstr) data Myseq.t =
+    : (('value,'dconstr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
   let* m = Myseq.from_result (eval m0 bindings) in
-  generator m info)
+  let* data = generator m info in
+  let dl = dl_data data in (* encoding of what is not specified by the evaluated model *)
+  Myseq.return (data, dl))
 
   
 (* paths and model refinement *)

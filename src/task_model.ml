@@ -157,12 +157,12 @@ let apply
                ('value,'dconstr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
-                'model -> 'info -> 'data Myseq.t)
+                'model -> 'info -> ('data * dl) Myseq.t)
       ~(env : 'data)
       (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
-    : ('data * 'data) list result =
+    : ('data * 'data * dl) list result =
   Common.prof "Task_model.apply" (fun () ->
-  let some_parse, _lri, l_di_do =
+  let some_parse, _lri, l_di_do_dl =
     myseq_bind_sample_fair
       ~size1:max_nb_reads ~size2:max_nb_writes
       (read
@@ -172,16 +172,22 @@ let apply
       (fun read_i ->
         let data_i = read_i.data in
         let bindings = get_bindings m.input_model data_i in
-        let* data_o = 
+        let* data_o, dl_o = 
           write
             ~bindings
             m.output_model info_o in
-        Myseq.return (data_i, data_o)) in
-  if l_di_do = []
+        let dl = read_i.dl +. dl_o in
+        Myseq.return (data_i, data_o, dl)) in
+  if l_di_do_dl = []
   then Result.Error (if some_parse
                      then Model.Generate_failure
                      else Model.Parse_failure)
-  else Result.Ok l_di_do)
+  else
+    let l_di_do_dl =
+      List.stable_sort
+        (fun (_,_,dl1) (_,_,dl2) -> dl_compare dl1 dl2)
+        l_di_do_dl in
+    Result.Ok l_di_do_dl)
 
 
 (* refinements *)

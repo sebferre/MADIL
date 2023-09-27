@@ -306,6 +306,7 @@ module Make (Domain : DOMAIN) =
       Model.write
         ~eval
         ~generator
+        ~dl_data
 
     (* refining *)
 
