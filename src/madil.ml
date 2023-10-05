@@ -54,6 +54,7 @@ module type TYPES =
     type path = constr Model.path
     val xp_path : path html_xp
 
+    type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars
     type bindings = (var,value) Expr.bindings
           
@@ -111,6 +112,7 @@ module Defined_types (T : BASIC_TYPES) =
     type path = constr Model.path
     let xp_path : path html_xp = Model.xp_path ~xp_field
 
+    type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars
     type bindings = (var,value) Expr.bindings
           
@@ -174,10 +176,10 @@ module type DOMAIN =
 
     val dseq_value : data list -> value (* value for a data sequence *)
       
-    val generator_pat : constr -> generator array -> generator
+    val generator_pat : t -> constr -> generator array -> generator
 
     val input_of_value : value -> input
-    val parseur_pat : constr -> parseur array -> parseur
+    val parseur_pat : t -> constr -> parseur array -> parseur
 
     (* description lengths *)
       
@@ -186,7 +188,7 @@ module type DOMAIN =
     val encoding_seq : encoding list -> encoding
     val dl_of_encoding : encoding -> dl
 
-    val dl_constr_params : constr -> dl
+    val dl_constr_params : t -> constr -> dl
     val dl_func_params : func -> dl
     val dl_var : nb_env_vars:int -> var -> dl
       
@@ -196,11 +198,11 @@ module type DOMAIN =
 
     (* refining *)
 
-    val refinements_pat : constr -> model array -> var Myseq.t -> data -> (model * var Myseq.t * input) list
-    val refinements_postprocessing : constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
+    val refinements_pat : t -> constr -> model array -> varseq -> data -> (model * varseq * input) list
+    val refinements_postprocessing : t -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
-    val prunings_pat : constr -> model array -> var Myseq.t -> data -> (model * var Myseq.t * input) list
-    val prunings_postprocessing : constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
+    val prunings_pat : t -> constr -> model array -> varseq -> data -> (model * varseq * input) list
+    val prunings_postprocessing : t -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
 

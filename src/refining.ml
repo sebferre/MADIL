@@ -162,8 +162,8 @@ let refinements
       ~(dl_model : nb_env_vars:int -> (('t,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval_parse_bests : 'model -> ('input,'value,'dconstr,'var) Model.eval_parse_bests)
-      ~(refinements_pat : 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
-      ~(postprocessing : 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
+      ~(refinements_pat : 't -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
+      ~(postprocessing : 't -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('t,'value,'dconstr,'var,'constr,'func) refiner =
   fun ~nb_env_vars ~dl_M m0 varseq0 reads ->
@@ -304,11 +304,11 @@ let refinements
                match eval_parse_bests m' read.bindings input with
                | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
                | _ -> None)
-             (refinements_pat c args varseq0 data)
+             (refinements_pat t c args varseq0 data)
         | _ -> assert false)
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         let* m_new, best_reads =
-          postprocessing c args m' ~supp ~nb ~alt best_reads in
+          postprocessing t c args m' ~supp ~nb ~alt best_reads in
         make_alt_if_allowed_and_needed
           ~allowed ~supp ~nb
           m_new m varseq' best_reads)

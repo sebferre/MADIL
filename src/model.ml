@@ -269,14 +269,14 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
 type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
-      ~(generator_pat: 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
+      ~(generator_pat: 't -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
     : ('t,'var,'constr,'func) model -> 'gen =
   let rec gen = function
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
        let gen_args = Array.map gen args in
-       generator_pat c gen_args
+       generator_pat t c gen_args
     | Fail ->
        (fun info -> Myseq.empty)
     | Alt (xc,c,m1,m2) ->
@@ -323,14 +323,14 @@ let generator (* on evaluated models: no expr, no def *)
 type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'input) Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
-      ~(parseur_pat : 'constr -> 'parse array -> 'parse)
+      ~(parseur_pat : 't -> 'constr -> 'parse array -> 'parse)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
     : ('t,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse = function
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
        let parse_args = Array.map parse args in
-       parseur_pat c parse_args
+       parseur_pat t c parse_args
     | Fail ->
        (fun input -> Myseq.empty)
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
@@ -476,7 +476,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
   aux, reset
 
 let dl_model_params
-      ~(dl_constr_params : 'constr -> dl)
+      ~(dl_constr_params : 't -> 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
       ~(dl_var : 'var -> dl)
     : ('t,'var,'constr,'func) model -> dl =
@@ -488,7 +488,7 @@ let dl_model_params
        let dl_args_params =
          Array.map aux args
          |> Array.fold_left (+.) 0. in
-       dl_constr_params c +. dl_args_params
+       dl_constr_params t c +. dl_args_params
     | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
