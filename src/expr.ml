@@ -1,7 +1,6 @@
 
 open Madil_common
 open Data
-open Kind 
 
 type ('var,'func) expr =
   | Ref of 'var
@@ -331,11 +330,11 @@ let size_expr_ast (* for DL computing *)
   aux
 
 let nb_expr_ast (* for DL computing *)
-      ~(funcs : 't kind -> ('func * 't kind array) list)
-    : ('t kind -> int -> float) * (unit -> unit) =
-  let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
+      ~(funcs : 'typ -> ('func * 'typ array) list)
+    : ('typ -> int -> float) * (unit -> unit) =
+  let tab : ('typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let reset () = Hashtbl.clear tab in
-  let rec aux (k : 't kind) (size : int) : float =
+  let rec aux (k : 'typ) (size : int) : float =
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
     | None -> (* QUICK *)

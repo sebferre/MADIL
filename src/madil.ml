@@ -9,8 +9,9 @@ module type BASIC_TYPES =
     val xp_value : value html_xp
     val value_of_json : Yojson.Safe.t -> value
 
-    type t
-    val xp_type : t html_xp
+    type typ
+    val typ_bool : typ
+    val xp_typ : typ html_xp
 
     type dconstr
     val xp_dpat : dconstr -> unit html_xp array -> unit html_xp
@@ -25,7 +26,7 @@ module type BASIC_TYPES =
     type func
     val xp_func : func html_xp
 
-    val asd : (t,constr,func) Model.asd
+    val asd : (typ,constr,func) Model.asd
 
     type generator_info
     type input
@@ -42,12 +43,6 @@ module type TYPES =
     type task_pair = value Task.pair
     type task = value Task.task
               
-    type kind = t Kind.kind
-    val xp_kind : kind html_xp
-
-    type signature = t Kind.signature
-    val xp_signature : signature html_xp
-          
     type data = (value,dconstr) Data.data
     val xp_data : data html_xp
               
@@ -61,15 +56,15 @@ module type TYPES =
     type expr = (var,func) Expr.expr
     val xp_expr : expr html_xp
 
-    type model = (t,var,constr,func) Model.model
+    type model = (typ,var,constr,func) Model.model
     val xp_model : model html_xp
 
-    type asd = (t,constr,func) Model.asd
+    type asd = (typ,constr,func) Model.asd
 
-    type task_model = (t,var,constr,func) Task_model.task_model
+    type task_model = (typ,var,constr,func) Task_model.task_model
     val xp_task_model : task_model html_xp
 
-    type refinement = (t,var,constr,func) Task_model.refinement
+    type refinement = (typ,var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
     type read = (value,dconstr,var,func) Model.read
@@ -100,12 +95,6 @@ module Defined_types (T : BASIC_TYPES) =
     type task_pair = value Task.pair
     type task = value Task.task
               
-    type kind = t Kind.kind
-    let xp_kind : kind html_xp = Kind.xp_kind ~xp_type
-
-    type signature = t Kind.signature
-    let xp_signature : signature html_xp = Kind.xp_signature ~xp_type
-          
     type data = (value,dconstr) Data.data
     let xp_data : data html_xp = Data.xp_data ~xp_dpat
                                
@@ -119,15 +108,15 @@ module Defined_types (T : BASIC_TYPES) =
     type expr = (var,func) Expr.expr
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
 
-    type model = (t,var,constr,func) Model.model
+    type model = (typ,var,constr,func) Model.model
     let xp_model : model html_xp = Model.xp_model ~xp_var ~xp_pat ~xp_func
 
-    type asd = (t,constr,func) Model.asd
+    type asd = (typ,constr,func) Model.asd
 
-    type task_model = (t,var,constr,func) Task_model.task_model
+    type task_model = (typ,var,constr,func) Task_model.task_model
     let xp_task_model : task_model html_xp = Task_model.xp_task_model ~xp_model
 
-    type refinement = (t,var,constr,func) Task_model.refinement
+    type refinement = (typ,var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
     type read = (value,dconstr,var,func) Model.read
@@ -169,17 +158,17 @@ module type DOMAIN =
     val eval_func : func -> value array -> value result
     val eval_unbound_var : var -> value result
     val eval_arg : unit -> value result
-    val data_of_value : kind -> value -> data result
-    val model_of_value : kind -> value -> model result
+    val data_of_value : typ -> value -> data result
+    val model_of_value : typ -> value -> model result
 
     (* model-based generation and parsing *)
 
     val dseq_value : data list -> value (* value for a data sequence *)
       
-    val generator_pat : t -> constr -> generator array -> generator
+    val generator_pat : typ -> constr -> generator array -> generator
 
     val input_of_value : value -> input
-    val parseur_pat : t -> constr -> parseur array -> parseur
+    val parseur_pat : typ -> constr -> parseur array -> parseur
 
     (* description lengths *)
       
@@ -188,7 +177,7 @@ module type DOMAIN =
     val encoding_seq : encoding list -> encoding
     val dl_of_encoding : encoding -> dl
 
-    val dl_constr_params : t -> constr -> dl
+    val dl_constr_params : typ -> constr -> dl
     val dl_func_params : func -> dl
     val dl_var : nb_env_vars:int -> var -> dl
       
@@ -198,11 +187,11 @@ module type DOMAIN =
 
     (* refining *)
 
-    val refinements_pat : t -> constr -> model array -> varseq -> data -> (model * varseq * input) list
-    val refinements_postprocessing : t -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
+    val refinements_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq * input) list
+    val refinements_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
-    val prunings_pat : t -> constr -> model array -> varseq -> data -> (model * varseq * input) list
-    val prunings_postprocessing : t -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
+    val prunings_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq * input) list
+    val prunings_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
 
@@ -274,6 +263,7 @@ module Make (Domain : DOMAIN) =
           ~asd in
       let nb_model_ast, reset_nb_model_ast =
         Model.nb_model_ast
+          ~typ_bool
           ~asd
           ~nb_expr_ast in
       let dl_model_params =

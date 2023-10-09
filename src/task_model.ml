@@ -1,22 +1,21 @@
 
 open Madil_common
-open Kind
 open Data
 open Model
 
 (* task models *)
    
-type ('t,'var,'constr,'func) task_model =
-  { input_model : ('t,'var,'constr,'func) model; (* no reference *)
+type ('typ,'var,'constr,'func) task_model =
+  { input_model : ('typ,'var,'constr,'func) model; (* no reference *)
     input_varseq : 'var Myseq.t;
     nb_env_vars : int; (* nb of visible vars in input model *)
-    output_model : ('t,'var,'constr,'func) model;
+    output_model : ('typ,'var,'constr,'func) model;
     output_varseq : 'var Myseq.t
   }
        
 let xp_task_model
-      ~(xp_model : ('t,'var,'constr,'func) model html_xp)
-    :  ('t,'var,'constr,'func) task_model html_xp =
+      ~(xp_model : ('typ,'var,'constr,'func) model html_xp)
+    :  ('typ,'var,'constr,'func) task_model html_xp =
   fun ~html print m ->
   xp_model ~html print m.input_model;
   print#string "\n ⬇ \n";
@@ -34,12 +33,12 @@ type ('value,'dconstr,'var,'func) pairs_reads =
 
 let read_pairs
       ~(max_nb_reads : int)
-      ~(dl_task_model : (('t,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
+      ~(dl_task_model : (('typ,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
                lazy_index:(('value,'var,'func) Expr.Index.t Lazy.t) ->
-               (('t,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
+               (('typ,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(make_index : ('var,'value) Expr.bindings -> ('value,'var,'func) Expr.Index.t)
       
@@ -153,13 +152,13 @@ let apply
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'value) Expr.bindings as 'bindings) ->
                lazy_index:(('value,'var,'func) Expr.Index.t Lazy.t) ->
-               (('t,'var,'constr,'func) model as 'model) -> 'value ->
+               (('typ,'var,'constr,'func) model as 'model) -> 'value ->
                ('value,'dconstr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 'model -> 'info -> ('data * dl) Myseq.t)
       ~(env : 'data)
-      (m : ('t,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
+      (m : ('typ,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
     : ('data * 'data * dl) list result =
   Common.prof "Task_model.apply" (fun () ->
   let some_parse, _lri, l_di_do_dl =
@@ -192,20 +191,20 @@ let apply
 
 (* refinements *)
   
-type ('t,'var,'constr,'func) refinement =
+type ('typ,'var,'constr,'func) refinement =
   | RInit
-  | Rinput of 'constr path * ('t,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
-  | Routput of 'constr path * ('t,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Rinput of 'constr path * ('typ,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Routput of 'constr path * ('typ,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
 
-let refinement_support : ('t,'var,'constr,'func) refinement -> int = function
+let refinement_support : ('typ,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
   | Rinput (_,_,supp,_) -> supp
   | Routput (_,_,supp,_) -> supp             
 
 let xp_refinement
       ~(xp_path : 'constr path html_xp)
-      ~(xp_model : ('t,'var,'constr,'func) model html_xp)
-    : ('t,'var,'constr,'func) refinement html_xp =
+      ~(xp_model : ('typ,'var,'constr,'func) model html_xp)
+    : ('typ,'var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
     | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
@@ -224,8 +223,8 @@ let xp_refinement
   in
   aux
 
-let refine (r : ('t,'var,'constr,'func) refinement) (m : ('t,'var,'constr,'func) task_model)
-    : (('t,'var,'constr,'func) refinement * ('t,'var,'constr,'func) task_model) result =
+let refine (r : ('typ,'var,'constr,'func) refinement) (m : ('typ,'var,'constr,'func) task_model)
+    : (('typ,'var,'constr,'func) refinement * ('typ,'var,'constr,'func) task_model) result =
   match r with
   | RInit -> Result.Error (Failure "Task_model.refine")
   | Rinput (p,ri,supp,dl') ->

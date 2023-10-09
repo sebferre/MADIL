@@ -1,6 +1,5 @@
 
 open Madil_common
-open Kind
 open Data
 
 type ('var,'func) cond_model =
@@ -9,14 +8,14 @@ type ('var,'func) cond_model =
   | False (* always false condition - only in evaluated model *)
   | BoolExpr of ('var,'func) Expr.expr (* computed condition - not in evaluated model *)
  
-type ('t,'var,'constr,'func) model =
-  | Def of 'var * ('t,'var,'constr,'func) model (* a var is an id for the value at this sub-model - not in evaluated model *)
-  | Pat of 't * 'constr * ('t,'var,'constr,'func) model array (* constr type may be different from data constr *)
+type ('typ,'var,'constr,'func) model =
+  | Def of 'var * ('typ,'var,'constr,'func) model (* a var is an id for the value at this sub-model - not in evaluated model *)
+  | Pat of 'typ * 'constr * ('typ,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Fail (* like an empty alternative - only in evaluated model *)
-  | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('t,'var,'constr,'func) model * ('t,'var,'constr,'func) model
-  | Seq of int * 't kind (* elt kind *) * ('t,'var,'constr,'func) model list
-  | Cst of ('t,'var,'constr,'func) model
-  | Expr of 't kind * ('var,'func) Expr.expr (* not in evaluated model *)
+  | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('typ,'var,'constr,'func) model * ('typ,'var,'constr,'func) model
+  | Seq of int * 'typ (* elt type *) * ('typ,'var,'constr,'func) model list
+  | Cst of ('typ,'var,'constr,'func) model
+  | Expr of 'typ * ('var,'func) Expr.expr (* not in evaluated model *)
 
 type 'constr path =
   | This
@@ -27,19 +26,19 @@ type 'constr path =
 type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
 
-let make_def (x : 'var) (m1 : ('t,'var,'constr,'func) model) : ('t,'var,'constr,'func) model =
+let make_def (x : 'var) (m1 : ('typ,'var,'constr,'func) model) : ('typ,'var,'constr,'func) model =
   Def (x,m1)
-let make_pat (t : 't) (c : 'constr) (args : ('t,'var,'constr,'func) model array) : ('t,'var,'constr,'func) model =
+let make_pat (t : 't) (c : 'constr) (args : ('typ,'var,'constr,'func) model array) : ('typ,'var,'constr,'func) model =
   Pat (t,c,args)
 
-let rec kind : ('t,'var,'constr,'func) model -> 't kind = function
-  | Def (x,m1) -> kind m1
-  | Pat (t,c,args) -> KPat t
+let rec typ : ('typ,'var,'constr,'func) model -> 'typ = function
+  | Def (x,m1) -> typ m1
+  | Pat (t,c,args) -> t
   | Fail -> assert false
-  | Alt (xc,c,m1,m2) -> kind m1
-  | Seq (n,k1,lm1) -> KSeq k1
-  | Cst m1 -> KSeq (kind m1)
-  | Expr (k,e) -> k
+  | Alt (xc,c,m1,m2) -> typ m1
+  | Seq (n,t1,lm1) -> t1
+  | Cst m1 -> typ m1
+  | Expr (t,e) -> t
   
 (* printing *)
   
@@ -47,7 +46,7 @@ let xp_model
       ~(xp_var : 'var html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
       ~(xp_func : 'func html_xp)
-    : ('t,'var,'constr,'func) model html_xp =
+    : ('typ,'var,'constr,'func) model html_xp =
   let rec aux ~prio_ctx ~html print m =
     match m with
     | Def (x,m1) ->
@@ -86,14 +85,14 @@ let xp_model
            aux ~html ~prio_ctx:2 print m2;
            if html then print#string "</div>")
 
-    | Seq (n,_k1,lm1) ->
+    | Seq (n,_t1,lm1) ->
        Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
          (Xprint.sep_list ", " (aux ~prio_ctx:2 ~html))
          print lm1
     | Cst m1 ->
        Xprint.bracket ("〈", " = 〉") (aux ~prio_ctx:2 ~html)
          print m1
-    | Expr (_k,e) ->
+    | Expr (_t,e) ->
        if html then print#string "<span class=\"model-expr\">";
        Expr.xp_expr ~xp_var ~xp_func ~html print e;
        if html then print#string "</span>"
@@ -150,19 +149,19 @@ let xp_path
 
 (* ASD *)
 
-class virtual ['t,'constr,'func] asd =
+class virtual ['typ,'constr,'func] asd =
   object (self)
     method virtual is_default_constr : 'constr -> bool
-    method virtual default_and_other_pats : 't -> 'constr option * ('constr * 't kind array) list
-    method virtual funcs : 't kind -> ('func * 't kind array) list (* None when expressions not allowed for this kind *)
-    method virtual expr_opt : 't kind -> 't kind option
-    method virtual alt_opt : 't kind -> bool
+    method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * 'typ array) list
+    method virtual funcs : 'typ -> ('func * 'typ array) list (* None when expressions not allowed for this type *)
+    method virtual expr_opt : 'typ -> 'typ option
+    method virtual alt_opt : 'typ -> bool
   end
         
 (* model evaluation *)
 
 let binding_vars
-      (m0 : ('t,'var,'constr,'func) model)
+      (m0 : ('typ,'var,'constr,'func) model)
     : 'var Expr.binding_vars =
   let rec aux m acc =
     match m with
@@ -176,17 +175,17 @@ let binding_vars
        let acc = aux m1 acc in
        let acc = aux m2 acc in
        Bintree.add xc acc
-    | Seq (n,k1,lm1) ->
+    | Seq (n,t1,lm1) ->
        List.fold_right aux lm1 acc
     | Cst m1 -> raise TODO
-    | Expr (k,e) -> acc
+    | Expr (t,e) -> acc
   in
   aux m0 Bintree.empty
 
   
 let get_bindings  (* QUICK *)
       ~(value_of_bool : bool -> 'value)
-      (m0 : ('t,'var,'constr,'func) model)
+      (m0 : ('typ,'var,'constr,'func) model)
       (d0 : ('value,'dconstr) data)
     : ('var,'value) Expr.bindings =
   let rec aux m d acc =
@@ -207,7 +206,7 @@ let get_bindings  (* QUICK *)
     | Alt (xc,c,m1,m2), D (_v, DAlt (_prob,b,d12)) ->
        let acc = aux (if b then m1 else m2) d12 acc in
        Mymap.add xc (value_of_bool b) acc
-    | Seq (n,k1,lm1), D (_v, DSeq (dn,ld1)) ->
+    | Seq (n,t1,lm1), D (_v, DSeq (dn,ld1)) ->
        assert (n = dn);
        List.fold_right2 aux lm1 ld1 acc
     | Cst _, _ -> raise TODO
@@ -221,11 +220,11 @@ exception EmptyAlt
 let eval (* from model to evaluated model: resolving expr, ignoring def *)
       ~asd
       ~(eval_expr : ('var,'func) Expr.expr -> ('var,'value) Expr.bindings -> 'value result)
-      ~(model_of_value : 't kind -> 'value -> ('t,'var,'constr,'func) model result)
+      ~(model_of_value : 'typ -> 'value -> ('typ,'var,'constr,'func) model result)
       ~(bool_of_value : 'value -> bool result)
-      (m : ('t,'var,'constr,'func) model)
+      (m : ('typ,'var,'constr,'func) model)
       (bindings : ('var,'value) Expr.bindings)
-    : ('t,'var,'constr,'func) model result =
+    : ('typ,'var,'constr,'func) model result =
   (* INV: eval must ensure that the resulting model has data that is compatible with the given model, so that encoding is well-defined. E.g. no Alt simplification when condition evaluates to True/False. *)
   let rec aux m = (* QUICK *)
     match m with
@@ -247,13 +246,13 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
           | True, Fail, _
           | False, _, Fail -> Result.Error EmptyAlt
         | _ -> Result.Ok (Alt (xc,c',m1',m2')))
-    | Seq (n,k1,lm1) ->
+    | Seq (n,t1,lm1) ->
        let| lm1' = list_map_result aux lm1 in
-       Result.Ok (Seq (n,k1,lm1'))
+       Result.Ok (Seq (n,t1,lm1'))
     | Cst m1 -> raise TODO
-    | Expr (k,e) ->
+    | Expr (t,e) ->
        let| v = eval_expr e bindings in
-       model_of_value k v
+       model_of_value t v
   and aux_cond = function
     | Undet prob -> Result.Ok (Undet prob)
     | True | False -> assert false
@@ -269,9 +268,9 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
 type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
-      ~(generator_pat: 't -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
+      ~(generator_pat: 'typ -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
-    : ('t,'var,'constr,'func) model -> 'gen =
+    : ('typ,'var,'constr,'func) model -> 'gen =
   let rec gen = function
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
@@ -307,14 +306,14 @@ let generator (* on evaluated models: no expr, no def *)
          let* prob, b, d12 = gen_b_d12 info in
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
-    | Seq (n,k1,lm1) ->
+    | Seq (n,t1,lm1) ->
        let gen_lm1 = List.map gen lm1 in
        (fun info ->
          let* ld = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_lm1) in
          let v = dseq_value ld in
          Myseq.return (D (v, DSeq (n, ld))))
     | Cst m1 -> raise TODO
-    | Expr (k,e) -> assert false
+    | Expr (t,e) -> assert false
   in
   gen
                                         
@@ -323,9 +322,9 @@ let generator (* on evaluated models: no expr, no def *)
 type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'input) Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
-      ~(parseur_pat : 't -> 'constr -> 'parse array -> 'parse)
+      ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
       ~(dseq_value : ('value,'dconstr) data list -> 'value)
-    : ('t,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
+    : ('typ,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse = function
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
@@ -356,14 +355,14 @@ let parseur (* on evaluated models: no expr, no def *)
         | True -> seq1 1.
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
-    | Seq (n,k1,lm1) ->
+    | Seq (n,t1,lm1) ->
        let parse_lm1 = List.map parse lm1 in
        (fun input ->
          let* ld, input = Myseq.product_dependent_fair parse_lm1 input in
          let v = dseq_value ld in
          Myseq.return (D (v, (DSeq (n, ld))), input))
     | Cst m1 -> raise TODO
-    | Expr (k,e) -> assert false
+    | Expr (t,e) -> assert false
   in
   parse
 
@@ -401,8 +400,8 @@ let dl_parse_rank (rank : int) : dl =
 let size_alt = 3
   
 let size_model_ast (* for DL computing, QUICK *)
-      ~(asd : ('t,'constr,'func) asd)
-    (m : ('t,'var,'constr,'func) model) : int =
+      ~(asd : ('typ,'constr,'func) asd)
+    (m : ('typ,'var,'constr,'func) model) : int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Pat (t,c,args) ->
@@ -412,9 +411,9 @@ let size_model_ast (* for DL computing, QUICK *)
          args
     | Fail -> assert false
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Seq (n,k1,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
+    | Seq (n,t1,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
     | Cst m1 -> 1 + aux m1
-    | Expr (k,e) -> Expr.size_expr_ast e
+    | Expr (t,e) -> Expr.size_expr_ast e
   and aux_cond = function
     | Undet _ -> 0
     | True | False -> assert false
@@ -423,41 +422,40 @@ let size_model_ast (* for DL computing, QUICK *)
   aux m
 
 let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
-      ~(asd : ('t,'constr,'func) asd)
-      ~(nb_expr_ast : 't kind -> int -> float) =
-  let tab : ('t kind * int, float) Hashtbl.t = Hashtbl.create 1013 in
+      ~(typ_bool : 'typ)
+      ~(asd : ('typ,'constr,'func) asd)
+      ~(nb_expr_ast : 'typ -> int -> float) =
+  let tab : ('typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let reset () = Hashtbl.clear tab in
-  let rec aux (k : 't kind) (size : int) : float (* float to handle large numbers *) =
-    match Hashtbl.find_opt tab (k,size) with
+  let rec aux (t : 'typ) (size : int) : float (* float to handle large numbers *) =
+    match Hashtbl.find_opt tab (t,size) with
     | Some nb -> nb
     | None -> (* QUICK *)
        let nb = (* counting possible expressions *)
-         match asd#expr_opt k with
+         match asd#expr_opt t with
          | None -> 0.
-         | Some k1 -> nb_expr_ast k1 size in
+         | Some t1 -> nb_expr_ast t1 size in
        let nb = (* counting possible alternatives *)
-         if size >= size_alt && asd#alt_opt k
-         then nb +. sum_conv [aux_cond; aux k; aux k] (size - size_alt)
+         if size >= size_alt && asd#alt_opt t
+         then nb +. sum_conv [aux_cond; aux t; aux t] (size - size_alt)
                              (* split between condition, left model, right model *)
          else nb in
-       let nb =
-         match k with
-         | KBool -> nb (* no Boolean model construct *)
-         | KPat t -> (* counting Pat (c,args) *)
-            let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
-            let nb =
-              if size = 0 && default_constr_opt <> None
-              then nb +. 1.
-              else nb in
-            List.fold_left
-              (fun nb (c,k_args) ->
-                if k_args = [||] (* leaf node *)
-                then if size = 1 then nb +. 1. else nb
-                else
-                  if size >= 1
-                  then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
-                  else nb)
-              nb other_constr_args
+       let nb = (* counting Pat (c,args) *)
+         let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
+         let nb =
+           if size = 0 && default_constr_opt <> None
+           then nb +. 1.
+           else nb in
+         List.fold_left
+           (fun nb (c,t_args) ->
+             if t_args = [||] (* leaf node *)
+             then if size = 1 then nb +. 1. else nb
+             else
+               if size >= 1
+               then nb +. sum_conv (Array.to_list (Array.map aux t_args)) (size-1)
+               else nb)
+           nb other_constr_args in
+      (*
          | KSeq k1 -> (* counting Seq (n,lm1) *)
             let aux_k1 = aux k1 in
             let size1 = size-1 in
@@ -465,21 +463,21 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
               (fun n nb ->
                 nb +. sum_conv (List.init n (fun _ -> aux_k1)) size1)
               1 (max 9 size1)
-              nb in
-       Hashtbl.add tab (k,size) nb;
+              nb in *)
+       Hashtbl.add tab (t,size) nb;
        nb
   and aux_cond (size : int) : float =
     if size = 0
     then 1. (* Undet *)
-    else nb_expr_ast KBool size (* BoolExpr *)
+    else nb_expr_ast typ_bool size (* BoolExpr *)
   in
   aux, reset
 
 let dl_model_params
-      ~(dl_constr_params : 't -> 'constr -> dl)
+      ~(dl_constr_params : 'typ -> 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
       ~(dl_var : 'var -> dl)
-    : ('t,'var,'constr,'func) model -> dl =
+    : ('typ,'var,'constr,'func) model -> dl =
   let dl_expr_params =
     Expr.dl_expr_params ~dl_func_params ~dl_var in
   let rec aux = function
@@ -492,11 +490,11 @@ let dl_model_params
     | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
-    | Seq (n,k1,lm1) ->
+    | Seq (n,t1,lm1) ->
        List.map aux lm1
        |> List.fold_left (+.) 0.
     | Cst m1 -> raise TODO
-    | Expr (k,e) -> dl_expr_params e
+    | Expr (t,e) -> dl_expr_params e
   and aux_cond = function
     | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
     | True | False -> assert false
@@ -505,16 +503,16 @@ let dl_model_params
   aux
 
 let dl
-      ~(size_model_ast : ('t,'var,'constr,'func) model -> int)
-      ~(nb_model_ast : 't kind -> int -> float)
-      ~(dl_model_params : dl_var:('var -> dl) -> ('t,'var,'constr,'func) model -> dl)
+      ~(size_model_ast : ('typ,'var,'constr,'func) model -> int)
+      ~(nb_model_ast : 'typ -> int -> float)
+      ~(dl_model_params : dl_var:('var -> dl) -> ('typ,'var,'constr,'func) model -> dl)
       ~(dl_var : nb_env_vars:int -> 'var -> dl) =
   fun
     ~(nb_env_vars : int)
-    (m : ('t,'var,'constr,'func) model) -> (* QUICK *)
+    (m : ('typ,'var,'constr,'func) model) -> (* QUICK *)
   let size = size_model_ast m in
-  let k = kind m in    
-  let nb = nb_model_ast k size in
+  let t = typ m in    
+  let nb = nb_model_ast t size in
   assert (nb > 0.); (* as [m] has this size, the nb of AST of this size must not be zero *)
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
@@ -545,11 +543,11 @@ type ('input,'value,'dconstr,'var) eval_parse_bests = ('var,'value) Expr.binding
         
 let eval_parse_bests
       ~(max_nb_parse : int)
-      ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
-      ~(parseur : ('t,'var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
+      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
+      ~(parseur : ('typ,'var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
       ~(dl_data : ('value,'dconstr) data -> dl)
 
-      (m0 : ('t,'var,'constr,'func) model)
+      (m0 : ('typ,'var,'constr,'func) model)
     : ('input,'value,'dconstr,'var) eval_parse_bests =
   fun bindings input ->
   Common.prof "Model.eval_parse_bests" (fun () ->
@@ -576,14 +574,14 @@ let eval_parse_bests
 
 let read
       ~(input_of_value : 'value -> 'input)
-      ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
-      ~(eval_parse_bests : ('t,'var,'constr,'func) model -> ('input,'value,'dconstr,'var) eval_parse_bests)
+      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
+      ~(eval_parse_bests : ('typ,'var,'constr,'func) model -> ('input,'value,'dconstr,'var) eval_parse_bests)
 
       ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('var,'value) Expr.bindings)
       ~(lazy_index : ('value,'var,'func) Expr.Index.t Lazy.t)
-      (m0 : ('t,'var,'constr,'func) model)
+      (m0 : ('typ,'var,'constr,'func) model)
       (v : 'value)
     : ('value,'dconstr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
@@ -603,12 +601,12 @@ let read
 exception Generate_failure
   
 let write
-      ~(eval : ('t,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('t,'var,'constr,'func) model result)
-      ~(generator : ('t,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
+      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
+      ~(generator : ('typ,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
       ~(dl_data : ('value,'dconstr) data -> dl)
       
       ~(bindings : ('var,'value) Expr.bindings)
-      (m0 : ('t,'var,'constr,'func) model)
+      (m0 : ('typ,'var,'constr,'func) model)
       (info : 'info)
     : (('value,'dconstr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
@@ -637,7 +635,7 @@ let reverse_path (p : 'constr path) : 'constr path =
   ctx This       
   
 let refine (* replace submodel of [m] at [p] by [r] *) 
-    : 'constr path -> ('t,'var,'constr,'func) model -> ('t,'var,'constr,'func) model -> ('t,'var,'constr,'func) model =
+    : 'constr path -> ('typ,'var,'constr,'func) model -> ('typ,'var,'constr,'func) model -> ('typ,'var,'constr,'func) model =
   let rec aux p r m =
     match p, m with
     | _, Def (x,m1) ->
@@ -654,9 +652,9 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | Branch (false,p1), Alt (xc,c,m1,m2) ->
        let new_m2 = aux p1 r m2 in
        Alt (xc,c,m1,new_m2)
-    | Item (i,p1), Seq (n,k1,lm1) when i < n ->
+    | Item (i,p1), Seq (n,t1,lm1) when i < n ->
        let new_lm1 = list_update (fun mi -> aux p1 r mi) i lm1 in
-       Seq (n,k1,new_lm1)
+       Seq (n,t1,new_lm1)
     | _ -> assert false
   in
   aux
