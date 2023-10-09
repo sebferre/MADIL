@@ -268,7 +268,7 @@ let html_of_cell : cell -> Html.t = function
                 if vo = expected_vo
                 then "pred-correct"
                 else "pred-incorrect" in
-              Html.span ~classe:cl html_vo in
+              Html.div ~classe:cl html_vo in
             html_row_pair html_di html_vo
             ^ Printf.sprintf "<br/>DL = %.3f" dl)
           l_di_do_dl)
