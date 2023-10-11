@@ -51,7 +51,7 @@ module type TYPES =
 
     type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars
-    type bindings = (var,value) Expr.bindings
+    type bindings = (var,typ,value) Expr.bindings
           
     type expr = (var,func) Expr.expr
     val xp_expr : expr html_xp
@@ -67,16 +67,16 @@ module type TYPES =
     type refinement = (typ,var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
-    type read = (value,dconstr,var,func) Model.read
-    type reads = (value,dconstr,var,func) Task_model.reads
-    type pairs_reads = (value,dconstr,var,func) Task_model.pairs_reads
+    type read = (typ,value,dconstr,var,func) Model.read
+    type reads = (typ,value,dconstr,var,func) Task_model.reads
+    type pairs_reads = (typ,value,dconstr,var,func) Task_model.pairs_reads
 
     type generator = (generator_info,value,dconstr) Model.generator
     type parseur = (input,value,dconstr) Model.parseur
 
-    type expr_index = (value,var,func) Expr.Index.t
+    type expr_index = (typ,value,var,func) Expr.Index.t
 
-    type best_reads = (value,dconstr,var,func) Refining.best_read list
+    type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * dl triple triple * dl)
@@ -103,7 +103,7 @@ module Defined_types (T : BASIC_TYPES) =
 
     type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars
-    type bindings = (var,value) Expr.bindings
+    type bindings = (var,typ,value) Expr.bindings
           
     type expr = (var,func) Expr.expr
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
@@ -119,16 +119,16 @@ module Defined_types (T : BASIC_TYPES) =
     type refinement = (typ,var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
-    type read = (value,dconstr,var,func) Model.read
-    type reads = (value,dconstr,var,func) Task_model.reads
-    type pairs_reads = (value,dconstr,var,func) Task_model.pairs_reads
+    type read = (typ,value,dconstr,var,func) Model.read
+    type reads = (typ,value,dconstr,var,func) Task_model.reads
+    type pairs_reads = (typ,value,dconstr,var,func) Task_model.pairs_reads
                      
     type generator = (generator_info,value,dconstr) Model.generator
     type parseur = (input,value,dconstr) Model.parseur
 
-    type expr_index = (value,var,func) Expr.Index.t
+    type expr_index = (typ,value,var,func) Expr.Index.t
 
-    type best_reads = (value,dconstr,var,func) Refining.best_read list
+    type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * dl triple triple * dl)
@@ -218,6 +218,7 @@ module Make (Domain : DOMAIN) =
   
     let get_bindings : model -> data -> bindings =
       Model.get_bindings
+        ~typ_bool
         ~value_of_bool
 
     let eval_expr : expr -> bindings -> value result =
@@ -306,6 +307,7 @@ module Make (Domain : DOMAIN) =
       Refining.refinements
         ~xp_model
         ~asd
+        ~typ_bool
         ~data_of_value
         ~value_of_bool
         ~dl_model
@@ -320,6 +322,7 @@ module Make (Domain : DOMAIN) =
       Refining.refinements
         ~xp_model
         ~asd
+        ~typ_bool
         ~data_of_value
         ~value_of_bool
         ~dl_model

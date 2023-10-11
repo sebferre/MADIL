@@ -25,13 +25,13 @@ let filter_map_reads (f : 'read -> 'read option) (selected_reads : ('read list *
       else Some (defined_example_reads, unselected_reads || undefined_reads <> []))
     selected_reads
 
-type ('value,'dconstr,'var,'func) best_read =
+type ('typ,'value,'dconstr,'var,'func) best_read =
   { unselected_reads : bool; (* flag for out-of-branch alt reads *)
     matching : bool; (* matching flag *)
-    read : ('value,'dconstr,'var,'func) Model.read; (* the selected best read, first one when matching=false *)
+    read : ('typ,'value,'dconstr,'var,'func) Model.read; (* the selected best read, first one when matching=false *)
     new_data : ('value,'dconstr) Data.data } (* the new data, the old data when matching=false *)
 
-let best_reads_stats (best_reads : ('value,'dconstr,'var,'func) best_read list) : int * int = (* support, total *)
+let best_reads_stats (best_reads : ('typ,'value,'dconstr,'var,'func) best_read list) : int * int = (* support, total *)
   List.fold_left
     (fun (supp,nb) best_read ->
       if best_read.matching then supp+1, nb+1 (* positive *)
@@ -40,9 +40,9 @@ let best_reads_stats (best_reads : ('value,'dconstr,'var,'func) best_read list) 
     (0,0) best_reads
 
 let inter_union_reads
-      (get_rs : ('value,'dconstr,'var,'func) Model.read -> ('ref * 'var Myseq.t * ('value,'dconstr) Data.data) list)
-      (reads : (('value,'dconstr,'var,'func) Model.read list * bool) list)
-    : ('ref, 'var Myseq.t * ('value,'dconstr,'var,'func) best_read list) Mymap.t =
+      (get_rs : ('typ,'value,'dconstr,'var,'func) Model.read -> ('ref * 'var Myseq.t * ('value,'dconstr) Data.data) list)
+      (reads : (('typ,'value,'dconstr,'var,'func) Model.read list * bool) list)
+    : ('ref, 'var Myseq.t * ('typ,'value,'dconstr,'var,'func) best_read list) Mymap.t =
   (* given a function extracting refinements (submodels) from each read,
      return a set of such refinements, each mapped to the dl-shortest reads supporting it, along with new data *)
   let process_example reads unselected_reads =
@@ -90,8 +90,8 @@ let inter_union_reads
      refs
 
 let extend_partial_best_reads
-      (selected_reads : ((('value,'dconstr,'var,'func) Model.read as 'read) list * bool) list)
-      (best_reads : (('value,'dconstr,'var,'func) best_read as 'best_read) list)
+      (selected_reads : ((('typ,'value,'dconstr,'var,'func) Model.read as 'read) list * bool) list)
+      (best_reads : (('typ,'value,'dconstr,'var,'func) best_read as 'best_read) list)
       (check_alt_read : 'read -> ('read * ('value,'dconstr) Data.data) option)
     : 'best_read list =
   List.map2
@@ -116,7 +116,7 @@ let make_alt_if_allowed_and_needed
       (m_true : (('typ,'var,'const,'func) Model.model as 'model))
       (m_false : 'model)
       (varseq : 'var Myseq.t)
-      (best_reads : (('value,'dconstr,'var,'func) best_read as 'best_read) list)
+      (best_reads : (('typ,'value,'dconstr,'var,'func) best_read as 'best_read) list)
     : ('model * 'var Myseq.t * 'best_read list) Myseq.t =
   if supp = nb then (* no need for alternative *)
     Myseq.return (m_true, varseq, best_reads)
@@ -142,7 +142,7 @@ type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
   (('typ,'var,'constr,'func) Model.model as 'model) ->
   'var Myseq.t -> (* fresh variables viz the model *)
-  ('value,'dconstr,'var,'func) Model.read list list
+  ('typ,'value,'dconstr,'var,'func) Model.read list list
   -> ('constr Model.path (* refinement location *)
       * 'model (* refined submodel *)
       * int (* support *)
@@ -157,11 +157,12 @@ let refinements
       ~(alpha : float)
       ~(max_refinements : int)
       ~(asd : ('typ,'constr,'func) Model.asd)
+      ~(typ_bool : 'typ)
       ~(data_of_value : 'typ -> 'value -> 'data result)
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> (('typ,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(eval_parse_bests : 'model -> ('input,'value,'dconstr,'var) Model.eval_parse_bests)
+      ~(eval_parse_bests : 'model -> ('input,'typ,'value,'dconstr,'var) Model.eval_parse_bests)
       ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
@@ -282,7 +283,7 @@ let refinements
            let v = Data.value read.data in
            match data_of_value t v with (* new data for an expression *)
            | Result.Ok dv ->
-              let es = Expr.Index.lookup v (Lazy.force read.lazy_index) in
+              let es = Expr.Index.lookup (t1,v) (Lazy.force read.lazy_index) in
               Myseq.fold_left
                 (fun rs e -> (e, varseq0, dv) :: rs)
                 [] (Expr.Exprset.to_seq es)
@@ -330,7 +331,7 @@ let refinements
         match read.data with
         | Data.D (v, DAlt (_prob, true, d1)) ->
            let vc = value_of_bool true in
-           let es : _ Expr.Exprset.t = Expr.Index.lookup vc (Lazy.force read.lazy_index) in
+           let es : _ Expr.Exprset.t = Expr.Index.lookup (typ_bool,vc) (Lazy.force read.lazy_index) in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, Data.D (v, DAlt (1., true, d1))) :: rs)
              [] (Expr.Exprset.to_seq es)
@@ -349,7 +350,7 @@ let refinements
               (fun read ->
                 match read.data with
                 | D (v, DAlt (_prob, b, d1)) ->
-                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (value_of_bool true) (Lazy.force read.lazy_index)))
+                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (typ_bool, value_of_bool true) (Lazy.force read.lazy_index)))
                    then Some (read, D (v, DAlt (1., false, d1)))
                    else None
                 | _ -> assert false) in
@@ -380,9 +381,9 @@ let task_refinements
       ~(output_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       
       (m : (('typ,'var,'constr,'func) Task_model.task_model) as 'task_model)
-      (prs : ('value,'dconstr,'var,'func) Task_model.pairs_reads)
-      (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
-      (dsro : ('value,'dconstr,'var,'func) Task_model.reads)
+      (prs : ('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads)
+      (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
+      (dsro : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
     : (('typ,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseqi =
@@ -403,7 +404,7 @@ let task_prunings
       ~(input_prunings : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       
       (m : (('typ,'var,'constr,'func) Task_model.task_model as 'task_model))
-      (dsri : ('value,'dconstr,'var,'func) Task_model.reads)
+      (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
     : (('typ,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   let* pi, ri, suppi, dli', mi', varseqi' =
     input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m

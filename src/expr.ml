@@ -11,7 +11,7 @@ type ('var,'func) expr =
 type 'var binding_vars = 'var Bintree.t
 let binding_vars0 = Bintree.empty
 
-type ('var,'value) bindings = ('var, 'value) Mymap.t
+type ('var,'typ,'value) bindings = ('var, 'typ * 'value) Mymap.t
 let bindings0 = Mymap.empty
 
 let xp_expr
@@ -23,9 +23,10 @@ let xp_expr
     | Ref x -> xp_var ~html print x
     | Apply (f,args) ->
        xp_func ~html print f;
-       Xprint.bracket ("(",")")
-         (Xprint.sep_array ", " (aux ~html))
-         print args
+       if args <> [||] then
+         Xprint.bracket ("(",")")
+           (Xprint.sep_array ", " (aux ~html))
+           print args
     | Arg -> print#string "_"
     | Fun e1 -> print#string "fun { "; aux ~html print e1; print#string " }"
   in
@@ -39,13 +40,13 @@ let eval
       ~(eval_unbound_var : 'var -> 'value result) (* ex: return some null value, or fail *)
       ~(eval_func : 'func -> 'value array -> 'value result)
       ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
-      (e : ('var,'func) expr) (bindings : ('var,'value) bindings)
+      (e : ('var,'func) expr) (bindings : ('var,'typ,'value) bindings)
     : 'value result =
   let rec aux e =
     match e with
     | Ref x ->
        (match Mymap.find_opt x bindings with
-        | Some v -> Result.Ok v
+        | Some (t,v) -> Result.Ok v
         | None -> eval_unbound_var x)
     | Apply (f,args) ->
        let| lv = list_map_result aux (Array.to_list args) in
@@ -256,19 +257,19 @@ module Exprset : EXPRSET =
 
 module Index =
   struct
-    type ('value,'var,'func) t = ('value, ('var,'func) Exprset.t) Mymap.t
+    type ('typ,'value,'var,'func) t = ('typ * 'value, ('var,'func) Exprset.t) Mymap.t
 
     let empty = Mymap.empty
                 
-    let bind_ref (v : 'value) (x : 'var) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
-      Mymap.update v
+    let bind_ref (tv : 'typ * 'value) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+      Mymap.update tv
         (function
          | None -> Some (Exprset.add_ref x Exprset.empty)
          | Some es -> Some (Exprset.add_ref x es))
         index
       
-    let bind_apply (v : 'value) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('value,'var,'func) t) : ('value,'var,'func) t =
-      Mymap.update v
+    let bind_apply (tv : 'typ * 'value) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+      Mymap.update tv
         (function
          | None -> Some (Exprset.add_apply f es_args Exprset.empty)
          | Some es -> Some (Exprset.add_apply f es_args es))
@@ -278,43 +279,47 @@ module Index =
 
     let fold = Mymap.fold
                 
-    let lookup (v : 'value) (index : ('value,'var,'func) t) : ('var,'func) Exprset.t =
-      match find_opt v index with
+    let lookup (tv : 'typ * 'value) (index : ('typ,'value,'var,'func) t) : ('var,'func) Exprset.t =
+      match find_opt tv index with
       | None -> Exprset.empty
       | Some exprs -> exprs
   end
            
-let index_add_bindings index (bindings : ('var,'value) bindings) : ('value,'var,'func) Index.t =
+let index_add_bindings index (bindings : ('var,'typ,'value) bindings) : ('typ,'value,'var,'func) Index.t =
   Mymap.fold
-    (fun x v res -> Index.bind_ref v x res)
+    (fun x tv res -> Index.bind_ref tv x res)
     bindings index
 
 let index_apply_functions
       ~(eval_func : 'func -> 'value array -> 'value result)
-      index (max_arity : int) (get_functions : 'value array -> 'func list)
-    : ('value,'var,'func) Index.t =
-  let rec aux k lv_k les_k args_k es_args_k res =
+      index
+      (max_arity : int)
+      (get_functions : 'typ array * 'value array -> ('typ * 'func) list)
+    : ('typ,'value,'var,'func) Index.t =
+  let rec aux k lt_k lv_k les_k t_args_k v_args_k es_args_k res =
     let res =
-      get_functions args_k
+      get_functions (t_args_k, v_args_k)
       |> List.fold_left
-           (fun res f ->
-             match eval_func f args_k with
-             | Result.Ok v -> Index.bind_apply v f es_args_k res
+           (fun res (t,f) ->
+             match eval_func f v_args_k with
+             | Result.Ok v -> Index.bind_apply (t,v) f es_args_k res
              | Result.Error _ -> res)
            res in
     if k >= max_arity
     then res
     else
       Index.fold
-        (fun v es res ->
+        (fun (t,v) es res ->
+          let lt = t::lt_k in
           let lv = v::lv_k in
           let les = es::les_k in
-          let args = Array.of_list lv in
+          let t_args = Array.of_list lt in
+          let v_args = Array.of_list lv in
           let es_args = Array.of_list les in
-          aux (k+1) lv les args es_args res)
+          aux (k+1) lt lv les t_args v_args es_args res)
         index res
   in
-  aux 0 [] [] [||] [||] index
+  aux 0 [] [] [] [||] [||] [||] index
 
 
 (* expr encoding *)

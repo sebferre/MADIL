@@ -23,11 +23,11 @@ let xp_task_model
 
 (* pair reading and encoding *)
   
-type ('value,'dconstr,'var,'func) pairs_reads =
+type ('typ,'value,'dconstr,'var,'func) pairs_reads =
   (* result of reading a list of pairs of grids *)
   { dl_mi : dl; (* input model DL *)
     dl_mo : dl; (* output model DL *)
-    inputs_reads : (('value,'dconstr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
+    inputs_reads : (('typ,'value,'dconstr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
     reads : ('read * 'read * dl) list list; (* outer list over examples, inner list over parses, sorted in increasing DL *)
   }
 
@@ -36,17 +36,17 @@ let read_pairs
       ~(dl_task_model : (('typ,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
-               bindings:(('var,'value) Expr.bindings as 'bindings) ->
-               lazy_index:(('value,'var,'func) Expr.Index.t Lazy.t) ->
+               bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
+               lazy_index:(('typ,'value,'var,'func) Expr.Index.t Lazy.t) ->
                (('typ,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
-      ~(make_index : ('var,'value) Expr.bindings -> ('value,'var,'func) Expr.Index.t)
+      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)
       
       ~(pruning : bool)
       ~(env : 'data)
       (m : 'task_model)
       (pairs : 'value Task.pair list)
-    : ('value,'dconstr,'var,'func) pairs_reads result =
+    : ('typ,'value,'dconstr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
   let dl_mi, dl_mo = dl_task_model m in
   let| inputs_reads_reads =
@@ -84,13 +84,13 @@ let read_pairs
   let inputs_reads, reads = List.split inputs_reads_reads in
   Result.Ok {dl_mi; dl_mo; inputs_reads; reads})
 
-type ('value,'dconstr,'var,'func) reads =
+type ('typ,'value,'dconstr,'var,'func) reads =
   { dl_m : dl; (* DL of the model *)
-    reads : ('value,'dconstr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
+    reads : ('typ,'value,'dconstr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
   }
   
 let split_pairs_read
-      (prs : ('value,'dconstr,'var,'func) pairs_reads) : ('value,'dconstr,'var,'func) reads double =
+      (prs : ('typ,'value,'dconstr,'var,'func) pairs_reads) : ('typ,'value,'dconstr,'var,'func) reads double =
   let project_reads proj =
     List.map
       (fun pair_reads ->
@@ -108,7 +108,7 @@ let split_pairs_read
 
 let dl_model_data
       ~(alpha : float)
-      (psr : ('value,'dconstr,'var,'func) pairs_reads) : dl triple triple = (* QUICK *)
+      (psr : ('typ,'value,'dconstr,'var,'func) pairs_reads) : dl triple triple = (* QUICK *)
   let lmi = psr.dl_mi in
   let lmo = psr.dl_mo in
   let ldi, ldo =
@@ -127,7 +127,7 @@ let dl_model_data
 
 let make_norm_dl_model_data
       ~(alpha : float)
-      () : ('value,'dconstr,'var,'func) pairs_reads -> dl triple triple =
+      () : ('typ,'value,'dconstr,'var,'func) pairs_reads -> dl triple triple =
   let lmdi0 = ref (-1.) in
   let lmdo0 = ref (-1.) in
   fun psr ->
@@ -150,10 +150,10 @@ let apply
       ~(max_nb_writes : int)
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
-               bindings:(('var,'value) Expr.bindings as 'bindings) ->
-               lazy_index:(('value,'var,'func) Expr.Index.t Lazy.t) ->
+               bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
+               lazy_index:(('typ,'value,'var,'func) Expr.Index.t Lazy.t) ->
                (('typ,'var,'constr,'func) model as 'model) -> 'value ->
-               ('value,'dconstr,'var,'func) read Myseq.t)
+               ('typ,'value,'dconstr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 'model -> 'info -> ('data * dl) Myseq.t)

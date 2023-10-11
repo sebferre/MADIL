@@ -184,15 +184,17 @@ let binding_vars
 
   
 let get_bindings  (* QUICK *)
+      ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
       (m0 : ('typ,'var,'constr,'func) model)
       (d0 : ('value,'dconstr) data)
-    : ('var,'value) Expr.bindings =
+    : ('var,'typ,'value) Expr.bindings =
   let rec aux m d acc =
     match m, d with
     | Def (x,m1), D (v,_) ->
        let acc = aux m1 d acc in
-       Mymap.add x v acc
+       let t1 = typ m1 in
+       Mymap.add x (t1,v) acc
     | Pat (t,c,args), D (_v, DPat (dc, dargs)) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
@@ -205,7 +207,7 @@ let get_bindings  (* QUICK *)
     | Fail, _ -> assert false (* because Fail only occurs in evaluated models *)
     | Alt (xc,c,m1,m2), D (_v, DAlt (_prob,b,d12)) ->
        let acc = aux (if b then m1 else m2) d12 acc in
-       Mymap.add xc (value_of_bool b) acc
+       Mymap.add xc (typ_bool, value_of_bool b) acc
     | Seq (n,t1,lm1), D (_v, DSeq (dn,ld1)) ->
        assert (n = dn);
        List.fold_right2 aux lm1 ld1 acc
@@ -219,11 +221,11 @@ exception EmptyAlt
   
 let eval (* from model to evaluated model: resolving expr, ignoring def *)
       ~asd
-      ~(eval_expr : ('var,'func) Expr.expr -> ('var,'value) Expr.bindings -> 'value result)
+      ~(eval_expr : ('var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(model_of_value : 'typ -> 'value -> ('typ,'var,'constr,'func) model result)
       ~(bool_of_value : 'value -> bool result)
       (m : ('typ,'var,'constr,'func) model)
-      (bindings : ('var,'value) Expr.bindings)
+      (bindings : ('var,'typ,'value) Expr.bindings)
     : ('typ,'var,'constr,'func) model result =
   (* INV: eval must ensure that the resulting model has data that is compatible with the given model, so that encoding is well-defined. E.g. no Alt simplification when condition evaluates to True/False. *)
   let rec aux m = (* QUICK *)
@@ -522,10 +524,10 @@ let dl
        
 (* reading *)
 
-type ('value,'dconstr,'var,'func) read =
+type ('typ,'value,'dconstr,'var,'func) read =
   { env : ('value,'dconstr) data;
-    bindings : ('var,'value) Expr.bindings;
-    lazy_index : ('value,'var,'func) Expr.Index.t Lazy.t;
+    bindings : ('var,'typ,'value) Expr.bindings;
+    lazy_index : ('typ,'value,'var,'func) Expr.Index.t Lazy.t;
     data : ('value,'dconstr) data;
     dl : dl }
 
@@ -539,16 +541,16 @@ type ('value,'dconstr,'var,'func) read =
 
 exception Parse_failure
 
-type ('input,'value,'dconstr,'var) eval_parse_bests = ('var,'value) Expr.bindings -> 'input -> (('value,'dconstr) data * dl) list result
+type ('input,'typ,'value,'dconstr,'var) eval_parse_bests = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'dconstr) data * dl) list result
         
 let eval_parse_bests
       ~(max_nb_parse : int)
-      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
+      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
       ~(parseur : ('typ,'var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
       ~(dl_data : ('value,'dconstr) data -> dl)
 
       (m0 : ('typ,'var,'constr,'func) model)
-    : ('input,'value,'dconstr,'var) eval_parse_bests =
+    : ('input,'typ,'value,'dconstr,'var) eval_parse_bests =
   fun bindings input ->
   Common.prof "Model.eval_parse_bests" (fun () ->
   let| m = eval m0 bindings in (* resolving expressions *)
@@ -574,16 +576,16 @@ let eval_parse_bests
 
 let read
       ~(input_of_value : 'value -> 'input)
-      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
-      ~(eval_parse_bests : ('typ,'var,'constr,'func) model -> ('input,'value,'dconstr,'var) eval_parse_bests)
+      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
+      ~(eval_parse_bests : ('typ,'var,'constr,'func) model -> ('input,'typ,'value,'dconstr,'var) eval_parse_bests)
 
       ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
-      ~(bindings : ('var,'value) Expr.bindings)
-      ~(lazy_index : ('value,'var,'func) Expr.Index.t Lazy.t)
+      ~(bindings : ('var,'typ,'value) Expr.bindings)
+      ~(lazy_index : ('typ,'value,'var,'func) Expr.Index.t Lazy.t)
       (m0 : ('typ,'var,'constr,'func) model)
       (v : 'value)
-    : ('value,'dconstr,'var,'func) read Myseq.t =
+    : ('typ,'value,'dconstr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
   let input = input_of_value v in
   let* best_parses = Myseq.from_result (eval_parse_bests m0 bindings input) in
@@ -601,11 +603,11 @@ let read
 exception Generate_failure
   
 let write
-      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
+      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
       ~(generator : ('typ,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
       ~(dl_data : ('value,'dconstr) data -> dl)
       
-      ~(bindings : ('var,'value) Expr.bindings)
+      ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m0 : ('typ,'var,'constr,'func) model)
       (info : 'info)
     : (('value,'dconstr) data * dl) Myseq.t =

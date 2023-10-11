@@ -10,10 +10,10 @@ let learn
           pruning:bool -> env:'data ->
           (('t,'var,'constr,'func) Task_model.task_model as 'task_model) ->
           'value Task.pair list ->
-          (('value,'dconstr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
+          (('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
-          (('value,'dconstr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
+          (('typ,'value,'dconstr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
           ((('t,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
       ~(task_prunings :
           'task_model -> 'reads ->
