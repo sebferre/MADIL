@@ -127,6 +127,12 @@ let pp_endline xp x =
   pp xp x;
   print_newline ()
 
+let xp_newline : unit html_xp =
+  fun ~html print () ->
+  if html
+  then print#string "<br/>"
+  else print#string "\n"
+
 let xp_brackets : (unit -> unit) html_xp =
   fun ~html print p ->
   if html then print#string "<div class=\"model-brackets\">" else print#string "(";
@@ -139,7 +145,64 @@ let xp_brackets_prio ~prio_ctx ~prio : (unit -> unit) html_xp =
   then p ()
   else xp_brackets ~html print p
 
+let xp_tuple1 ?(delims = "(",")") (xp1 : 'a1 html_xp) : 'a1 html_xp =
+  fun ~html print x1 ->
+  let left, right = delims in
+  print#string left;
+  xp1 ~html print x1;
+  print#string right
+
+let xp_tuple2 ?(delims = "(",")") ?(sep = ", ") (xp1 : 'a1 html_xp) (xp2 : 'a2 html_xp) : ('a1 * 'a2) html_xp =
+  fun ~html print (x1,x2) ->
+  let left, right = delims in
+  print#string left;
+  xp1 ~html print x1;
+  print#string sep;
+  xp2 ~html print x2;
+  print#string right
+
+let xp_tuple3 ?(delims = "(",")") ?(sep = ", ") (xp1 : 'a1 html_xp) (xp2 : 'a2 html_xp) (xp3 : 'a3 html_xp) : ('a1 * 'a2 * 'a3) html_xp =
+  fun ~html print (x1,x2,x3) ->
+  let left, right = delims in
+  print#string left;
+  xp1 ~html print x1;
+  print#string sep;
+  xp2 ~html print x2;
+  print#string sep;
+  xp3 ~html print x3;
+  print#string right
+
+let xp_array ?(delims = "[","]") ?(sep = ", ") (xp : (int * 'a) html_xp) : 'a array html_xp =
+  fun ~html print xs ->
+  let left, right = delims in
+  print#string left;
+  Array.iteri
+    (fun i xi ->
+      if i > 0 then print#string sep;
+      xp ~html print (i,xi))
+    xs;
+  print#string right
+
+let xp_list ?(delims = "[","]") ?(sep = ", ") (xp : 'a html_xp) : 'a list html_xp =
+  fun ~html print xs ->
+  let left, right = delims in
+  print#string left;
+  List.iteri
+    (fun i xi ->
+      if i > 0 then print#string sep;
+      xp ~html print xi)
+    xs;
+  print#string right
   
+let xp_html_elt (tag : string) ?(classe : string = "") : (unit -> unit) html_xp =
+  fun ~html print p ->
+  if html then
+    if classe = ""
+    then print#string ("<" ^ tag ^ ">")
+    else print#string ("<" ^ tag ^ " class=\"" ^ String.escaped classe ^ "\">");
+  p ();
+  if html then print#string ("</" ^ tag ^ ">")
+
 (* combinatorics *)
 
 let rec sum_conv (lf : (int -> float) list) (n : int) : float =

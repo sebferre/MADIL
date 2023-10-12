@@ -212,14 +212,15 @@ let xp_refinement
   and aux2 ~html print in_out p r supp dl' i_o =
     (* if dl' <> 0. (* undefined value *) then (* showing DL estimate *)
       print#string (Printf.sprintf " (~%.3f) " dl'); *)
-    xp_model ~html print r;
     if supp <> 0 (* undefined value *) then
       aux_support ~html print supp;
+    xp_html_elt "span" ~classe:"model-refinement" ~html print
+      (fun () -> xp_model ~html print r);
     print#string " → ";
     print#string in_out;
     xp_path ~html print p    
   and aux_support ~html print supp =
-    print#string " ("; print#int supp; print#string ")"
+    print#string " #"; print#int supp; print#string " "
   in
   aux
 
