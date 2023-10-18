@@ -57,6 +57,18 @@ let rec list_map_result (f : 'a -> ('b,'c) Result.t) (lx : 'a list) : ('b list, 
      let| ly1 = list_map_result f lx1 in
      Result.Ok (y::ly1)
 
+let array_map_result (f : 'a -> 'b result) (xs : 'a array) : 'b array result =
+  try
+    Result.Ok
+      (Array.map
+         (fun x ->
+           match f x with
+           | Result.Ok y -> y
+           | Result.Error exn -> raise exn)
+         xs)
+  with exn ->
+    Result.Error exn
+
 let result_list_bind_some (lx_res : ('a list,'c) Result.t) (f : 'a -> ('b list,'c) Result.t) : ('b list, 'c) Result.t =
   let rec aux = function
   | [] -> invalid_arg "Model2.bind_map_ok: empty list"
@@ -115,7 +127,11 @@ let myseq_bind_sample_fair ~(size1 : int) ~(size2 : int) (s : 'a Myseq.t) (f : '
   let ok1, rev_acc1, rev_acc12 = aux size1 false [] [] s in
   ok1, List.rev rev_acc1, List.rev rev_acc12
 
-  
+(* ndtrees *)
+
+let ( let< ) t f = Ndtree.map f t
+let ( let<* ) t f = Ndtree.bind f t
+
 (* xprint *)
 
 type 'a html_xp = html:bool -> 'a Xprint.xp
@@ -172,14 +188,14 @@ let xp_tuple3 ?(delims = "(",")") ?(sep = ", ") (xp1 : 'a1 html_xp) (xp2 : 'a2 h
   xp3 ~html print x3;
   print#string right
 
-let xp_array ?(delims = "[","]") ?(sep = ", ") (xp : (int * 'a) html_xp) : 'a array html_xp =
+let xp_array ?(delims = "[","]") ?(sep = ", ") (xp : 'a html_xp) : 'a array html_xp =
   fun ~html print xs ->
   let left, right = delims in
   print#string left;
   Array.iteri
     (fun i xi ->
       if i > 0 then print#string sep;
-      xp ~html print (i,xi))
+      xp ~html print xi)
     xs;
   print#string right
 
