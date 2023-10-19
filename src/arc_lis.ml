@@ -52,6 +52,7 @@ type arc_focus = arc_state
 type arc_extent = arc_state
 
 let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (refinement : refinement) (env : data) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
+  try
   let| prs = read_pairs ~pruning:(stage = Prune) ~env model task.train in
   let dsri, dsro = Task_model.split_pairs_read prs in
   let dls = Task_model.dl_model_data ~alpha:(!alpha) prs in
@@ -67,7 +68,13 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       dls;
       norm_dls;
       norm_dl;
-      suggestions = [] }  
+      suggestions = [] }
+  with exn ->
+    print_endline "FAILURE to compute new state for some refinement";
+    print_endline (Printexc.to_string exn);
+    print_string "refinement: "; pp xp_refinement refinement;
+    print_string "model: "; pp xp_task_model model;
+    Result.Error exn
                
 let initial_focus (name : string) (task : task) : arc_focus =
   let norm_dl_model_data = Task_model.make_norm_dl_model_data ~alpha:(!alpha) () in
@@ -86,9 +93,14 @@ object
     if focus.suggestions = [] then (
       Jsutils.firebug "Computing suggestions...";
       let _, suggestions = (* selecting up to [refine_degree] compressive refinements, keeping other for information *)
-        (match focus.stage with
-         | Build -> task_refinements focus.model focus.prs focus.dsri focus.dsro
-         | Prune -> task_prunings focus.model focus.dsri)
+        (try
+           match focus.stage with
+           | Build -> task_refinements focus.model focus.prs focus.dsri focus.dsro
+           | Prune -> task_prunings focus.model focus.dsri
+         with exn ->
+           print_endline "FAILURE to compute refinements";
+           print_endline (Printexc.to_string exn);
+           Myseq.empty)
         |> Myseq.fold_left
              (fun (quota_compressive,suggestions as res) (r,m) ->
                if quota_compressive <= 0
@@ -301,10 +313,13 @@ let w_results : (col, unit, cell) Widget_table.widget =
 let render_place place k =
   let get_pred ~test m vi vo =
     let focus = place#focus in
-    match apply ~env:focus.env m vi focus.info_o with
-    | Result.Ok [] -> Error "No valid prediction"
-    | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
-    | Result.Error exn -> Error (Printexc.to_string exn)
+    try
+      match apply ~env:focus.env m vi focus.info_o with
+      | Result.Ok [] -> Error "No valid prediction"
+      | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
+      | Result.Error exn -> Error (Printexc.to_string exn)
+    with exn ->
+      Error ("Unexpected error: " ^ Printexc.to_string exn)
   in
  Jsutils.jquery "#lis-suggestions" (fun elt_lis ->
   let> _ = Jsutils.toggle_class elt_lis "computing" in (* turn on *)
