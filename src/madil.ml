@@ -152,18 +152,19 @@ module type DOMAIN =
 
     val bool_of_value : value -> bool result
     val value_of_bool : bool -> value
+    val value_null : value
 
     (* bindings and evaluation *)
 
-    val eval_func : func -> value array -> value result
-    val eval_unbound_var : var -> value result
-    val eval_arg : unit -> value result
+    val eval_func : func -> value Ndtree.t array -> value Ndtree.t result
+    val eval_unbound_var : var -> value Ndtree.t result
+    val eval_arg : unit -> value Ndtree.t result
     val data_of_value : typ -> value -> data result
     val model_of_value : typ -> value -> model result
 
     (* model-based generation and parsing *)
 
-    val dseq_value : data list -> value (* value for a data sequence *)
+    val dseq_value : data array -> value (* value for a data sequence *)
       
     val generator_pat : typ -> constr -> generator array -> generator
 
@@ -174,7 +175,7 @@ module type DOMAIN =
       
     val encoding_dpat : dconstr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
-    val encoding_seq : encoding list -> encoding
+    val encoding_seq : dl (* seq len *) -> encoding array -> encoding
     val dl_of_encoding : encoding -> dl
 
     val dl_constr_params : typ -> constr -> dl
@@ -220,8 +221,9 @@ module Make (Domain : DOMAIN) =
       Model.get_bindings
         ~typ_bool
         ~value_of_bool
+        ~value_null
 
-    let eval_expr : expr -> bindings -> value result =
+    let eval_expr : expr -> bindings -> value Ndtree.t result =
       Expr.eval
         ~eval_unbound_var
         ~eval_func

@@ -7,11 +7,12 @@ type ('var,'func) expr =
   | Apply of 'func * ('var,'func) expr array
   | Arg (* implicit unique argument of functions *)
   | Fun of ('var,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
+(* TODO: add indexing construct for ndtree values ? with exprs for the ndtree and the indexes ? *)
 
 type 'var binding_vars = 'var Bintree.t
 let binding_vars0 = Bintree.empty
 
-type ('var,'typ,'value) bindings = ('var, 'typ * 'value) Mymap.t
+type ('var,'typ,'value) bindings = ('var, 'typ * 'value Ndtree.t) Mymap.t
 let bindings0 = Mymap.empty
 
 let xp_expr
@@ -37,11 +38,11 @@ let xp_expr
 (* expression evaluation *)
 
 let eval
-      ~(eval_unbound_var : 'var -> 'value result) (* ex: return some null value, or fail *)
-      ~(eval_func : 'func -> 'value array -> 'value result)
-      ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
+      ~(eval_unbound_var : 'var -> 'value Ndtree.t result) (* ex: return some null value, or fail *)
+      ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
+      ~(eval_arg : unit -> 'value Ndtree.t result) (* the value should be the identity function *)
       (e : ('var,'func) expr) (bindings : ('var,'typ,'value) bindings)
-    : 'value result =
+    : 'value Ndtree.t result =
   let rec aux e =
     match e with
     | Ref x ->
@@ -257,18 +258,18 @@ module Exprset : EXPRSET =
 
 module Index =
   struct
-    type ('typ,'value,'var,'func) t = ('typ * 'value, ('var,'func) Exprset.t) Mymap.t
+    type ('typ,'value,'var,'func) t = ('typ * 'value Ndtree.t, ('var,'func) Exprset.t) Mymap.t
 
     let empty = Mymap.empty
                 
-    let bind_ref (tv : 'typ * 'value) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+    let bind_ref (tv : 'typ * 'value Ndtree.t) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
       Mymap.update tv
         (function
          | None -> Some (Exprset.add_ref x Exprset.empty)
          | Some es -> Some (Exprset.add_ref x es))
         index
       
-    let bind_apply (tv : 'typ * 'value) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+    let bind_apply (tv : 'typ * 'value Ndtree.t) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
       Mymap.update tv
         (function
          | None -> Some (Exprset.add_apply f es_args Exprset.empty)
@@ -279,7 +280,7 @@ module Index =
 
     let fold = Mymap.fold
                 
-    let lookup (tv : 'typ * 'value) (index : ('typ,'value,'var,'func) t) : ('var,'func) Exprset.t =
+    let lookup (tv : 'typ * 'value Ndtree.t) (index : ('typ,'value,'var,'func) t) : ('var,'func) Exprset.t =
       match find_opt tv index with
       | None -> Exprset.empty
       | Some exprs -> exprs
@@ -291,10 +292,10 @@ let index_add_bindings index (bindings : ('var,'typ,'value) bindings) : ('typ,'v
     bindings index
 
 let index_apply_functions
-      ~(eval_func : 'func -> 'value array -> 'value result)
+      ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
       index
       (max_arity : int)
-      (get_functions : 'typ array * 'value array -> ('typ * 'func) list)
+      (get_functions : 'typ array * 'value Ndtree.t array -> ('typ * 'func) list)
     : ('typ,'value,'var,'func) Index.t =
   let rec aux k lt_k lv_k les_k t_args_k v_args_k es_args_k res =
     let res =

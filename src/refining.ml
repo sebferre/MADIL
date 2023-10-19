@@ -256,8 +256,17 @@ let refinements
                   | _ -> assert false)
                 selected_reads in
             aux ctx2 m2 sel2) ]
-                        
-    | Model.Seq (n,k1,lm1) ->
+    | Model.Loop m1 ->
+       aux ctx m1
+         (map_reads
+            (fun read ->
+              match read.Model.data with
+              | D (_, DSeq (_,_,ds1)) -> (* TODO: this is temporary hack *)
+                 assert (ds1 <> [||]); 
+                 {read with Model.data = ds1.(0)}
+              | _ -> assert false)
+            selected_reads)
+    | Model.Seq (n,t1,ms1) ->
        Myseq.interleave
          (List.mapi
             (fun i mi ->
@@ -266,11 +275,10 @@ let refinements
                 (map_reads
                    (fun read ->
                      match read.Model.data with
-                     | D (_, DSeq (_,ld)) -> {read with Model.data = List.nth ld i}
+                     | D (_, DSeq (_,_,ds1)) -> {read with Model.data = ds1.(i)}
                      | _ -> assert false)
                    selected_reads))
-            lm1)
-    | Model.Cst m1 -> raise TODO
+            (Array.to_list ms1))
     | Model.Expr (k,e) -> Myseq.empty
   and aux_expr ctx m selected_reads =
     let t = Model.typ m in
@@ -283,7 +291,7 @@ let refinements
            let v = Data.value read.data in
            match data_of_value t v with (* new data for an expression *)
            | Result.Ok dv ->
-              let es = Expr.Index.lookup (t1,v) (Lazy.force read.lazy_index) in
+              let es = Expr.Index.lookup (t1, Ndtree.scalar v) (Lazy.force read.lazy_index) in
               Myseq.fold_left
                 (fun rs e -> (e, varseq0, dv) :: rs)
                 [] (Expr.Exprset.to_seq es)
@@ -331,7 +339,7 @@ let refinements
         match read.data with
         | Data.D (v, DAlt (_prob, true, d1)) ->
            let vc = value_of_bool true in
-           let es : _ Expr.Exprset.t = Expr.Index.lookup (typ_bool,vc) (Lazy.force read.lazy_index) in
+           let es : _ Expr.Exprset.t = Expr.Index.lookup (typ_bool, Ndtree.scalar vc) (Lazy.force read.lazy_index) in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, Data.D (v, DAlt (1., true, d1))) :: rs)
              [] (Expr.Exprset.to_seq es)
@@ -350,7 +358,8 @@ let refinements
               (fun read ->
                 match read.data with
                 | D (v, DAlt (_prob, b, d1)) ->
-                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (typ_bool, value_of_bool true) (Lazy.force read.lazy_index)))
+                   let v_true = value_of_bool true in
+                   if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (typ_bool, Ndtree.scalar v_true) (Lazy.force read.lazy_index)))
                    then Some (read, D (v, DAlt (1., false, d1)))
                    else None
                 | _ -> assert false) in

@@ -225,7 +225,7 @@ let rec sum_conv (lf : (int -> float) list) (n : int) : float =
   (* distributes [n] over functions in [lf], multiply results, sums over all distribs *)
   (* TODO: memoize recursive calls? *)
   match lf with
-  | [] -> assert false
+  | [] -> if n = 0 then 1. else 0.
   | [f1] -> f1 n
   | f1::lf1 ->
      Common.fold_for

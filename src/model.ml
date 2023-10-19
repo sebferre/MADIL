@@ -13,15 +13,15 @@ type ('typ,'var,'constr,'func) model =
   | Pat of 'typ * 'constr * ('typ,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Fail (* like an empty alternative - only in evaluated model *)
   | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('typ,'var,'constr,'func) model * ('typ,'var,'constr,'func) model
-  | Seq of int * 'typ (* elt type *) * ('typ,'var,'constr,'func) model list
-  | Cst of ('typ,'var,'constr,'func) model
+  | Loop of ('typ,'var,'constr,'func) model
+  | Seq of int * 'typ (* elt type *) * ('typ,'var,'constr,'func) model array
   | Expr of 'typ * ('var,'func) Expr.expr (* not in evaluated model *)
 
 type 'constr path =
   | This
-  | Field of 'constr * int * 'constr path
-  | Branch of bool * 'constr path
-  | Item of int * 'constr path
+  | Field of 'constr * int * 'constr path (* Pat field *)
+  | Branch of bool * 'constr path (* Alt branch *)
+  | Item of int * 'constr path (* Seq item *)
 
 type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
@@ -30,14 +30,18 @@ let make_def (x : 'var) (m1 : ('typ,'var,'constr,'func) model) : ('typ,'var,'con
   Def (x,m1)
 let make_pat (t : 't) (c : 'constr) (args : ('typ,'var,'constr,'func) model array) : ('typ,'var,'constr,'func) model =
   Pat (t,c,args)
+let make_alt (xc : 'var) (cond : ('var,'func) cond_model) (m1 : ('typ,'var,'constr,'func) model) (m2 : ('typ,'var,'constr,'func) model) : ('typ,'var,'constr,'func) model =
+  Alt (xc,cond,m1,m2)
+let make_loop (m1 : ('typ,'var,'constr,'func) model) : ('typ,'var,'constr,'func) model =
+  Loop m1
 
 let rec typ : ('typ,'var,'constr,'func) model -> 'typ = function
   | Def (x,m1) -> typ m1
   | Pat (t,c,args) -> t
   | Fail -> assert false
   | Alt (xc,c,m1,m2) -> typ m1
+  | Loop m1 -> typ m1
   | Seq (n,t1,lm1) -> t1
-  | Cst m1 -> typ m1
   | Expr (t,e) -> t
   
 (* printing *)
@@ -85,13 +89,10 @@ let xp_model
            aux ~html ~prio_ctx:2 print m2;
            if html then print#string "</div>")
 
+    | Loop m1 ->
+       xp_tuple1 ~delims:("〈", " ...〉") (aux ~prio_ctx:2) ~html print m1
     | Seq (n,_t1,lm1) ->
-       Xprint.bracket ("〈" ^ string_of_int n ^ ": ", "〉")
-         (Xprint.sep_list ", " (aux ~prio_ctx:2 ~html))
-         print lm1
-    | Cst m1 ->
-       Xprint.bracket ("〈", " = 〉") (aux ~prio_ctx:2 ~html)
-         print m1
+       xp_array ~delims:("〈","〉") (aux ~prio_ctx:2) ~html print lm1
     | Expr (_t,e) ->
        if html then print#string "<span class=\"model-expr\">";
        Expr.xp_expr ~xp_var ~xp_func ~html print e;
@@ -152,7 +153,7 @@ let xp_path
 class virtual ['typ,'constr,'func] asd =
   object (self)
     method virtual is_default_constr : 'constr -> bool
-    method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * 'typ array) list
+    method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * ('typ * int) array) list (* the int is the ndim of the field *)
     method virtual funcs : 'typ -> ('func * 'typ array) list (* None when expressions not allowed for this type *)
     method virtual expr_opt : 'typ -> 'typ option
     method virtual alt_opt : 'typ -> bool
@@ -175,9 +176,9 @@ let binding_vars
        let acc = aux m1 acc in
        let acc = aux m2 acc in
        Bintree.add xc acc
+    | Loop m1 -> aux m1 acc
     | Seq (n,t1,lm1) ->
-       List.fold_right aux lm1 acc
-    | Cst m1 -> raise TODO
+       Array.fold_right aux lm1 acc
     | Expr (t,e) -> acc
   in
   aux m0 Bintree.empty
@@ -186,42 +187,92 @@ let binding_vars
 let get_bindings  (* QUICK *)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
-      (m0 : ('typ,'var,'constr,'func) model)
-      (d0 : ('value,'dconstr) data)
+      ~(value_null : 'value)
+      (m0 : ('typ,'var,'constr,'func) model as 'model)
+      (d0 : ('value,'dconstr) data as 'data)
     : ('var,'typ,'value) Expr.bindings =
-  let rec aux m d acc =
-    match m, d with
-    | Def (x,m1), D (v,_) ->
-       let acc = aux m1 d acc in
+  let rec aux m (d_tree : 'data option Ndtree.t) acc =
+    match m with
+    | Def (x,m1) ->
+       let acc = aux m1 d_tree acc in
        let t1 = typ m1 in
-       Mymap.add x (t1,v) acc
-    | Pat (t,c,args), D (_v, DPat (dc, dargs)) ->
+       let v_tree =
+         let< d = d_tree in
+         match d with
+         | Some d -> Data.value d
+         | None -> value_null in
+       Mymap.add x (t1,v_tree) acc
+    | Pat (t,c,args) ->
        let n = Array.length args in
-       assert (Array.length dargs = n);
        let ref_acc = ref acc in (* missing Array.fold_right2 *)
        for i = 0 to n - 1 do
-         let acc = aux args.(i) dargs.(i) !ref_acc in
-         ref_acc := acc
+         let di_tree =
+           let< d = d_tree in
+           match d with
+           | Some (D (_v, DPat (dc, dargs))) ->
+              assert (Array.length dargs = n);
+              Some dargs.(i)
+           | None -> None
+           | _ -> assert false in
+         ref_acc := aux args.(i) di_tree !ref_acc
        done;
        !ref_acc
-    | Fail, _ -> assert false (* because Fail only occurs in evaluated models *)
-    | Alt (xc,c,m1,m2), D (_v, DAlt (_prob,b,d12)) ->
-       let acc = aux (if b then m1 else m2) d12 acc in
-       Mymap.add xc (typ_bool, value_of_bool b) acc
-    | Seq (n,t1,lm1), D (_v, DSeq (dn,ld1)) ->
-       assert (n = dn);
-       List.fold_right2 aux lm1 ld1 acc
-    | Cst _, _ -> raise TODO
-    | Expr _, _ -> acc
-    | _ -> assert false
+    | Fail -> assert false (* because Fail only occurs in evaluated models *)
+    | Alt (xc,c,m1,m2) ->
+       let d1_tree =
+         let< d = d_tree in
+         match d with
+         | Some (D (_v, DAlt (_prob,b,d12))) -> if b then Some d12 else None
+         | None -> None
+         | _ -> assert false in
+       let acc = aux m1 d1_tree acc in
+       let d2_tree =
+         let< d = d_tree in
+         match d with
+         | Some (D (_v, DAlt (_prob,b,d12))) -> if b then None else Some d12
+         | None -> None
+         | _ -> assert false in
+       let acc = aux m2 d2_tree acc in
+       let vc_tree =
+         let< d = d_tree in
+         match d with
+         | Some (D (_v, DAlt (_prob,b,d12))) -> value_of_bool b
+         | None -> value_null
+         | _ -> assert false in
+       Mymap.add xc (typ_bool, vc_tree) acc
+    | Loop m1 ->
+       let d1_tree =
+         let<* d = d_tree in
+         match d with
+         | Some (D (_v, DSeq (dn,_,ds1))) ->
+            Ndtree.pack1 (Array.map (fun d1 -> Some d1) ds1)
+         | None ->
+            Ndtree.pack1 [|None|]
+         | _ -> assert false in
+       aux m1 d1_tree acc
+    | Seq (n,t1,ms1) ->
+       let ref_acc = ref acc in (* missing Array.fold_right2 *)
+       for i = 0 to n - 1 do
+         let di_tree =
+           let< d = d_tree in
+           match d with
+           | Some (D (_v, DSeq (dn, _, ds1))) ->
+              assert (dn = n);
+              Some ds1.(i)
+           | None -> None
+           | _ -> assert false in
+         ref_acc := aux ms1.(i) di_tree !ref_acc
+       done;
+       !ref_acc
+    | Expr _ -> acc
   in
-  aux m0 d0 Expr.bindings0
+  aux m0 (Ndtree.scalar (Some d0)) Expr.bindings0
 
 exception EmptyAlt
   
 let eval (* from model to evaluated model: resolving expr, ignoring def *)
       ~asd
-      ~(eval_expr : ('var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
+      ~(eval_expr : ('var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
       ~(model_of_value : 'typ -> 'value -> ('typ,'var,'constr,'func) model result)
       ~(bool_of_value : 'value -> bool result)
       (m : ('typ,'var,'constr,'func) model)
@@ -248,18 +299,22 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
           | True, Fail, _
           | False, _, Fail -> Result.Error EmptyAlt
         | _ -> Result.Ok (Alt (xc,c',m1',m2')))
-    | Seq (n,t1,lm1) ->
-       let| lm1' = list_map_result aux lm1 in
-       Result.Ok (Seq (n,t1,lm1'))
-    | Cst m1 -> raise TODO
+    | Loop m1 ->
+       let| m1' = aux m1 in
+       Result.Ok (Loop m1')
+    | Seq (n,t1,ms1) ->
+       let| ms1' = array_map_result aux ms1 in
+       Result.Ok (Seq (n,t1,ms1'))
     | Expr (t,e) ->
-       let| v = eval_expr e bindings in
+       let| v_tree = eval_expr e bindings in
+       let| v = Ndtree.unscalar v_tree in
        model_of_value t v
   and aux_cond = function
     | Undet prob -> Result.Ok (Undet prob)
     | True | False -> assert false
     | BoolExpr e ->
-       let| v = eval_expr e bindings in
+       let| v_tree = eval_expr e bindings in
+       let| v = Ndtree.unscalar v_tree in
        let| b = bool_of_value v in
        Result.Ok (if b then True else False)
   in
@@ -271,7 +326,7 @@ type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
       ~(generator_pat: 'typ -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
-      ~(dseq_value : ('value,'dconstr) data list -> 'value)
+      ~(dseq_value : ('value,'dconstr) data array -> 'value)
     : ('typ,'var,'constr,'func) model -> 'gen =
   let rec gen = function
     | Def (x,m1) -> assert false
@@ -308,13 +363,20 @@ let generator (* on evaluated models: no expr, no def *)
          let* prob, b, d12 = gen_b_d12 info in
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
-    | Seq (n,t1,lm1) ->
-       let gen_lm1 = List.map gen lm1 in
+    | Loop m1 ->
+       let gen_m1 = gen m1 in
        (fun info ->
-         let* ld = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_lm1) in
-         let v = dseq_value ld in
-         Myseq.return (D (v, DSeq (n, ld))))
-    | Cst m1 -> raise TODO
+         let* d1 = gen_m1 info in (* generating a single item *)
+         let ds1 = [|d1|] in
+         let v = dseq_value ds1 in
+         Myseq.return (D (v, DSeq (1, Range.make_open 0, ds1))))
+    | Seq (n,t1,ms1) ->
+       let gen_ms1 = Array.to_list (Array.map gen ms1) in
+       (fun info ->
+         let* ld1 = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_ms1) in
+         let ds1 = Array.of_list ld1 in
+         let v = dseq_value ds1 in
+         Myseq.return (D (v, DSeq (n, Range.make_exact n, ds1))))
     | Expr (t,e) -> assert false
   in
   gen
@@ -325,7 +387,7 @@ type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'inp
 
 let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
-      ~(dseq_value : ('value,'dconstr) data list -> 'value)
+      ~(dseq_value : ('value,'dconstr) data array -> 'value)
     : ('typ,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse = function
     | Def (x,m1) -> assert false
@@ -357,13 +419,22 @@ let parseur (* on evaluated models: no expr, no def *)
         | True -> seq1 1.
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
-    | Seq (n,t1,lm1) ->
-       let parse_lm1 = List.map parse lm1 in
+    | Loop m1 ->
+       let parse_m1 = parse m1 in
+       let seq_parse_m1 = Myseq.const parse_m1 in
        (fun input ->
-         let* ld, input = Myseq.product_dependent_fair parse_lm1 input in
-         let v = dseq_value ld in
-         Myseq.return (D (v, (DSeq (n, ld))), input))
-    | Cst m1 -> raise TODO
+         let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in
+         let ds1 = Array.of_list ld1 in
+         let n = Array.length ds1 in
+         let v = dseq_value ds1 in
+         Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1)), input))
+    | Seq (n,t1,ms1) ->
+       let parse_lm1 = Array.to_list (Array.map parse ms1) in
+       (fun input ->
+         let* ld1, input = Myseq.product_dependent_fair parse_lm1 input in
+         let ds1 = Array.of_list ld1 in
+         let v = dseq_value ds1 in
+         Myseq.return (D (v, (DSeq (n, Range.make_exact n, ds1))), input))
     | Expr (t,e) -> assert false
   in
   parse
@@ -373,7 +444,7 @@ let parseur (* on evaluated models: no expr, no def *)
 let dl_data
       ~(encoding_dpat : 'dconstr -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
-      ~(encoding_seq : 'encoding list -> 'encoding)
+      ~(encoding_seq : dl (* DL of seq length *) -> 'encoding array -> 'encoding)
       ~(dl_of_encoding : 'encoding -> dl)
     : (('value,'dconstr) data as 'data) -> dl = (* QUICK *)
   let rec aux (D (v, dm)) =
@@ -385,9 +456,10 @@ let dl_data
        let dl_choice = Mdl.Code.usage prob in
        let enc12 = aux d12 in
        encoding_alt dl_choice enc12
-    | DSeq (dn,ld1) ->
-       let encs = List.map aux ld1 in
-       encoding_seq encs
+    | DSeq (dn,range,ds1) ->
+       let dl_length = Range.dl dn range in
+       let encs = Array.map aux ds1 in
+       encoding_seq dl_length encs
   in
   fun d ->
   let enc = aux d in
@@ -400,6 +472,8 @@ let dl_parse_rank (rank : int) : dl =
 (* model encoding *)
 
 let size_alt = 3
+let size_loop = 2
+let size_seq = 2
   
 let size_model_ast (* for DL computing, QUICK *)
       ~(asd : ('typ,'constr,'func) asd)
@@ -413,8 +487,8 @@ let size_model_ast (* for DL computing, QUICK *)
          args
     | Fail -> assert false
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Seq (n,t1,lm1) -> List.fold_left (fun res m1 -> res + aux m1) 1 lm1
-    | Cst m1 -> 1 + aux m1
+    | Loop m1 -> size_loop + aux m1
+    | Seq (n,t1,ms1) -> Array.fold_left (fun res m1 -> res + aux m1) 1 ms1
     | Expr (t,e) -> Expr.size_expr_ast e
   and aux_cond = function
     | Undet _ -> 0
@@ -449,29 +523,40 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
            then nb +. 1.
            else nb in
          List.fold_left
-           (fun nb (c,t_args) ->
-             if t_args = [||] (* leaf node *)
+           (fun nb (c,t_ndim_args) ->
+             if t_ndim_args = [||] (* leaf node *)
              then if size = 1 then nb +. 1. else nb
              else
                if size >= 1
-               then nb +. sum_conv (Array.to_list (Array.map aux t_args)) (size-1)
+               then nb +. sum_conv (Array.to_list (Array.map aux_seq t_ndim_args)) (size-1)
                else nb)
            nb other_constr_args in
-      (*
-         | KSeq k1 -> (* counting Seq (n,lm1) *)
-            let aux_k1 = aux k1 in
-            let size1 = size-1 in
-            Common.fold_for
-              (fun n nb ->
-                nb +. sum_conv (List.init n (fun _ -> aux_k1)) size1)
-              1 (max 9 size1)
-              nb in *)
        Hashtbl.add tab (t,size) nb;
        nb
   and aux_cond (size : int) : float =
     if size = 0
     then 1. (* Undet *)
     else nb_expr_ast typ_bool size (* BoolExpr *)
+  and aux_seq (t,ndim : 'typ * int) (size : int) : float =
+    assert (ndim >= 0);
+    if ndim = 0
+    then aux t size
+    else
+      let nb = 0. in
+      let nb = (* counting possible loops *)
+        if size >= size_loop
+        then nb +. aux_seq (t,ndim-1) (size - size_loop)
+        else nb in
+      let nb = (* counting possible Seqs *)
+        if size >= size_seq
+        then
+          Common.fold_for
+            (fun n nb ->
+              nb +. sum_conv (List.init n (fun _ -> aux_seq (t,ndim-1))) (size - size_seq - n)) (* cost 1 for each item to avoid pb with zero-cost models *)
+            0 (max 4 (size - size_seq)) (* bounding to 4 to avoid explosion *)
+            nb
+        else nb in
+      nb
   in
   aux, reset
 
@@ -492,10 +577,11 @@ let dl_model_params
     | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
-    | Seq (n,t1,lm1) ->
-       List.map aux lm1
-       |> List.fold_left (+.) 0.
-    | Cst m1 -> raise TODO
+    | Loop m1 -> aux m1
+    | Seq (n,t1,ms1) ->
+       Mdl.Code.universal_int_star n
+       +. (Array.map aux ms1
+           |> Array.fold_left (+.) 0.)
     | Expr (t,e) -> dl_expr_params e
   and aux_cond = function
     | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
@@ -654,9 +740,13 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | Branch (false,p1), Alt (xc,c,m1,m2) ->
        let new_m2 = aux p1 r m2 in
        Alt (xc,c,m1,new_m2)
-    | Item (i,p1), Seq (n,t1,lm1) when i < n ->
-       let new_lm1 = list_update (fun mi -> aux p1 r mi) i lm1 in
-       Seq (n,t1,new_lm1)
+    | _, Loop m1 ->
+       let new_m1 = aux p r m1 in
+       Loop new_m1
+    | Item (i,p1), Seq (n,t1,ms1) when i >= 0 && i < n ->
+       let new_ms1 = Array.copy ms1 in
+       new_ms1.(i) <- aux p1 r ms1.(i);
+       Seq (n,t1,new_ms1)
     | _ -> assert false
   in
   aux
