@@ -1,6 +1,8 @@
 (* n-dim trees, all paths must have the same lengths, which is the number of dimensions *)
 (* inspired by ndarrays but without the same-size constraint per axis *)
 
+open Madil_common
+
 type 'a tree =
   | Scalar of 'a (* ndim = 0 *)
   | Vector1 of 'a array (* ndim = 1, memory optim of Vector to avoid many boxing with Scalar *)
@@ -129,6 +131,21 @@ let mapi (f : int list -> 'a -> 'b) (t : 'a t) : 'b t =
   in
   { t with tree = aux [] t.tree }
 
+let map_result (f : 'a -> 'b result) (t : 'a t) : 'b t result =
+  let rec aux = function
+    | Scalar x ->
+       let| y = f x in
+       Result.Ok (Scalar y)
+    | Vector1 vx ->
+       let| vy = array_map_result f vx in
+       Result.Ok (Vector1 vy)
+    | Vector v ->
+       let| v' = array_map_result aux v in
+       Result.Ok (Vector v')
+  in
+  let| tree' = aux t.tree in
+  Result.Ok { t with tree = tree' }
+
 let bind (f : 'a -> 'b t) (t : 'a t) : 'b t =
   let ndim_incr = ref 0 in
   let rec aux = function
@@ -149,3 +166,9 @@ let for_all (f : 'a -> bool) (t : 'a t) : bool =
     | Vector v -> Array.for_all aux v
   in
   aux t.tree
+
+module Operators =
+  struct
+    let ( let< ) t f = map f t
+    let ( let<* ) t f = bind f t
+  end
