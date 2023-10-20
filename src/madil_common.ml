@@ -38,7 +38,11 @@ let list_list_map (f : 'a -> 'b) (reads : 'a list list) : 'b list list  =
     (fun l ->
       List.map f l)
     reads
-     
+
+(* array *)
+
+let array_float_sum : float array -> float = Array.fold_left (+.) 0.
+  
 (* result *)
         
 type 'a result = ('a,exn) Result.t
@@ -126,11 +130,6 @@ let myseq_bind_sample_fair ~(size1 : int) ~(size2 : int) (s : 'a Myseq.t) (f : '
   in
   let ok1, rev_acc1, rev_acc12 = aux size1 false [] [] s in
   ok1, List.rev rev_acc1, List.rev rev_acc12
-
-(* ndtrees *)
-
-let ( let< ) t f = Ndtree.map f t
-let ( let<* ) t f = Ndtree.bind f t
 
 (* xprint *)
 

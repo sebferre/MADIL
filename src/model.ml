@@ -1,5 +1,6 @@
 
 open Madil_common
+open Ndtree.Operators
 open Data
 
 type ('var,'func) cond_model =
@@ -191,16 +192,14 @@ let get_bindings  (* QUICK *)
       (m0 : ('typ,'var,'constr,'func) model as 'model)
       (d0 : ('value,'dconstr) data as 'data)
     : ('var,'typ,'value) Expr.bindings =
-  let rec aux m (d_tree : 'data option Ndtree.t) acc =
+  let rec aux m (d_tree : 'data Ndtree.t) acc =
     match m with
     | Def (x,m1) ->
        let acc = aux m1 d_tree acc in
        let t1 = typ m1 in
        let v_tree =
          let< d = d_tree in
-         match d with
-         | Some d -> Data.value d
-         | None -> value_null in
+         Data.value d in
        Mymap.add x (t1,v_tree) acc
     | Pat (t,c,args) ->
        let n = Array.length args in
@@ -209,10 +208,9 @@ let get_bindings  (* QUICK *)
          let di_tree =
            let< d = d_tree in
            match d with
-           | Some (D (_v, DPat (dc, dargs))) ->
+           | D (_v, DPat (dc, dargs)) ->
               assert (Array.length dargs = n);
-              Some dargs.(i)
-           | None -> None
+              dargs.(i)
            | _ -> assert false in
          ref_acc := aux args.(i) di_tree !ref_acc
        done;
@@ -220,24 +218,21 @@ let get_bindings  (* QUICK *)
     | Fail -> assert false (* because Fail only occurs in evaluated models *)
     | Alt (xc,c,m1,m2) ->
        let d1_tree =
-         let< d = d_tree in
+         let<? d = d_tree in
          match d with
-         | Some (D (_v, DAlt (_prob,b,d12))) -> if b then Some d12 else None
-         | None -> None
+         | D (_v, DAlt (_prob,b,d12)) -> if b then Some d12 else None
          | _ -> assert false in
        let acc = aux m1 d1_tree acc in
        let d2_tree =
-         let< d = d_tree in
+         let<? d = d_tree in
          match d with
-         | Some (D (_v, DAlt (_prob,b,d12))) -> if b then None else Some d12
-         | None -> None
+         | D (_v, DAlt (_prob,b,d12)) -> if b then None else Some d12
          | _ -> assert false in
        let acc = aux m2 d2_tree acc in
        let vc_tree =
          let< d = d_tree in
          match d with
-         | Some (D (_v, DAlt (_prob,b,d12))) -> value_of_bool b
-         | None -> value_null
+         | D (_v, DAlt (_prob,b,d12)) -> value_of_bool b
          | _ -> assert false in
        Mymap.add xc (typ_bool, vc_tree) acc
     | Loop m1 ->
@@ -256,10 +251,9 @@ let get_bindings  (* QUICK *)
          let di_tree =
            let< d = d_tree in
            match d with
-           | Some (D (_v, DSeq (dn, _, ds1))) ->
+           | D (_v, DSeq (dn, _, ds1)) ->
               assert (dn = n);
-              Some ds1.(i)
-           | None -> None
+              ds1.(i)
            | _ -> assert false in
          ref_acc := aux ms1.(i) di_tree !ref_acc
        done;
