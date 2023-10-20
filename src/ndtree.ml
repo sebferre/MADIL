@@ -95,7 +95,9 @@ let lookup (t : 'a t) (is : int list) : 'a option =
        vx.(i mod n)
     | Vector v, i::is1 ->
        let n = Array.length v in
-       aux v.(i mod n) is1
+       if i >= 0 && i < n
+       then aux v.(i) is1
+       else None
     | _ -> failwith "Ndtree.lookup: invalid index, lower ndim than the ndtree"
   in
   aux t.tree is

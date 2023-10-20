@@ -9,14 +9,15 @@ type ('var,'func) cond_model =
   | False (* always false condition - only in evaluated model *)
   | BoolExpr of ('var,'func) Expr.expr (* computed condition - not in evaluated model *)
  
-type ('typ,'var,'constr,'func) model =
-  | Def of 'var * ('typ,'var,'constr,'func) model (* a var is an id for the value at this sub-model - not in evaluated model *)
-  | Pat of 'typ * 'constr * ('typ,'var,'constr,'func) model array (* constr type may be different from data constr *)
+type ('typ,'value,'var,'constr,'func) model =
+  | Def of 'var * ('typ,'value,'var,'constr,'func) model (* a var is an id for the value at this sub-model - not in evaluated model *)
+  | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Fail (* like an empty alternative - only in evaluated model *)
-  | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('typ,'var,'constr,'func) model * ('typ,'var,'constr,'func) model
-  | Loop of ('typ,'var,'constr,'func) model
-  | Seq of int * 'typ (* elt type *) * ('typ,'var,'constr,'func) model array
+  | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
+  | Loop of ('typ,'value,'var,'constr,'func) model
+  | Seq of int * 'typ (* elt type *) * ('typ,'value,'var,'constr,'func) model array
   | Expr of 'typ * ('var,'func) Expr.expr (* not in evaluated model *)
+  | Value of 'typ * 'value Ndtree.t (* only in evaluated model *)
 
 type 'constr path =
   | This
@@ -27,16 +28,16 @@ type 'constr path =
 type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
 
-let make_def (x : 'var) (m1 : ('typ,'var,'constr,'func) model) : ('typ,'var,'constr,'func) model =
+let make_def (x : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Def (x,m1)
-let make_pat (t : 't) (c : 'constr) (args : ('typ,'var,'constr,'func) model array) : ('typ,'var,'constr,'func) model =
+let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) model array) : ('typ,'value,'var,'constr,'func) model =
   Pat (t,c,args)
-let make_alt (xc : 'var) (cond : ('var,'func) cond_model) (m1 : ('typ,'var,'constr,'func) model) (m2 : ('typ,'var,'constr,'func) model) : ('typ,'var,'constr,'func) model =
+let make_alt (xc : 'var) (cond : ('var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Alt (xc,cond,m1,m2)
-let make_loop (m1 : ('typ,'var,'constr,'func) model) : ('typ,'var,'constr,'func) model =
+let make_loop (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Loop m1
 
-let rec typ : ('typ,'var,'constr,'func) model -> 'typ = function
+let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Def (x,m1) -> typ m1
   | Pat (t,c,args) -> t
   | Fail -> assert false
@@ -44,6 +45,7 @@ let rec typ : ('typ,'var,'constr,'func) model -> 'typ = function
   | Loop m1 -> typ m1
   | Seq (n,t1,lm1) -> t1
   | Expr (t,e) -> t
+  | Value _ -> assert false
   
 (* printing *)
   
@@ -51,7 +53,7 @@ let xp_model
       ~(xp_var : 'var html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
       ~(xp_func : 'func html_xp)
-    : ('typ,'var,'constr,'func) model html_xp =
+    : ('typ,'value,'var,'constr,'func) model html_xp =
   let rec aux ~prio_ctx ~html print m =
     match m with
     | Def (x,m1) ->
@@ -95,18 +97,18 @@ let xp_model
     | Seq (n,_t1,lm1) ->
        xp_array ~delims:("〈","〉") (aux ~prio_ctx:2) ~html print lm1
     | Expr (_t,e) ->
-       if html then print#string "<span class=\"model-expr\">";
-       Expr.xp_expr ~xp_var ~xp_func ~html print e;
-       if html then print#string "</span>"
+       xp_html_elt "span" ~classe:"model-expr" ~html print
+         (fun () ->
+           Expr.xp_expr ~xp_var ~xp_func ~html print e)
+    | Value _ -> assert false
   and aux_cond ~html print = function
     | Undet prob ->
        aux_prob ~html print prob
     | True -> assert false
     | False -> assert false
     | BoolExpr e ->
-       if html then print#string "<span class=\"model-expr\">";
-       Expr.xp_expr ~xp_var ~xp_func ~html print e;
-       if html then print#string "</span>"
+       xp_html_elt "span" ~classe:"model-expr" ~html print
+         (fun () -> Expr.xp_expr ~xp_var ~xp_func ~html print e)
   and aux_prob ~html print prob =
     let p1 = int_of_float (prob *. 10.) in
     let p2 = 10 - p1 in
@@ -163,7 +165,7 @@ class virtual ['typ,'constr,'func] asd =
 (* model evaluation *)
 
 let binding_vars
-      (m0 : ('typ,'var,'constr,'func) model)
+      (m0 : ('typ,'value,'var,'constr,'func) model)
     : 'var Expr.binding_vars =
   let rec aux m acc =
     match m with
@@ -181,6 +183,7 @@ let binding_vars
     | Seq (n,t1,lm1) ->
        Array.fold_right aux lm1 acc
     | Expr (t,e) -> acc
+    | Value _ -> assert false
   in
   aux m0 Bintree.empty
 
@@ -188,7 +191,7 @@ let binding_vars
 let get_bindings  (* QUICK *)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
-      (m0 : ('typ,'var,'constr,'func) model as 'model)
+      (m0 : ('typ,'value,'var,'constr,'func) model as 'model)
       (d0 : ('value,'dconstr) data as 'data)
     : ('var,'typ,'value) Expr.bindings =
   let rec aux m (d_tree : 'data Ndtree.t) acc =
@@ -258,6 +261,7 @@ let get_bindings  (* QUICK *)
        done;
        !ref_acc
     | Expr _ -> acc
+    | Value _ -> assert false
   in
   aux m0 (Ndtree.scalar (Some d0)) Expr.bindings0
 
@@ -266,11 +270,10 @@ exception EmptyAlt
 let eval (* from model to evaluated model: resolving expr, ignoring def *)
       ~asd
       ~(eval_expr : ('var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
-      ~(model_of_value : 'typ -> 'value -> ('typ,'var,'constr,'func) model result)
       ~(bool_of_value : 'value -> bool result)
-      (m : ('typ,'var,'constr,'func) model)
+      (m : ('typ,'value,'var,'constr,'func) model)
       (bindings : ('var,'typ,'value) Expr.bindings)
-    : ('typ,'var,'constr,'func) model result =
+    : ('typ,'value,'var,'constr,'func) model result =
   (* INV: eval must ensure that the resulting model has data that is compatible with the given model, so that encoding is well-defined. E.g. no Alt simplification when condition evaluates to True/False. *)
   let rec aux m = (* QUICK *)
     match m with
@@ -300,8 +303,8 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
        Result.Ok (Seq (n,t1,ms1'))
     | Expr (t,e) ->
        let| v_tree = eval_expr e bindings in
-       let| v = Ndtree.unscalar v_tree in
-       model_of_value t v
+       Result.Ok (Value (t,v_tree))
+    | Value _ -> assert false
   and aux_cond = function
     | Undet prob -> Result.Ok (Undet prob)
     | True | False -> assert false
@@ -320,22 +323,22 @@ type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 let generator (* on evaluated models: no expr, no def *)
       ~(generator_pat: 'typ -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
       ~(dseq_value : ('value,'dconstr) data array -> 'value)
-    : ('typ,'var,'constr,'func) model -> 'gen =
-  let rec gen = function
+    : ('typ,'value,'var,'constr,'func) model -> 'gen =
+  let rec gen rev_is = function
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
-       let gen_args = Array.map gen args in
+       let gen_args = Array.map (gen rev_is) args in
        generator_pat t c gen_args
     | Fail ->
        (fun info -> Myseq.empty)
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
-         let gen_m1 = gen m1 in
+         let gen_m1 = gen rev_is m1 in
          (fun info ->
            let* d1 = gen_m1 info in
            Myseq.return (prob, true, d1)) in
        let gen_b_d2 prob =
-         let gen_m2 = gen m2 in
+         let gen_m2 = gen rev_is m2 in
          (fun info ->
            let* d2 = gen_m2 info in
            Myseq.return (prob, false, d2)) in
@@ -357,46 +360,67 @@ let generator (* on evaluated models: no expr, no def *)
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
     | Loop m1 ->
-       let gen_m1 = gen m1 in
+       let gen_m1 i = gen (i::rev_is) m1 in
+       let rec seq_gen_m1 i info =
+         if i < 9 (* TODO: find a better way *)
+         then Myseq.if_not_empty_else
+                (let* di = gen_m1 i info in
+                 let* ld = seq_gen_m1 (i+1) info in
+                 Myseq.return (di::ld))
+                (Myseq.return [])
+         else Myseq.return [] in
+       (*       let gen_m1 i info =
+         let* di = gen (i::rev_is) m1 info in
+         Myseq.return (di, info) in
+       let seq_gen_m1 =
+         let* i = Myseq.counter 0 in
+         Myseq.return (gen_m1 i) in *)
        (fun info ->
-         let* d1 = gen_m1 info in (* generating a single item *)
-         let ds1 = [|d1|] in
+         let* ld1 = seq_gen_m1 0 info in
+         let ds1 = Array.of_list ld1 in
+         let n = Array.length ds1 in
          let v = dseq_value ds1 in
-         Myseq.return (D (v, DSeq (1, Range.make_open 0, ds1))))
+         Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1))))
     | Seq (n,t1,ms1) ->
-       let gen_ms1 = Array.to_list (Array.map gen ms1) in
+       let gen_ms1 = Array.to_list (Array.mapi (fun i m1 -> gen (i::rev_is) m1) ms1) in
        (fun info ->
          let* ld1 = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_ms1) in
          let ds1 = Array.of_list ld1 in
          let v = dseq_value ds1 in
          Myseq.return (D (v, DSeq (n, Range.make_exact n, ds1))))
     | Expr (t,e) -> assert false
+    | Value (t,v_tree) ->
+       let is = List.rev rev_is in
+       (match Ndtree.lookup v_tree is with
+        | Some v -> (fun info -> Myseq.return (D (v, DExpr)))
+        | None -> (fun info -> Myseq.empty))
   in
-  gen
+  gen []
                                         
 (* model-based parsing *)
 
 type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'input) Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
+      ~(parseur_value : 'value -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
       ~(dseq_value : ('value,'dconstr) data array -> 'value)
-    : ('typ,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
-  let rec parse = function
+    : ('typ,'value,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
+  let rec parse rev_is = function
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
-       let parse_args = Array.map parse args in
+       let parse_args = Array.map (parse rev_is) args in
        parseur_pat t c parse_args
     | Fail ->
        (fun input -> Myseq.empty)
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
-         let parse_m1 = parse m1 in
+         let parse_m1 = parse rev_is m1 in
          (fun input ->
            let* d1, input = parse_m1 input in
            Myseq.return (D (value d1, DAlt (prob,true,d1)), input)) in
        let seq2 prob =
-         let parse_m2 = parse m2 in
+         let parse_m2 = parse rev_is m2 in
          (fun input ->
            let* d2, input = parse_m2 input in
            Myseq.return (D (value d2, DAlt (prob,false,d2)), input)) in
@@ -413,8 +437,10 @@ let parseur (* on evaluated models: no expr, no def *)
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
     | Loop m1 ->
-       let parse_m1 = parse m1 in
-       let seq_parse_m1 = Myseq.const parse_m1 in
+       let parse_m1 i = parse (i::rev_is) m1 in
+       let seq_parse_m1 =
+         let* i = Myseq.counter 0 in
+         Myseq.return (parse_m1 i) in
        (fun input ->
          let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in
          let ds1 = Array.of_list ld1 in
@@ -422,15 +448,22 @@ let parseur (* on evaluated models: no expr, no def *)
          let v = dseq_value ds1 in
          Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1)), input))
     | Seq (n,t1,ms1) ->
-       let parse_lm1 = Array.to_list (Array.map parse ms1) in
+       let parse_lm1 = Array.to_list (Array.mapi (fun i m1 -> parse (i::rev_is) m1) ms1) in
        (fun input ->
          let* ld1, input = Myseq.product_dependent_fair parse_lm1 input in
          let ds1 = Array.of_list ld1 in
          let v = dseq_value ds1 in
          Myseq.return (D (v, (DSeq (n, Range.make_exact n, ds1))), input))
     | Expr (t,e) -> assert false
+    | Value (t,v_tree) ->
+       let is = List.rev rev_is in
+       match Ndtree.lookup v_tree is with
+       | Some v ->
+          (fun input -> parseur_value v input)            
+       | None ->
+          (fun input -> Myseq.empty)
   in
-  parse
+  parse []
 
 (* model-based encoding of data *)
 
@@ -438,6 +471,7 @@ let dl_data
       ~(encoding_dpat : 'dconstr -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : dl (* DL of seq length *) -> 'encoding array -> 'encoding)
+      ~(encoding_expr_value : 'value -> 'encoding) (* DL = 0 *)
       ~(dl_of_encoding : 'encoding -> dl)
     : (('value,'dconstr) data as 'data) -> dl = (* QUICK *)
   let rec aux (D (v, dm)) =
@@ -453,6 +487,7 @@ let dl_data
        let dl_length = Range.dl dn range in
        let encs = Array.map aux ds1 in
        encoding_seq dl_length encs
+    | DExpr -> encoding_expr_value v
   in
   fun d ->
   let enc = aux d in
@@ -470,7 +505,7 @@ let size_seq = 2
   
 let size_model_ast (* for DL computing, QUICK *)
       ~(asd : ('typ,'constr,'func) asd)
-    (m : ('typ,'var,'constr,'func) model) : int =
+    (m : ('typ,'value,'var,'constr,'func) model) : int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Pat (t,c,args) ->
@@ -483,6 +518,7 @@ let size_model_ast (* for DL computing, QUICK *)
     | Loop m1 -> size_loop + aux m1
     | Seq (n,t1,ms1) -> Array.fold_left (fun res m1 -> res + aux m1) 1 ms1
     | Expr (t,e) -> Expr.size_expr_ast e
+    | Value _ -> assert false
   and aux_cond = function
     | Undet _ -> 0
     | True | False -> assert false
@@ -557,7 +593,7 @@ let dl_model_params
       ~(dl_constr_params : 'typ -> 'constr -> dl)
       ~(dl_func_params : 'func -> dl)
       ~(dl_var : 'var -> dl)
-    : ('typ,'var,'constr,'func) model -> dl =
+    : ('typ,'value,'var,'constr,'func) model -> dl =
   let dl_expr_params =
     Expr.dl_expr_params ~dl_func_params ~dl_var in
   let rec aux = function
@@ -576,6 +612,7 @@ let dl_model_params
        +. (Array.map aux ms1
            |> Array.fold_left (+.) 0.)
     | Expr (t,e) -> dl_expr_params e
+    | Value _ -> assert false
   and aux_cond = function
     | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
     | True | False -> assert false
@@ -584,13 +621,13 @@ let dl_model_params
   aux
 
 let dl
-      ~(size_model_ast : ('typ,'var,'constr,'func) model -> int)
+      ~(size_model_ast : ('typ,'value,'var,'constr,'func) model -> int)
       ~(nb_model_ast : 'typ -> int -> float)
-      ~(dl_model_params : dl_var:('var -> dl) -> ('typ,'var,'constr,'func) model -> dl)
+      ~(dl_model_params : dl_var:('var -> dl) -> ('typ,'value,'var,'constr,'func) model -> dl)
       ~(dl_var : nb_env_vars:int -> 'var -> dl) =
   fun
     ~(nb_env_vars : int)
-    (m : ('typ,'var,'constr,'func) model) -> (* QUICK *)
+    (m : ('typ,'value,'var,'constr,'func) model) -> (* QUICK *)
   let size = size_model_ast m in
   let t = typ m in    
   let nb = nb_model_ast t size in
@@ -624,11 +661,11 @@ type ('input,'typ,'value,'dconstr,'var) eval_parse_bests = ('var,'typ,'value) Ex
         
 let eval_parse_bests
       ~(max_nb_parse : int)
-      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
-      ~(parseur : ('typ,'var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
+      ~(eval : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'constr,'func) model result)
+      ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('input,'value,'dconstr) parseur)
       ~(dl_data : ('value,'dconstr) data -> dl)
 
-      (m0 : ('typ,'var,'constr,'func) model)
+      (m0 : ('typ,'value,'var,'constr,'func) model)
     : ('input,'typ,'value,'dconstr,'var) eval_parse_bests =
   fun bindings input ->
   Common.prof "Model.eval_parse_bests" (fun () ->
@@ -655,14 +692,14 @@ let eval_parse_bests
 
 let read
       ~(input_of_value : 'value -> 'input)
-      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
-      ~(eval_parse_bests : ('typ,'var,'constr,'func) model -> ('input,'typ,'value,'dconstr,'var) eval_parse_bests)
+      ~(eval : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'constr,'func) model result)
+      ~(eval_parse_bests : ('typ,'value,'var,'constr,'func) model -> ('input,'typ,'value,'dconstr,'var) eval_parse_bests)
 
       ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       ~(lazy_index : ('typ,'value,'var,'func) Expr.Index.t Lazy.t)
-      (m0 : ('typ,'var,'constr,'func) model)
+      (m0 : ('typ,'value,'var,'constr,'func) model)
       (v : 'value)
     : ('typ,'value,'dconstr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
@@ -682,12 +719,12 @@ let read
 exception Generate_failure
   
 let write
-      ~(eval : ('typ,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'var,'constr,'func) model result)
-      ~(generator : ('typ,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
+      ~(eval : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'constr,'func) model result)
+      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('info,'value,'dconstr) generator)
       ~(dl_data : ('value,'dconstr) data -> dl)
       
       ~(bindings : ('var,'typ,'value) Expr.bindings)
-      (m0 : ('typ,'var,'constr,'func) model)
+      (m0 : ('typ,'value,'var,'constr,'func) model)
       (info : 'info)
     : (('value,'dconstr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
@@ -716,7 +753,7 @@ let reverse_path (p : 'constr path) : 'constr path =
   ctx This       
   
 let refine (* replace submodel of [m] at [p] by [r] *) 
-    : 'constr path -> ('typ,'var,'constr,'func) model -> ('typ,'var,'constr,'func) model -> ('typ,'var,'constr,'func) model =
+    : 'constr path -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
   let rec aux p r m =
     match p, m with
     | _, Def (x,m1) ->

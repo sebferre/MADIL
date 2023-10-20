@@ -56,15 +56,15 @@ module type TYPES =
     type expr = (var,func) Expr.expr
     val xp_expr : expr html_xp
 
-    type model = (typ,var,constr,func) Model.model
+    type model = (typ,value,var,constr,func) Model.model
     val xp_model : model html_xp
 
     type asd = (typ,constr,func) Model.asd
 
-    type task_model = (typ,var,constr,func) Task_model.task_model
+    type task_model = (typ,value,var,constr,func) Task_model.task_model
     val xp_task_model : task_model html_xp
 
-    type refinement = (typ,var,constr,func) Task_model.refinement
+    type refinement = (typ,value,var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
     type read = (typ,value,dconstr,var,func) Model.read
@@ -96,7 +96,7 @@ module Defined_types (T : BASIC_TYPES) =
     type task = value Task.task
               
     type data = (value,dconstr) Data.data
-    let xp_data : data html_xp = Data.xp_data ~xp_dpat
+    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dpat
                                
     type path = constr Model.path
     let xp_path : path html_xp = Model.xp_path ~xp_field
@@ -108,15 +108,15 @@ module Defined_types (T : BASIC_TYPES) =
     type expr = (var,func) Expr.expr
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
 
-    type model = (typ,var,constr,func) Model.model
+    type model = (typ,value,var,constr,func) Model.model
     let xp_model : model html_xp = Model.xp_model ~xp_var ~xp_pat ~xp_func
 
     type asd = (typ,constr,func) Model.asd
 
-    type task_model = (typ,var,constr,func) Task_model.task_model
+    type task_model = (typ,value,var,constr,func) Task_model.task_model
     let xp_task_model : task_model html_xp = Task_model.xp_task_model ~xp_model
 
-    type refinement = (typ,var,constr,func) Task_model.refinement
+    type refinement = (typ,value,var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
     type read = (typ,value,dconstr,var,func) Model.read
@@ -158,8 +158,6 @@ module type DOMAIN =
     val eval_func : func -> value Ndtree.t array -> value Ndtree.t result
     val eval_unbound_var : var -> value Ndtree.t result
     val eval_arg : unit -> value Ndtree.t result
-    val data_of_value : typ -> value -> data result
-    val model_of_value : typ -> value -> model result
 
     (* model-based generation and parsing *)
 
@@ -168,6 +166,7 @@ module type DOMAIN =
     val generator_pat : typ -> constr -> generator array -> generator
 
     val input_of_value : value -> input
+    val parseur_value : value -> parseur
     val parseur_pat : typ -> constr -> parseur array -> parseur
 
     (* description lengths *)
@@ -175,6 +174,7 @@ module type DOMAIN =
     val encoding_dpat : dconstr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_seq : dl (* seq len *) -> encoding array -> encoding
+    val encoding_expr_value : value -> encoding
     val dl_of_encoding : encoding -> dl
 
     val dl_constr_params : typ -> constr -> dl
@@ -231,7 +231,6 @@ module Make (Domain : DOMAIN) =
       Model.eval
         ~asd
         ~eval_expr
-        ~model_of_value
         ~bool_of_value
 
     (* model-based generation and parsing *)
@@ -243,6 +242,7 @@ module Make (Domain : DOMAIN) =
 
     let parseur : model -> parseur =
       Model.parseur
+        ~parseur_value
         ~parseur_pat
         ~dseq_value
 
@@ -253,6 +253,7 @@ module Make (Domain : DOMAIN) =
         ~encoding_dpat
         ~encoding_alt
         ~encoding_seq
+        ~encoding_expr_value
         ~dl_of_encoding
 
     let (dl_model, reset_dl_model) : (nb_env_vars:int -> model -> dl) * (unit -> unit) =
@@ -308,7 +309,6 @@ module Make (Domain : DOMAIN) =
         ~xp_model
         ~asd
         ~typ_bool
-        ~data_of_value
         ~value_of_bool
         ~dl_model
         ~dl_data
@@ -323,7 +323,6 @@ module Make (Domain : DOMAIN) =
         ~xp_model
         ~asd
         ~typ_bool
-        ~data_of_value
         ~value_of_bool
         ~dl_model
         ~dl_data

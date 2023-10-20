@@ -139,7 +139,7 @@ let new_var (varseq : 'var Myseq.t) : 'var * 'var Myseq.t =
 
 let make_alt_if_allowed_and_needed
       ~(allowed : bool) ~(nb : int) ~(supp : int)
-      (m_true : (('typ,'var,'const,'func) Model.model as 'model))
+      (m_true : (('typ,'value,'var,'const,'func) Model.model as 'model))
       (m_false : 'model)
       (varseq : 'var Myseq.t)
       (best_reads : (('typ,'value,'dconstr,'var,'func) best_read as 'best_read) list)
@@ -170,7 +170,7 @@ type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   nb_env_vars:int ->
   dl_M:dl -> (* current model DL *)
   (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
-  (('typ,'var,'constr,'func) Model.model as 'model) ->
+  (('typ,'value,'var,'constr,'func) Model.model as 'model) ->
   'var Myseq.t -> (* fresh variables viz the model *)
   ('typ,'value,'dconstr,'var,'func) Model.read list list
   -> ('constr Model.path (* refinement location *)
@@ -188,9 +188,8 @@ let refinements
       ~(max_refinements : int)
       ~(asd : ('typ,'constr,'func) Model.asd)
       ~(typ_bool : 'typ)
-      ~(data_of_value : 'typ -> 'value -> 'data result)
       ~(value_of_bool : bool -> 'value)
-      ~(dl_model : nb_env_vars:int -> (('typ,'var,'constr,'func) Model.model as 'model) -> dl)
+      ~(dl_model : nb_env_vars:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval_parse_bests : 'model -> ('input,'typ,'value,'dconstr,'var) Model.eval_parse_bests)
       ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data Ndtree.t -> ('model * 'var Myseq.t * 'input Ndtree.t) list) (* refined submodel with remaining fresh vars and related new parsing input *)
@@ -311,6 +310,7 @@ let refinements
                    selected_reads))
             (Array.to_list ms1))
     | Model.Expr (k,e) -> Myseq.empty
+    | Model.Value _ -> assert false
   and aux_expr ctx m selected_reads =
     let t = Model.typ m in
     match asd#expr_opt t with
@@ -322,9 +322,7 @@ let refinements
            let v_tree = Ndtree.map Data.value data in
            let es = Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index) in
            let dv_tree = (* new data for an expression *)
-             Ndtree.map_filter
-               (fun v -> Result.to_option (data_of_value t v))
-               v_tree in
+             Ndtree.map (fun v -> Data.make_dexpr v) v_tree in
            Myseq.fold_left
              (fun rs e -> (e, varseq0, dv_tree) :: rs)
              [] (Expr.Exprset.to_seq es))
@@ -481,15 +479,15 @@ let refinements
 
   
 let task_refinements
-      ~(binding_vars : ('typ,'var,'constr,'func) Model.model -> 'var Expr.binding_vars)
+      ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> 'var Expr.binding_vars)
       ~(input_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       ~(output_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       
-      (m : (('typ,'var,'constr,'func) Task_model.task_model) as 'task_model)
+      (m : (('typ,'value,'var,'constr,'func) Task_model.task_model) as 'task_model)
       (prs : ('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads)
       (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
       (dsro : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
-    : (('typ,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
+    : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseqi =
          input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
@@ -508,9 +506,9 @@ let task_refinements
 let task_prunings
       ~(input_prunings : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       
-      (m : (('typ,'var,'constr,'func) Task_model.task_model as 'task_model))
+      (m : (('typ,'value,'var,'constr,'func) Task_model.task_model as 'task_model))
       (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
-    : (('typ,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
+    : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   let* pi, ri, suppi, dli', mi', varseqi' =
     input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m
       m.input_model m.input_varseq dsri.reads in

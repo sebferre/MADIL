@@ -7,6 +7,7 @@ and ('value,'dconstr) data_model =
   | DPat of 'dconstr * ('value,'dconstr) data array
   | DAlt of float (* prob *) * bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
   | DSeq of int * Range.t * ('value,'dconstr) data array (* inv: <int> = Array.length <data array> *)
+  | DExpr (* computed value *)
 
 (* TODO: consider adding DNil as nil data, for use as nil env *)
 
@@ -19,8 +20,11 @@ let make_dpat (value : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data ar
 let make_dseq (value : 'value) (range : Range.t) (ds : ('value,'dconstr) data array) : ('value,'dconstr) data =
   let n = Array.length ds in
   D (value, DSeq (n,range,ds))
+let make_dexpr (value : 'value) : ('value,'dconstr) data =
+  D (value, DExpr)
           
 let xp_data
+      ~(xp_value : 'value html_xp)
       ~(xp_dpat : 'dconstr -> unit html_xp array -> unit html_xp)
     : ('value,'dconstr) data html_xp =
   let rec aux ~prio_ctx ~html print d =
@@ -41,6 +45,10 @@ let xp_data
        xp_array ~delims:("〈" ^ string_of_int n ^ ": ", "〉")
          (aux ~prio_ctx:2)
          ~html print items
+    | D (v, DExpr) ->
+       xp_html_elt "span" ~classe:"data-expr" ~html print
+         (fun () ->
+           xp_tuple1 ~delims:("{","}") xp_value ~html print v)
   in
   aux ~prio_ctx:2
   
