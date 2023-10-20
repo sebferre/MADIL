@@ -152,6 +152,7 @@ module type DOMAIN =
 
     val bool_of_value : value -> bool result
     val value_of_bool : bool -> value
+    val value_of_seq : value array -> value (* value for a data sequence *)      
 
     (* bindings and evaluation *)
 
@@ -161,8 +162,6 @@ module type DOMAIN =
 
     (* model-based generation and parsing *)
 
-    val dseq_value : data array -> value (* value for a data sequence *)
-      
     val generator_pat : typ -> constr -> generator array -> generator
 
     val input_of_value : value -> input
@@ -238,13 +237,13 @@ module Make (Domain : DOMAIN) =
     let generator : model -> generator =
       Model.generator
         ~generator_pat
-        ~dseq_value
+        ~value_of_seq
 
     let parseur : model -> parseur =
       Model.parseur
         ~parseur_value
         ~parseur_pat
-        ~dseq_value
+        ~value_of_seq
 
     (* description lengths *)
       

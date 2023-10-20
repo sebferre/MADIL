@@ -322,7 +322,7 @@ type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
       ~(generator_pat: 'typ -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
-      ~(dseq_value : ('value,'dconstr) data array -> 'value)
+      ~(value_of_seq : 'value array -> 'value)
     : ('typ,'value,'var,'constr,'func) model -> 'gen =
   let rec gen rev_is = function
     | Def (x,m1) -> assert false
@@ -379,14 +379,14 @@ let generator (* on evaluated models: no expr, no def *)
          let* ld1 = seq_gen_m1 0 info in
          let ds1 = Array.of_list ld1 in
          let n = Array.length ds1 in
-         let v = dseq_value ds1 in
+         let v = value_of_seq (Array.map Data.value ds1) in
          Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1))))
     | Seq (n,t1,ms1) ->
        let gen_ms1 = Array.to_list (Array.mapi (fun i m1 -> gen (i::rev_is) m1) ms1) in
        (fun info ->
          let* ld1 = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_ms1) in
          let ds1 = Array.of_list ld1 in
-         let v = dseq_value ds1 in
+         let v = value_of_seq (Array.map Data.value ds1) in
          Myseq.return (D (v, DSeq (n, Range.make_exact n, ds1))))
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
@@ -404,7 +404,7 @@ type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'inp
 let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_value : 'value -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
-      ~(dseq_value : ('value,'dconstr) data array -> 'value)
+      ~(value_of_seq : 'value array -> 'value)
     : ('typ,'value,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse rev_is = function
     | Def (x,m1) -> assert false
@@ -445,14 +445,14 @@ let parseur (* on evaluated models: no expr, no def *)
          let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in
          let ds1 = Array.of_list ld1 in
          let n = Array.length ds1 in
-         let v = dseq_value ds1 in
+         let v = value_of_seq (Array.map Data.value ds1) in
          Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1)), input))
     | Seq (n,t1,ms1) ->
        let parse_lm1 = Array.to_list (Array.mapi (fun i m1 -> parse (i::rev_is) m1) ms1) in
        (fun input ->
          let* ld1, input = Myseq.product_dependent_fair parse_lm1 input in
          let ds1 = Array.of_list ld1 in
-         let v = dseq_value ds1 in
+         let v = value_of_seq (Array.map Data.value ds1) in
          Myseq.return (D (v, (DSeq (n, Range.make_exact n, ds1))), input))
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
