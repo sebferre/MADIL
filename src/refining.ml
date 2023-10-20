@@ -1,35 +1,61 @@
 
 open Madil_common
+open Ndtree.Operators
 
 (* computing model refinements from parsing data *)
+
+type ('typ,'value,'dconstr,'var,'func) read = ('typ,'value,'dconstr,'var,'func) Model.read * ('value,'dconstr) Data.data Ndtree.t
    
-let map_reads (f : 'read -> 'read) (reads : ('read list * bool) list) : ('read list * bool) list  =
+let map_reads (f : 'data -> 'data) (reads : ('read list * bool) list) : ('read list * bool) list  =
   List.map
     (fun (example_reads, unselected_reads) ->
-      List.map f example_reads, unselected_reads)
+      List.map
+        (fun (read,data) ->
+          let data' = Ndtree.map f data in
+          (read, data'))
+        example_reads,
+      unselected_reads)
     reads
 
-let filter_map_reads (f : 'read -> 'read option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
+let filter_map_reads (f : 'data -> 'data option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
   (* returns: the result of applying [f] on [selected_reads] when [f] is defined *)
   List.filter_map
     (fun (example_reads, unselected_reads) ->
       let defined_example_reads, undefined_reads =
         List.partition_map
-          (fun read ->
-            match f read with
-            | Some defined_read -> Either.Left defined_read
-            | None -> Either.Right ())
+          (fun (read,data) ->
+            let data' = Ndtree.map_filter f data in
+            if Ndtree.for_all (fun d -> d = None) data' (* TODO: this is not so elegant *)
+            then Either.Right () (* this case might be avoided *)
+            else Either.Left (read, data'))
           example_reads in
       if defined_example_reads = []
       then None
       else Some (defined_example_reads, unselected_reads || undefined_reads <> []))
     selected_reads
 
-type ('typ,'value,'dconstr,'var,'func) best_read =
+let bind_reads (f : 'data -> 'data array) (reads : (('read * 'data Ndtree.t) list * bool) list) : (('read * 'data Ndtree.t) list * bool) list  =
+  List.map
+    (fun (example_reads, unselected_reads) ->
+      List.map
+        (fun (read,data) ->
+          let data' =
+            let<* d_opt = data in
+            match d_opt with
+            | None -> Ndtree.pack1 [|None|]
+            | Some d -> Ndtree.pack1 (Array.map Option.some (f d)) in
+          (read, data'))
+        example_reads,
+      unselected_reads)
+    reads
+
+  
+type ('typ,'value,'dconstr,'var,'func) best_read = (* should be named best_read *)
   { unselected_reads : bool; (* flag for out-of-branch alt reads *)
     matching : bool; (* matching flag *)
     read : ('typ,'value,'dconstr,'var,'func) Model.read; (* the selected best read, first one when matching=false *)
-    new_data : ('value,'dconstr) Data.data } (* the new data, the old data when matching=false *)
+    data : ('value,'dconstr) Data.data Ndtree.t;
+    new_data : ('value,'dconstr) Data.data Ndtree.t } (* the new data, the old data when matching=false *)
 
 let best_reads_stats (best_reads : ('typ,'value,'dconstr,'var,'func) best_read list) : int * int = (* support, total *)
   List.fold_left
@@ -40,24 +66,24 @@ let best_reads_stats (best_reads : ('typ,'value,'dconstr,'var,'func) best_read l
     (0,0) best_reads
 
 let inter_union_reads
-      (get_rs : ('typ,'value,'dconstr,'var,'func) Model.read -> ('ref * 'var Myseq.t * ('value,'dconstr) Data.data) list)
-      (reads : (('typ,'value,'dconstr,'var,'func) Model.read list * bool) list)
+      (get_rs : (('typ,'value,'dconstr,'var,'func) read as 'read) -> ('ref * 'var Myseq.t * 'data Ndtree.t) list)
+      (reads : ('readdata list * bool) list)
     : ('ref, 'var Myseq.t * ('typ,'value,'dconstr,'var,'func) best_read list) Mymap.t =
   (* given a function extracting refinements (submodels) from each read,
      return a set of such refinements, each mapped to the dl-shortest reads supporting it, along with new data *)
   let process_example reads unselected_reads =
     assert (reads <> []);
-    let read0 = List.hd reads in
-    let alt_read = {unselected_reads; matching = false; read = read0; new_data = read0.Model.data} in
+    let read0, data0 = List.hd reads in
+    let alt_read = {unselected_reads; matching = false; read = read0; data = data0; new_data = data0} in
     let refs =
       List.fold_left
-        (fun refs read ->
-          let refs_read = get_rs read in
+        (fun refs (read,data) ->
+          let refs_read = get_rs (read,data) in
           List.fold_left (* union(refs, refs_read) *)
-            (fun refs (r,varseq',data') ->
+            (fun refs (r,varseq',new_data) ->
               if Mymap.mem r refs
               then refs
-              else Mymap.add r (varseq', {unselected_reads; matching = true; read; new_data = data'}) refs)
+              else Mymap.add r (varseq', {unselected_reads; matching = true; read; data; new_data}) refs)
             refs refs_read)
         Mymap.empty reads in
     alt_read, refs
@@ -90,9 +116,9 @@ let inter_union_reads
      refs
 
 let extend_partial_best_reads
-      (selected_reads : ((('typ,'value,'dconstr,'var,'func) Model.read as 'read) list * bool) list)
+      (selected_reads : ((('typ,'value,'dconstr,'var,'func) read as 'read) list * bool) list)
       (best_reads : (('typ,'value,'dconstr,'var,'func) best_read as 'best_read) list)
-      (check_alt_read : 'read -> ('read * ('value,'dconstr) Data.data) option)
+      (check_alt_read : 'read -> ('read * 'data Ndtree.t) option)
     : 'best_read list =
   List.map2
     (fun (reads, unselected_reads) best_read ->
@@ -100,9 +126,9 @@ let extend_partial_best_reads
       then best_read (* already matches some refinement *)
       else
         (match List.find_map check_alt_read reads with
-         | Some (best_read', data') ->
-            {unselected_reads = best_read.unselected_reads;
-             matching = true; read = best_read'; new_data = data'} (* new match *)
+         | Some ((read,data), new_data) ->
+            {unselected_reads = best_read.unselected_reads; matching = true;
+             read; data; new_data} (* new match *)
          | None -> best_read)) (* no change *)
     selected_reads best_reads
 
@@ -127,10 +153,14 @@ let make_alt_if_allowed_and_needed
     let m' = Model.Alt (xc, Undet prob, m_true, m_false) in
     let best_reads' =
       List.map
-        (fun {unselected_reads; matching; read; new_data} ->
+        (fun {unselected_reads; matching; read; data; new_data} ->
           let prob = if matching then prob else 1. -. prob in
-          let new_data = Data.D (Data.value new_data, DAlt (prob, matching, new_data)) in
-          {unselected_reads; matching; read; new_data})
+          let new_data =
+            Ndtree.map
+              (fun new_d ->
+                Data.D (Data.value new_d, DAlt (prob, matching, new_d)))
+              new_data in
+          {unselected_reads; matching; read; data; new_data})
         best_reads in
     Myseq.return (m', varseq', best_reads')
   else (* alt not allowed *)
@@ -163,14 +193,14 @@ let refinements
       ~(dl_model : nb_env_vars:int -> (('typ,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval_parse_bests : 'model -> ('input,'typ,'value,'dconstr,'var) Model.eval_parse_bests)
-      ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t * 'input) list) (* refined submodel with remaining fresh vars and related new parsing input *)
+      ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data Ndtree.t -> ('model * 'var Myseq.t * 'input Ndtree.t) list) (* refined submodel with remaining fresh vars and related new parsing input *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   fun ~nb_env_vars ~dl_M m0 varseq0 reads ->
   let aux_gen (type r)
         ctx m selected_reads
-        (read_refs : 'read -> (r * 'varseq * 'data) list)
+        (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
         (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
     let p = ctx Model.This in (* local path *)
@@ -184,11 +214,19 @@ let refinements
     let dl_new =
       dl_M -. dl_m +. dl_m_new
       +. alpha *. Mdl.sum best_reads
-                    (fun {matching; read; new_data} ->
+                    (fun {matching; read; data; new_data} ->
                       if matching
                       then
-                        let dl_d = dl_data read.data in
-                        let dl_d_new = dl_data new_data in
+                        let dl_d =
+                          Ndtree.fold
+                            ~scalar:(function Some d -> dl_data d | None -> 0.)
+                            ~vector:array_float_sum
+                            data in
+                        let dl_d_new =
+                          Ndtree.fold
+                            ~scalar:(function Some d -> dl_data d | None -> 0.)
+                            ~vector:array_float_sum
+                            new_data in
                         read.dl -. dl_d +. dl_d_new
                       else 0.) (* no change in this case *) in
     let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
@@ -210,12 +248,11 @@ let refinements
                    let ctxi = (fun p1 -> ctx (Model.Field (c,i,p1))) in
                    aux ctxi mi
                      (map_reads
-                        (fun read ->
-                          match read.Model.data with
-                          | D (_, DPat (dc, args)) ->
-                             let di = try args.(i) with _ -> assert false in
-                             {read with Model.data = di}
-                          | _ -> assert false)
+                        (function
+                         | Data.D (_, DPat (dc, args)) ->
+                            assert (i >= 0 && i < Array.length args);
+                            args.(i)
+                         | _ -> assert false)
                         selected_reads))
                  args))
     | Model.Fail -> assert false
@@ -234,37 +271,32 @@ let refinements
            (let ctx1 = (fun p1 -> ctx (Model.Branch (true,p1))) in
             let sel1 =
               filter_map_reads
-                (fun (read : _ Model.read) ->
-                  match read.data with
-                  | D (_, DAlt (prob,b,d12)) ->
-                     if b
-                     then Some {read with data=d12}
-                     else None
-                  | _ -> assert false)
+                (function
+                 | Data.D (_, DAlt (prob,b,d12)) ->
+                    if b
+                    then Some d12
+                    else None
+                 | _ -> assert false)
                 selected_reads in
             aux ctx1 m1 sel1);
                         
            (let ctx2 = (fun p1 -> ctx (Model.Branch (false,p1))) in
             let sel2 =
               filter_map_reads
-                (fun (read : _ Model.read) ->
-                  match read.data with
-                  | D (_, DAlt (prob,b,d12)) ->
-                     if not b
-                     then Some {read with data=d12}
-                     else None
-                  | _ -> assert false)
+                (function
+                 | Data.D (_, DAlt (prob,b,d12)) ->
+                    if not b
+                    then Some d12
+                    else None
+                 | _ -> assert false)
                 selected_reads in
             aux ctx2 m2 sel2) ]
     | Model.Loop m1 ->
        aux ctx m1
-         (map_reads
-            (fun read ->
-              match read.Model.data with
-              | D (_, DSeq (_,_,ds1)) -> (* TODO: this is temporary hack *)
-                 assert (ds1 <> [||]); 
-                 {read with Model.data = ds1.(0)}
-              | _ -> assert false)
+         (bind_reads
+            (function
+             | Data.D (_, DSeq (_,_,ds1)) -> ds1
+             | _ -> assert false)
             selected_reads)
     | Model.Seq (n,t1,ms1) ->
        Myseq.interleave
@@ -273,10 +305,9 @@ let refinements
               let ctxi = (fun p1 -> ctx (Model.Item (i,p1))) in
               aux ctxi mi
                 (map_reads
-                   (fun read ->
-                     match read.Model.data with
-                     | D (_, DSeq (_,_,ds1)) -> {read with Model.data = ds1.(i)}
-                     | _ -> assert false)
+                   (function
+                    | Data.D (_, DSeq (_,_,ds1)) -> ds1.(i)
+                    | _ -> assert false)
                    selected_reads))
             (Array.to_list ms1))
     | Model.Expr (k,e) -> Myseq.empty
@@ -287,15 +318,16 @@ let refinements
     | Some t1 ->
        let allowed = asd#alt_opt t in
        aux_gen ctx m selected_reads
-         (fun (read : _ Model.read) ->
-           let v = Data.value read.data in
-           match data_of_value t v with (* new data for an expression *)
-           | Result.Ok dv ->
-              let es = Expr.Index.lookup (t1, Ndtree.scalar v) (Lazy.force read.lazy_index) in
-              Myseq.fold_left
-                (fun rs e -> (e, varseq0, dv) :: rs)
-                [] (Expr.Exprset.to_seq es)
-           | Result.Error _ -> assert false)
+         (fun (read, data : _ read) ->
+           let v_tree = Ndtree.map Data.value data in
+           let es = Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index) in
+           let dv_tree = (* new data for an expression *)
+             Ndtree.map_filter
+               (fun v -> Result.to_option (data_of_value t v))
+               v_tree in
+           Myseq.fold_left
+             (fun rs e -> (e, varseq0, dv_tree) :: rs)
+             [] (Expr.Exprset.to_seq es))
          (fun e varseq' ~supp ~nb ~alt best_reads ->
            let m_new = Model.Expr (t,e) in
            make_alt_if_allowed_and_needed
@@ -304,16 +336,21 @@ let refinements
   and aux_pat ctx m t c args selected_reads =
     let allowed = asd#alt_opt t in
     aux_gen ctx m selected_reads
-      (fun (read : _ Model.read) ->
-        match read.data with
-        | D (v, DPat (dc, dargs)) as data ->
-           List.filter_map
-             (fun (m',varseq',input) ->
-               match eval_parse_bests m' read.bindings input with
-               | Result.Ok ((data',dl')::_) -> Some (m',varseq',data')
-               | _ -> None)
-             (refinements_pat t c args varseq0 data)
-        | _ -> assert false)
+      (fun (read, data : _ read) ->
+        List.filter_map
+          (fun (m',varseq',input_tree) ->
+            let data'_res =
+              Ndtree.map_result
+                (fun input ->
+                  let| parse_res = eval_parse_bests m' read.bindings input in
+                  match parse_res with
+                  | (d',dl')::_ -> Result.Ok d'
+                  | _ -> assert false)
+                input_tree in
+            match data'_res with
+            | Result.Ok data' -> Some (m',varseq',data')
+            | _ -> None)
+          (refinements_pat t c args varseq0 data))
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         let* m_new, best_reads =
           postprocessing t c args m' ~supp ~nb ~alt best_reads in
@@ -322,20 +359,70 @@ let refinements
           m_new m varseq' best_reads)
   and aux_alt_prune ctx m m1 m2 selected_reads =
     aux_gen ctx m selected_reads
-      (fun (read : _ Model.read) ->
-        match read.data with
+      (fun (read, data : _ read) ->
+        if Ndtree.for_all_defined
+             (function
+              | Data.D (_, DAlt (prob, b, d12)) -> b
+              | _ -> assert false)
+             data then
+          let data1 =
+            Ndtree.map_filter
+              (function
+               | Data.D (_, DAlt (prob, b, d12)) -> if b then Some d12 else None
+               | _ -> assert false)
+              data in
+          [m1, varseq0, data1]
+        else if Ndtree.for_all_defined
+             (function
+              | Data.D (_, DAlt (prob, b, d12)) -> not b
+              | _ -> assert false)
+             data then
+          let data2 =
+            Ndtree.map_filter
+              (function
+               | Data.D (_, DAlt (prob, b, d12)) -> if not b then Some d12 else None
+               | _ -> assert false)
+              data in
+          [m2, varseq0, data2]
+        else [])
+(*        match read.data with
         | Data.D (_, DAlt (prob, b, d12)) ->
            if b
            then [m1, varseq0, d12]
            else [m2, varseq0, d12]
-        | _ -> assert false)
+        | _ -> assert false) *)
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         if supp = nb
         then Myseq.return (m', varseq', best_reads)
         else Myseq.empty)
   and aux_alt_cond_undet ctx m xc c m1 m2 selected_reads =
     aux_gen ctx m selected_reads
-      (fun (read : _ Model.read) ->
+      (fun (read, data : _ read) ->
+        let vc_tree =
+          Ndtree.map
+          (function
+           | Data.D (v, DAlt (_prob, b, d12)) -> value_of_bool b
+           | _ -> assert false)
+          data in
+        let es : _ Expr.Exprset.t = Expr.Index.lookup (typ_bool, vc_tree) (Lazy.force read.lazy_index) in
+        let new_data = (* new data *)
+          Ndtree.map
+            (function
+             | Data.D (v, DAlt (_prob, b, d12)) -> Data.D (v, DAlt (1.,b,d12))
+             | _ -> assert false)
+            data in
+        Myseq.fold_left
+          (fun rs e -> (e, varseq0, new_data) :: rs)
+          [] (Expr.Exprset.to_seq es))
+      (fun e varseq' ~supp ~nb ~alt best_reads ->
+        if supp = nb
+        then
+          let c_new = Model.BoolExpr e in
+          let m_new = Model.Alt (xc, c_new, m1, m2) in
+          Myseq.return (m_new, varseq', best_reads)
+        else Myseq.empty)
+(* too clumsy - above code is more symmetrical wrt true/false but issue about missing false condition expressions
+      (fun (read : _ Model.read) ->        
         match read.data with
         | Data.D (v, DAlt (_prob, true, d1)) ->
            let vc = value_of_bool true in
@@ -371,10 +458,19 @@ let refinements
           let m_new = Model.Alt (xc, c_new, m1, m2) in
           Myseq.return (m_new, varseq', best_reads)
         else Myseq.empty)
+ *)
   in
   let selected_reads =
     (* the flag for each example indicates whether there are other reads, used with Alt *)
-    List.map (fun example_reads -> (example_reads, false)) reads in
+    List.map
+      (fun example_reads ->
+        let example_reads =
+          List.map
+            (fun (read : _ Model.read) ->
+              (read, Ndtree.scalar (Some read.data)))
+            example_reads in
+        (example_reads, false))
+      reads in
   let* p, r, varseq', supp, dl' =
     aux Model.ctx0 m0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->

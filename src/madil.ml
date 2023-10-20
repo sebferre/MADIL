@@ -152,7 +152,6 @@ module type DOMAIN =
 
     val bool_of_value : value -> bool result
     val value_of_bool : bool -> value
-    val value_null : value
 
     (* bindings and evaluation *)
 
@@ -188,10 +187,10 @@ module type DOMAIN =
 
     (* refining *)
 
-    val refinements_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq * input) list
+    val refinements_pat : typ -> constr -> model array -> varseq -> data Ndtree.t -> (model * varseq * input Ndtree.t) list
     val refinements_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
-    val prunings_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq * input) list
+    val prunings_pat : typ -> constr -> model array -> varseq -> data Ndtree.t -> (model * varseq * input Ndtree.t) list
     val prunings_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
@@ -221,7 +220,6 @@ module Make (Domain : DOMAIN) =
       Model.get_bindings
         ~typ_bool
         ~value_of_bool
-        ~value_null
 
     let eval_expr : expr -> bindings -> value Ndtree.t result =
       Expr.eval

@@ -188,7 +188,6 @@ let binding_vars
 let get_bindings  (* QUICK *)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
-      ~(value_null : 'value)
       (m0 : ('typ,'var,'constr,'func) model as 'model)
       (d0 : ('value,'dconstr) data as 'data)
     : ('var,'typ,'value) Expr.bindings =
