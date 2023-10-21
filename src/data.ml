@@ -42,7 +42,7 @@ let xp_data
            aux ~prio_ctx:2 ~html print d12;
            if html then print#string "</div>")
     | D (_v, DSeq (n,_range,items)) ->
-       xp_array ~delims:("〈" ^ string_of_int n ^ ": ", "〉")
+       xp_array ~delims:("〈#" ^ string_of_int n ^ ": ", "〉")
          (aux ~prio_ctx:2)
          ~html print items
     | D (v, DExpr) ->

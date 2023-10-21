@@ -65,9 +65,10 @@ let xp_model
   let rec aux ~prio_ctx ~html print m =
     match m with
     | Def (x,m1) ->
-       if html then print#string "<span class=\"model-def\">";
-       xp_var ~html print x; print#string ":"; aux ~prio_ctx ~html print m1;
-       if html then print#string "</span>"
+       xp_html_elt "span" ~classe:"model-def" ~html print
+         (fun () ->
+           xp_var ~html print x; print#string ":";
+           aux ~prio_ctx ~html print m1)
     | Pat (_t,c,args) ->
        let xp_args =
          Array.map
@@ -79,29 +80,42 @@ let xp_model
     | Alt (xc, Undet prob, m1, m2) -> (* m1 | m2 *)
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
-           if html then print#string "<div class=\"model-alt\">";
-           xp_var ~html print xc; print#string ": ";
-           aux_prob ~html print prob;
-           print#string "? ";
-           aux ~html ~prio_ctx:2 print m1;
-           print#string (if html then " <span class=\"model-meta-operator\">|</span> " else " | ");
-           aux ~html ~prio_ctx:2 print m2;
-           if html then print#string "</div>")
+           xp_html_elt "div" ~classe:"model-alt" ~html print
+             (fun () ->
+               xp_var ~html print xc; print#string ": ";
+               aux_prob ~html print prob;
+               print#string "? ";
+               aux ~html ~prio_ctx:2 print m1;
+               print#string " ";
+               xp_html_elt "span" ~classe:"model-meta-operator" ~html print
+                 (fun () -> print#string "|");
+               print#string " ";
+               aux ~html ~prio_ctx:2 print m2))
     | Alt (xc,c,m1,m2) -> (* if c then m1 else m2 *)
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
-           if html then print#string "<div class=\"model-alt\">";
-           print#string (if html then "<span class=\"model-meta-operator\">if</span> " else "if ");
-           xp_var ~html print xc; print#string ": ";
-           aux_cond ~html print c;
-           print#string (if html then " <span class=\"model-meta-operator\">then</span> " else " then ");
-           aux ~html ~prio_ctx:2 print m1;
-           print#string (if html then " <span class=\"model-meta-operator\">else</span> " else " else ");
-           aux ~html ~prio_ctx:2 print m2;
-           if html then print#string "</div>")
-
+           xp_html_elt "div" ~classe:"model-alt" ~html print
+             (fun () ->
+               xp_html_elt "span" ~classe:"model-meta-operator" ~html print
+                 (fun () -> print#string "if");
+               print#string " ";
+               xp_var ~html print xc; print#string ": ";
+               aux_cond ~html print c;
+               print#string " ";
+               xp_html_elt "span" ~classe:"model-meta-operator" ~html print
+                 (fun () -> print#string "then");
+               print#string " ";
+               aux ~html ~prio_ctx:2 print m1;
+               print#string " ";
+               xp_html_elt "span" ~classe:"model-meta-operator" ~html print
+                 (fun () -> print#string "else");
+               print#string " ";
+               aux ~html ~prio_ctx:2 print m2))
+      
     | Loop m1 ->
-       xp_tuple1 ~delims:("〈", " ...〉") (aux ~prio_ctx:2) ~html print m1
+       xp_html_elt "div" ~classe:"model-block" ~html print
+         (fun () -> aux ~prio_ctx:2 ~html print m1)
+    (* xp_tuple1 ~delims:("〈", " ...〉") (aux ~prio_ctx:2) ~html print m1 *)
     | Nil t ->
        xp_html_elt "span" ~classe:"model-meta-operator" ~html print
          (fun () -> print#string "end")
@@ -174,13 +188,18 @@ let xp_path
        xp_index ~html print i;
        aux ~html print p1
   and xp_tail ~html print i = function
+    | Head p1 ->
+       xp_index ~html print i;
+       aux ~html print p1
     | Tail p1 ->
        xp_tail ~html print (i+1) p1
     | p1 ->
-       xp_index ~html print i;
+       xp_slice ~html print i;
        aux ~html print p1
   and xp_index ~html print i =
     print#string "["; print#int i; print#string "]"
+  and xp_slice ~html print i =
+    print#string "["; print#int i; print#string ":]"
   in
   aux
 
