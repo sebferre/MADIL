@@ -770,7 +770,7 @@ let parse_bests
   (* TODO: take into account max_parse_dl_factor? *)
 
 let read
-      ~(input_of_value : 'value -> 'input)
+      ~(input_of_value : 'typ -> 'value -> 'input)
       ~(eval : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'constr,'func) model result)
       ~(parse_bests : ('typ,'value,'var,'constr,'func) model -> ?is:(int list) -> ('input,'value,'dconstr) parse_bests)
 
@@ -782,7 +782,8 @@ let read
       (v : 'value)
     : ('typ,'value,'dconstr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
-  let input = input_of_value v in
+  let t = typ m0 in
+  let input = input_of_value t v in
   let* m = Myseq.from_result (eval m0 bindings) in    
   let* best_parses = Myseq.from_result (parse_bests m input) in
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in

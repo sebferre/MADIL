@@ -176,6 +176,13 @@ let make_alt_if_allowed_and_needed
   else (* alt not allowed *)
     Myseq.empty
 
+let rec make_nested_cons ndim m (m',varseq') =
+  (* ndim is the max nesting level *)
+  (m',varseq')
+  :: if ndim = 0
+     then []
+     else make_nested_cons (ndim-1) m (Model.make_cons m' m, varseq')
+  
 type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   nb_env_vars:int ->
   dl_M:dl -> (* current model DL *)
@@ -202,8 +209,9 @@ let refinements
       ~(dl_model : nb_env_vars:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval : 'model -> ('var,'typ,'value) Expr.bindings -> 'model result)
+      ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ?is:(int list) -> ('input,'value,'dconstr) Model.parse_bests)
-      ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data Ndtree.t -> ('model * 'var Myseq.t * 'input Ndtree.t) list) (* refined submodel with remaining fresh vars and related new parsing input *)
+      ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
@@ -368,21 +376,30 @@ let refinements
     let allowed = asd#alt_opt t in
     aux_gen ctx m selected_reads
       (fun (read, data : _ read) ->
-        List.filter_map
-          (fun (m',varseq',input_tree) ->
-            let data'_res =
-              let| m' = eval m' read.bindings in
-              Ndtree.mapi_result
-                (fun is input ->
-                  let| parse_res = parse_bests m' ~is input in (* assuming m' does not contain expressions *)
-                  match parse_res with
-                  | (d',dl')::_ -> Result.Ok d'
-                  | _ -> assert false)
-                input_tree in
-            match data'_res with
-            | Result.Ok data' -> Some (m',varseq',data')
-            | _ -> None)
-          (refinements_pat t c args varseq0 data))
+        let ndim = Ndtree.ndim data in
+        let input_tree =
+          Ndtree.map
+            (fun d -> input_of_value t (Data.value d))
+            data in
+        match Ndtree.choose data with
+        | None -> []
+        | Some d -> (* computing refinements on a sample data *)
+           refinements_pat t c args varseq0 d
+           |> List.concat_map (make_nested_cons ndim m)
+           |> List.filter_map
+                (fun (m',varseq') ->
+                  let data'_res =
+                    let| m' = eval m' read.bindings in
+                    Ndtree.mapi_result
+                      (fun is input ->
+                        let| parse_res = parse_bests m' ~is input in
+                        match parse_res with
+                        | (d',dl')::_ -> Result.Ok d'
+                        | _ -> assert false)
+                      input_tree in
+                  match data'_res with
+                  | Result.Ok data' -> Some (m',varseq',data')
+                  | _ -> None))
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         let* m_new, best_reads =
           postprocessing t c args m' ~supp ~nb ~alt best_reads in

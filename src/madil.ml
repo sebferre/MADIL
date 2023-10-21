@@ -164,7 +164,7 @@ module type DOMAIN =
 
     val generator_pat : typ -> constr -> generator array -> generator
 
-    val input_of_value : value -> input
+    val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
     val parseur_pat : typ -> constr -> parseur array -> parseur
 
@@ -186,10 +186,10 @@ module type DOMAIN =
 
     (* refining *)
 
-    val refinements_pat : typ -> constr -> model array -> varseq -> data Ndtree.t -> (model * varseq * input Ndtree.t) list
+    val refinements_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq) list
     val refinements_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
-    val prunings_pat : typ -> constr -> model array -> varseq -> data Ndtree.t -> (model * varseq * input Ndtree.t) list
+    val prunings_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq) list
     val prunings_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
@@ -311,6 +311,7 @@ module Make (Domain : DOMAIN) =
         ~dl_model
         ~dl_data
         ~eval
+        ~input_of_value
         ~parse_bests
         ~refinements_pat
         ~postprocessing:refinements_postprocessing
@@ -326,6 +327,7 @@ module Make (Domain : DOMAIN) =
         ~dl_model
         ~dl_data
         ~eval
+        ~input_of_value
         ~parse_bests
         ~refinements_pat:prunings_pat
         ~postprocessing:prunings_postprocessing
