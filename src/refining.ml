@@ -49,6 +49,16 @@ let bind_reads (f : 'data -> 'data array) (reads : (('read * 'data Ndtree.t) lis
       unselected_reads)
     reads
 
+let map_reads_ndtree (f_ndtree : 'data Ndtree.t -> 'data Ndtree.t) (reads : ('read list * bool) list) : ('read list * bool) list  =
+  List.map
+    (fun (example_reads, unselected_reads) ->
+      List.map
+        (fun (read,data) ->
+          let data' = f_ndtree data in
+          (read, data'))
+        example_reads,
+      unselected_reads)
+    reads
   
 type ('typ,'value,'dconstr,'var,'func) best_read = (* should be named best_read *)
   { unselected_reads : bool; (* flag for out-of-branch alt reads *)
@@ -191,7 +201,8 @@ let refinements
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(eval_parse_bests : 'model -> ('input,'typ,'value,'dconstr,'var) Model.eval_parse_bests)
+      ~(eval : 'model -> ('var,'typ,'value) Expr.bindings -> 'model result)
+      ~(parse_bests : 'model -> ?is:(int list) -> ('input,'value,'dconstr) Model.parse_bests)
       ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data Ndtree.t -> ('model * 'var Myseq.t * 'input Ndtree.t) list) (* refined submodel with remaining fresh vars and related new parsing input *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
@@ -297,6 +308,28 @@ let refinements
              | Data.D (_, DSeq (_,_,ds1)) -> ds1
              | _ -> assert false)
             selected_reads)
+    | Model.Nil t -> Myseq.empty
+    | Model.Cons (m0,m1) ->
+       Myseq.interleave
+         [ (let ctx0 = (fun p1 -> ctx (Model.Head p1)) in
+            let sel0 =
+              map_reads_ndtree
+                (fun data ->
+                  match Ndtree.head_opt data with
+                  | Some data0 -> data0
+                  | None -> assert false)
+                selected_reads in
+            aux ctx0 m0 sel0);
+
+           (let ctx1 = (fun p1 -> ctx (Model.Tail p1)) in
+            let sel1 =
+              map_reads_ndtree
+                (fun data ->
+                  match Ndtree.tail_opt data with
+                  | Some data1 -> data1
+                  | None -> assert false)
+                selected_reads in
+            aux ctx1 m1 sel1) ]
     | Model.Seq (n,t1,ms1) ->
        Myseq.interleave
          (List.mapi
@@ -338,9 +371,10 @@ let refinements
         List.filter_map
           (fun (m',varseq',input_tree) ->
             let data'_res =
-              Ndtree.map_result
-                (fun input ->
-                  let| parse_res = eval_parse_bests m' read.bindings input in
+              let| m' = eval m' read.bindings in
+              Ndtree.mapi_result
+                (fun is input ->
+                  let| parse_res = parse_bests m' ~is input in (* assuming m' does not contain expressions *)
                   match parse_res with
                   | (d',dl')::_ -> Result.Ok d'
                   | _ -> assert false)

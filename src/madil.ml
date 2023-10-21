@@ -239,7 +239,7 @@ module Make (Domain : DOMAIN) =
         ~generator_pat
         ~value_of_seq
 
-    let parseur : model -> parseur =
+    let parseur : model -> ?is:(int list) -> parseur =
       Model.parseur
         ~parseur_value
         ~parseur_pat
@@ -282,10 +282,9 @@ module Make (Domain : DOMAIN) =
 
     (* reading and writing *)
 
-    let eval_parse_bests =
-      Model.eval_parse_bests
+    let parse_bests =
+      Model.parse_bests
         ~max_nb_parse:(!max_nb_parse)
-        ~eval
         ~parseur
         ~dl_data
 
@@ -293,7 +292,7 @@ module Make (Domain : DOMAIN) =
       Model.read
         ~input_of_value
         ~eval
-        ~eval_parse_bests
+        ~parse_bests
 
     let write =
       Model.write
@@ -311,7 +310,8 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~eval_parse_bests
+        ~eval
+        ~parse_bests
         ~refinements_pat
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
@@ -325,7 +325,8 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~eval_parse_bests
+        ~eval
+        ~parse_bests
         ~refinements_pat:prunings_pat
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)

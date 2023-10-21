@@ -73,6 +73,18 @@ let array_map_result (f : 'a -> 'b result) (xs : 'a array) : 'b array result =
   with exn ->
     Result.Error exn
 
+let array_mapi_result (f : int -> 'a -> 'b result) (xs : 'a array) : 'b array result =
+  try
+    Result.Ok
+      (Array.mapi
+         (fun i x ->
+           match f i x with
+           | Result.Ok y -> y
+           | Result.Error exn -> raise exn)
+         xs)
+  with exn ->
+    Result.Error exn
+
 let result_list_bind_some (lx_res : ('a list,'c) Result.t) (f : 'a -> ('b list,'c) Result.t) : ('b list, 'c) Result.t =
   let rec aux = function
   | [] -> invalid_arg "Model2.bind_map_ok: empty list"

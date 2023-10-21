@@ -92,7 +92,9 @@ let lookup (t : 'a t) (is : int list) : 'a option =
     | Scalar x_opt, _ -> x_opt
     | Vector1 vx, i::_ ->
        let n = Array.length vx in
-       vx.(i mod n)
+       if i >= 0 && i < n
+       then vx.(i)
+       else None
     | Vector v, i::is1 ->
        let n = Array.length v in
        if i >= 0 && i < n
@@ -130,6 +132,33 @@ let index (t : 'a t) (is : int option list) : 'a t option =
     Some { ndim; tree }
   with Not_found -> None
 
+let head_opt (t : 'a t) : 'a t option = (* t[0] *)
+  match t.tree with
+  | Scalar _ -> None
+  | Vector1 vx ->
+     if vx <> [||]
+     then Some {ndim = 0; tree = Scalar vx.(0)}
+     else None
+  | Vector v ->
+     if v <> [||]
+     then Some {ndim = t.ndim - 1; tree = v.(0)}
+     else None
+
+let tail_opt  (t : 'a t) : 'a t option = (* t[1:] *)
+  match t.tree with
+  | Scalar _ -> None
+  | Vector1 vx ->
+     let n = Array.length vx in
+     if n > 0
+     then Some {ndim = 1; tree = Vector1 (Array.sub vx 1 (n-1))}
+     else None
+  | Vector v ->
+     let n = Array.length v in
+     if n > 0
+     then Some {ndim = t.ndim; tree = Vector (Array.sub v 1 (n-1))}
+     else None
+
+                  
 let fold ~(scalar: 'a option -> 'b) ~(vector: 'b array -> 'b) (t : 'a t) : 'b =
   let rec aux = function
     | Scalar x_opt -> scalar x_opt
@@ -174,26 +203,34 @@ let mapi (f : int list -> 'a -> 'b) (t : 'a t) : 'b t =
   in
   { t with tree = aux [] t.tree }
 
-let map_result (f : 'a -> 'b result) (t : 'a t) : 'b t result =
-  let rec aux = function
+let mapi_result (f : int list -> 'a -> 'b result) (t : 'a t) : 'b t result =
+  let rec aux rev_is = function
     | Scalar None ->
        Result.Ok (Scalar None)
     | Scalar (Some x) ->
-       let| y = f x in
+       let is = List.rev rev_is in
+       let| y = f is x in
        Result.Ok (Scalar (Some y))
     | Vector1 vx ->
        let| vy =
-         array_map_result
-           (function
+         array_mapi_result
+           (fun i -> function
             | None -> Result.Ok None
-            | Some x -> let| y = f x in Result.Ok (Some y))
+            | Some x ->
+               let is = List.rev (i::rev_is) in
+               let| y = f is x in
+               Result.Ok (Some y))
            vx in
        Result.Ok (Vector1 vy)
     | Vector v ->
-       let| v' = array_map_result aux v in
+       let| v' =
+         array_mapi_result
+           (fun i tree1 ->
+             aux (i::rev_is) tree1)
+           v in
        Result.Ok (Vector v')
   in
-  let| tree' = aux t.tree in
+  let| tree' = aux [] t.tree in
   Result.Ok { t with tree = tree' }
 
 let bind (f : 'a option -> 'b t) (t : 'a t) : 'b t =
