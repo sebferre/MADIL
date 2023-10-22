@@ -352,18 +352,6 @@ let refinements
                   | None -> assert false)
                 selected_reads in
             aux ctx1 m1 sel1) ]
-    | Model.Seq (n,t1,ms1) ->
-       Myseq.interleave
-         (List.mapi
-            (fun i mi ->
-              let ctxi = (fun p1 -> ctx (Model.Item (i,p1))) in
-              aux ctxi mi
-                (map_reads
-                   (function
-                    | Data.D (_, DSeq (_,_,ds1)) -> ds1.(i)
-                    | _ -> assert false)
-                   selected_reads))
-            (Array.to_list ms1))
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
   and aux_expr ctx m selected_reads =

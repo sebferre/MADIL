@@ -17,7 +17,6 @@ type ('typ,'value,'var,'constr,'func) model =
   | Loop of ('typ,'value,'var,'constr,'func) model
   | Nil of 'typ
   | Cons of ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
-  | Seq of int * 'typ (* elt type *) * ('typ,'value,'var,'constr,'func) model array
   | Expr of 'typ * ('var,'func) Expr.expr (* not in evaluated model *)
   | Value of 'typ * 'value Ndtree.t (* only in evaluated model *)
 
@@ -27,7 +26,6 @@ type 'constr path =
   | Branch of bool * 'constr path (* Alt branch *)
   | Head of 'constr path (* Cons head *)
   | Tail of 'constr path (* Cons tail *)
-  | Item of int * 'constr path (* Seq item *)
 
 type 'constr ctx = 'constr path -> 'constr path
 let ctx0 : _ ctx = (fun p -> p)
@@ -51,7 +49,6 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Loop m1 -> typ m1
   | Nil t -> t
   | Cons (m0,m1) -> typ m0
-  | Seq (n,t1,lm1) -> t1
   | Expr (t,e) -> t
   | Value _ -> assert false
   
@@ -128,8 +125,6 @@ let xp_model
                xp_html_elt "span" ~classe:"model-meta-operator" ~html print
                  (fun () -> print#string "; ");
                aux ~html ~prio_ctx:1 print m1))
-    | Seq (n,_t1,lm1) ->
-       xp_array ~delims:("〈","〉") (aux ~prio_ctx:2) ~html print lm1
     | Expr (_t,e) ->
        xp_html_elt "span" ~classe:"model-expr" ~html print
          (fun () ->
@@ -184,9 +179,6 @@ let xp_path
        aux ~html print p1
     | Tail p1 ->
        xp_tail ~html print 1 p1
-    | Item (i,p1) ->
-       xp_index ~html print i;
-       aux ~html print p1
   and xp_tail ~html print i = function
     | Head p1 ->
        xp_index ~html print i;
@@ -237,8 +229,6 @@ let binding_vars
        let acc = aux m0 acc in
        let acc = aux m1 acc in
        acc
-    | Seq (n,t1,lm1) ->
-       Array.fold_right aux lm1 acc
     | Expr (t,e) -> acc
     | Value _ -> assert false
   in
@@ -318,19 +308,6 @@ let get_bindings  (* QUICK *)
          | None -> assert false in
        let acc = aux m1 d1_tree acc in
        acc
-    | Seq (n,t1,ms1) ->
-       let ref_acc = ref acc in (* missing Array.fold_right2 *)
-       for i = 0 to n - 1 do
-         let di_tree =
-           let< d = d_tree in
-           match d with
-           | D (_v, DSeq (dn, _, ds1)) ->
-              assert (dn = n);
-              ds1.(i)
-           | _ -> assert false in
-         ref_acc := aux ms1.(i) di_tree !ref_acc
-       done;
-       !ref_acc
     | Expr _ -> acc
     | Value _ -> assert false
   in
@@ -375,9 +352,6 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
        let| m0' = aux m0 in
        let| m1' = aux m1 in
        Result.Ok (Cons (m0',m1'))
-    | Seq (n,t1,ms1) ->
-       let| ms1' = array_map_result aux ms1 in
-       Result.Ok (Seq (n,t1,ms1'))
     | Expr (t,e) ->
        let| v_tree = eval_expr e bindings in
        Result.Ok (Value (t,v_tree))
@@ -470,13 +444,6 @@ let generator (* on evaluated models: no expr, no def *)
          | [] -> (fun info -> Myseq.empty) in
        (fun info ->
          gen_m info)
-    | Seq (n,t1,ms1) ->
-       let gen_ms1 = Array.to_list (Array.mapi (fun i m1 -> gen (i::rev_is) m1) ms1) in
-       (fun info ->
-         let* ld1 = Myseq.product_fair (List.map (fun gen_mi -> gen_mi info) gen_ms1) in
-         let ds1 = Array.of_list ld1 in
-         let v = value_of_seq (Array.map Data.value ds1) in
-         Myseq.return (D (v, DSeq (n, Range.make_exact n, ds1))))
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
        let is = List.rev rev_is in
@@ -533,12 +500,6 @@ let parseur (* on evaluated models: no expr, no def *)
        | 0::is0 -> parse (List.rev is0) m0 input
        | i::is1 -> parse (List.rev ((i-1)::is1)) m1 input
        | [] -> Myseq.empty)
-    | Seq (n,t1,ms1) ->
-       let parse_lm1 = Array.to_list (Array.mapi (fun i m1 -> parse (i::rev_is) m1) ms1) in
-       let* ld1, input = Myseq.product_dependent_fair parse_lm1 input in
-       let ds1 = Array.of_list ld1 in
-       let v = value_of_seq (Array.map Data.value ds1) in
-       Myseq.return (D (v, (DSeq (n, Range.make_exact n, ds1))), input)
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
        let is = List.rev rev_is in
@@ -604,7 +565,6 @@ let size_model_ast (* for DL computing, QUICK *)
     | Loop m1 -> size_loop + aux m1
     | Nil t -> size_nil
     | Cons (m0,m1) -> size_cons + aux m0 + aux m1
-    | Seq (n,t1,ms1) -> Array.fold_left (fun res m1 -> res + aux m1) 1 ms1
     | Expr (t,e) -> Expr.size_expr_ast e
     | Value _ -> assert false
   and aux_cond = function
@@ -667,22 +627,10 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
     assert (ndim >= 0);
     if ndim = 0
     then aux t size
-    else
-      let nb = 0. in
-      let nb = (* counting possible loops *)
-        if size >= size_loop
-        then nb +. aux_seq (t,ndim-1) (size - size_loop)
-        else nb in
-      let nb = (* counting possible Seqs *)
-        if size >= size_seq
-        then
-          Common.fold_for
-            (fun n nb ->
-              nb +. sum_conv (List.init n (fun _ -> aux_seq (t,ndim-1))) (size - size_seq - n)) (* cost 1 for each item to avoid pb with zero-cost models *)
-            0 (max 4 (size - size_seq)) (* bounding to 4 to avoid explosion *)
-            nb
-        else nb in
-      nb
+    else (* counting possible loops *)
+      if size >= size_loop
+      then aux_seq (t,ndim-1) (size - size_loop)
+      else 0.
   in
   aux, reset
 
@@ -705,11 +653,7 @@ let dl_model_params
        aux_cond c +. aux m1 +. aux m2
     | Loop m1 -> aux m1
     | Nil t -> 0.
-    | Cons (m0,m1) -> 0.
-    | Seq (n,t1,ms1) ->
-       Mdl.Code.universal_int_star n
-       +. (Array.map aux ms1
-           |> Array.fold_left (+.) 0.)
+    | Cons (m0,m1) -> aux m0 +. aux m1
     | Expr (t,e) -> dl_expr_params e
     | Value _ -> assert false
   and aux_cond = function
@@ -851,9 +795,6 @@ let reverse_path (p : 'constr path) : 'constr path =
     | Tail p1 ->
        let ctx1 = aux p1 in
        (fun rp -> ctx1 (Tail rp))
-    | Item (i,p1) ->
-       let ctx1 = aux p1 in
-       (fun rp -> ctx1 (Item (i,rp)))
   in
   let ctx = aux p in
   ctx This       
@@ -885,10 +826,6 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | Tail p1, Cons (m0,m1) ->
        let new_m1 = aux p1 r m1 in
        Cons (m0,new_m1)
-    | Item (i,p1), Seq (n,t1,ms1) when i >= 0 && i < n ->
-       let new_ms1 = Array.copy ms1 in
-       new_ms1.(i) <- aux p1 r ms1.(i);
-       Seq (n,t1,new_ms1)
     | _ -> assert false
   in
   aux
