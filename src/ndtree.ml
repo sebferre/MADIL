@@ -144,6 +144,21 @@ let head_opt (t : 'a t) : 'a t option = (* t[0] *)
      then Some {ndim = t.ndim - 1; tree = v.(0)}
      else None
 
+let replace_head (t : 'a t) (t0 : 'a t) : 'a t = (* t[0] <- t0, not in place *)
+  if t0.ndim <> t.ndim - 1 then raise Wrong_ndim;
+  match t.tree, t0.tree with
+  | Vector1 vx, Scalar x_opt ->
+     if vx = [||] then failwith "Ndtree.replace_head: empty vector, no head";
+     let vx' = Array.copy vx in
+     vx'.(0) <- x_opt;
+     {ndim = 1; tree = Vector1 vx'}
+  | Vector v, tree0 ->
+     if v = [||] then failwith "Ndtree.replace_head: empty vector, no head";
+     let v' = Array.copy v in
+     v'.(0) <- tree0;
+     {ndim = t.ndim; tree = Vector v'}
+  | _ -> assert false
+  
 let tail_opt  (t : 'a t) : 'a t option = (* t[1:] *)
   match t.tree with
   | Scalar _ -> None
