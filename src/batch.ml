@@ -51,12 +51,14 @@ let print_measures count ms =
   print_newline ()
 
 let apply_model ~env m v_i info_o =
-  let res_opt =
-    Common.do_timeout !timeout_predict (fun () ->
-        apply ~env m v_i info_o) in
-  match res_opt with
-  | Some res -> res
-  | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
+  try
+    let res_opt =
+      Common.do_timeout !timeout_predict (fun () ->
+          apply ~env m v_i info_o) in
+    match res_opt with
+    | Some res -> res
+    | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
+  with exn -> Result.Error exn
   
 let score_learned_model
       ~env (* input env data *)
