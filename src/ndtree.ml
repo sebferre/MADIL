@@ -105,6 +105,7 @@ let lookup (t : 'a t) (is : int list) : 'a option =
   aux t.tree is
      
 let index (t : 'a t) (is : int option list) : 'a t option =
+  (* None = full slice :, Some i = index i, negative indices supported *)
   let rec aux_ndim ndim is =
     match is with
     | [] -> ndim
@@ -115,13 +116,15 @@ let index (t : 'a t) (is : int option list) : 'a t option =
     | _, [] -> tree
     | Scalar _, _ -> failwith "Ndtree.index: invalid index, too many dims"
     | Vector1 v, (Some i)::_ ->
-       if i >= 0 && i < Array.length v
-       then Scalar v.(i)
+       let n = Array.length v in
+       if i >= 0 && i < n then Scalar v.(i)
+       else if i < 0 && i >= -n then Scalar v.(n+i) 
        else raise Not_found
     | Vector1 v, None::_ -> tree
     | Vector v, (Some i)::is1 ->
-       if i >= 0 && i < Array.length v
-       then aux_tree v.(i) is1
+       let n = Array.length v in
+       if i >= 0 && i < n then aux_tree v.(i) is1
+       else if i < 0 && i > -n then aux_tree v.(n+i) is1
        else raise Not_found
     | Vector v, None::is1 ->
        pack_tree (Array.map (fun tree1 -> aux_tree tree1 is1) v)
@@ -218,6 +221,34 @@ let mapi (f : int list -> 'a -> 'b) (t : 'a t) : 'b t =
   in
   { t with tree = aux [] t.tree }
 
+let map_result (f : 'a -> 'b result) (t : 'a t) : 'b t result =
+  let rec aux = function
+    | Scalar None ->
+       Result.Ok (Scalar None)
+    | Scalar (Some x) ->
+       let| y = f x in
+       Result.Ok (Scalar (Some y))
+    | Vector1 vx ->
+       let| vy =
+         array_map_result
+           (function
+            | None -> Result.Ok None
+            | Some x ->
+               let| y = f x in
+               Result.Ok (Some y))
+           vx in
+       Result.Ok (Vector1 vy)
+    | Vector v ->
+       let| v' =
+         array_map_result
+           (fun tree1 ->
+             aux tree1)
+           v in
+       Result.Ok (Vector v')
+  in
+  let| tree' = aux t.tree in
+  Result.Ok { t with tree = tree' }
+
 let mapi_result (f : int list -> 'a -> 'b result) (t : 'a t) : 'b t result =
   let rec aux rev_is = function
     | Scalar None ->
@@ -278,7 +309,102 @@ let for_all_defined (f : 'a -> bool) (t : 'a t) : bool =
   in
   aux t.tree
 
-  
+let all_same_size_or_one (ts : 'a t array) : int option =
+  Array.fold_left
+    (fun size_opt t ->
+      match size_opt with
+      | None -> None
+      | Some size ->
+         match t.tree with
+         | Scalar _ -> Some size
+         | Vector1 vx ->
+            let n = Array.length vx in
+            if size = 1 || n = 1 || size = n
+            then Some (max size n)
+            else None
+         | Vector v ->
+            let n = Array.length v in
+            if size = 1 || n = 1 || size = n
+            then Some (max size n)
+            else None)
+    (Some 1) ts
+
+exception Invalid_broadcast
+
+let broadcastable (ts : 'a t array) : bool =
+  (* when broadcast_result is well-defined *)
+  let rec aux ts =
+    if Array.for_all (fun t -> t.ndim = 0) ts (* all scalars *)
+    then true
+    else
+      match all_same_size_or_one ts with
+      | Some size -> (* broadcastable: all ndtrees have equal size or size=1 on first axis *)
+         Common.fold_for
+           (fun i ok ->
+             ok 
+             && (let ts_i = (* [t1[i], ..., tk[i] *)
+                   Array.map
+                     (fun t ->
+                       match t.tree with
+                       | Scalar x_opt -> t
+                       | Vector1 vx ->
+                          let n = Array.length vx in
+                          {ndim = 0; tree = Scalar vx.(i mod n)}
+                       | Vector v ->
+                          let n = Array.length v in
+                          {ndim = t.ndim-1; tree = v.(i mod n)})
+                     ts in
+                 aux ts_i))
+           0 (size-1)
+           true
+      | None -> false
+  in
+  match ts with
+  | [||] -> true
+  | [|t1|] -> true
+  | _ -> aux ts (* the real broadcasting case *)
+        
+let broadcast_result (f : 'a array -> 'b result) (ts : 'a t array) : 'b t result =
+  (* function application by broadcasting through an array of ndtrees *)
+  (* when the function application fails, the whole broadcast fails *)
+  let rec aux ts =
+    if Array.for_all (fun t -> t.ndim = 0) ts (* all scalars *)
+    then
+      let| xs = array_map_result unscalar ts in (* get scalars, if all defined *)
+      let| y = f xs in (* apply the function *)
+      Result.Ok (scalar (Some y)) (* TODO: consider converting app failure into None *)
+    else
+      match all_same_size_or_one ts with
+      | Some size -> (* broadcastable: all ndtrees have equal size or size=1 on first axis *)
+         let| ts_y: 'b t array =
+           array_map_result
+             (fun i ->
+               let ts_i = (* [t1[i], ..., tk[i] *)
+                 Array.map
+                   (fun t ->
+                     match t.tree with
+                     | Scalar x_opt -> t
+                     | Vector1 vx ->
+                        let n = Array.length vx in
+                        {ndim = 0; tree = Scalar vx.(i mod n)}
+                     | Vector v ->
+                        let n = Array.length v in
+                        {ndim = t.ndim-1; tree = v.(i mod n)})
+                   ts in
+               aux ts_i)
+             (Array.init size (fun i -> i)) in
+         Result.Ok (pack ts_y)
+      | None ->
+         Result.Error Invalid_broadcast
+  in
+  match ts with
+  | [||] ->
+     let| y = f [||] in
+     Result.Ok (scalar (Some y))
+  | [|t1|] ->
+     map_result (fun x1 -> f [|x1|]) t1
+  | _ -> aux ts (* the real broadcasting case *)
+
 module Operators =
   struct
     let ( let< ) t f = map f t
