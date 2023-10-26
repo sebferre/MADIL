@@ -269,7 +269,7 @@ module Index =
          | Some es -> Some (Exprset.add_ref x es))
         index
       
-    let bind_apply (tv : 'typ * 'value Ndtree.t) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+    let bind_apply (tv : 'typ * 'value Ndtree.t) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t = (* QUICK *)
       Mymap.update tv
         (function
          | None -> Some (Exprset.add_apply f es_args Exprset.empty)
@@ -296,9 +296,16 @@ let index_apply_functions
       index
       (max_arity : int)
       (get_functions : 'typ array * 'value Ndtree.t array -> ('typ * 'func) list)
-    : ('typ,'value,'var,'func) Index.t =
-  let rec aux k lt_k lv_k les_k t_args_k v_args_k es_args_k res =
-    let res =
+    : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
+  let args_k =
+    Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
+      (fun k -> (* three undefined arrays for types, values, and exprsets *)
+        Array.make k (Obj.magic () : 'typ),
+        Array.make k (Obj.magic () : 'value Ndtree.t),
+        Array.make k (Obj.magic () : ('var,'func) Exprset.t)) in
+  let rec aux k res =
+    let t_args_k, v_args_k, es_args_k = args_k.(k) in
+    let res = (* generating and applying functions for arity k *)
       get_functions (t_args_k, v_args_k)
       |> List.fold_left
            (fun res (t,f) ->
@@ -311,17 +318,16 @@ let index_apply_functions
     else
       Index.fold
         (fun (t,v) es res ->
-          let lt = t::lt_k in
-          let lv = v::lv_k in
-          let les = es::les_k in
-          let t_args = Array.of_list lt in
-          let v_args = Array.of_list lv in
-          let es_args = Array.of_list les in
-          aux (k+1) lt lv les t_args v_args es_args res)
+          for l = k+1 to max_arity do (* comleting the arrays at position k *)
+            let ts, vs, ess = args_k.(l) in
+            ts.(k) <- t;
+            vs.(k) <- v;
+            ess.(k) <- es
+          done;
+          aux (k+1) res)
         index res
   in
-  aux 0 [] [] [] [||] [||] [||] index
-
+  aux 0 index
 
 (* expr encoding *)
 
