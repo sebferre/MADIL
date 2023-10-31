@@ -20,15 +20,16 @@ type ('typ,'value,'var,'constr,'func) model =
   | Expr of 'typ * ('var,'func) Expr.expr (* not in evaluated model *)
   | Value of 'typ * 'value Ndtree.t (* only in evaluated model *)
 
-type 'constr path =
-  | This
-  | Field of 'constr * int * 'constr path (* Pat field *)
-  | Branch of bool * 'constr path (* Alt branch *)
-  | Head of 'constr path (* Cons head *)
-  | Tail of 'constr path (* Cons tail *)
+type ('var,'constr) path = ('var,'constr) path_step list
+and ('var,'constr) path_step =
+  | Field of 'constr * int (* Pat field *)
+  | Branch of bool (* Alt branch *)
+  | Head (* Cons head *)
+  | Tail (* Cons tail *)
+  | Alias of 'var * ('var,'constr) path (* named path, reverse path *)
 
-type 'constr ctx = 'constr path -> 'constr path
-let ctx0 : _ ctx = (fun p -> p)
+let p0 : ('var,'constr) path = [] (* the empty path = This *)
+let ctx0 : ('var,'constr) path = [] (* a context is a reverse path *)
 
 let make_def (x : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Def (x,m1)
@@ -162,29 +163,36 @@ let xp_pat_default
   )
 
 let xp_path
+      ~(xp_var : 'var html_xp)
       ~(xp_field : ('constr * int) html_xp)
-    : 'constr path html_xp =
+    : ('var,'constr) path html_xp =
   let rec aux ~html print p =
     match p with
-    | This -> ()
-    | Field (c,i,p1) ->
+    | [] -> ()
+    | Tail::p1 ->
+       aux_tail ~html print 1 p1
+    | step::p1 ->
+       aux_step ~html print step;
+       aux ~html print p1
+  and aux_step ~html print step =
+    match step with
+    | Field (c,i) ->
        print#string ".";
-       xp_field ~html print (c,i);
-       aux ~html print p1
-    | Branch (b,p1) ->
-       print#string (if b then "#true" else "#false");
-       aux ~html print p1
-    | Head p1 ->
-       xp_index ~html print 0;
-       aux ~html print p1
-    | Tail p1 ->
-       xp_tail ~html print 1 p1
-  and xp_tail ~html print i = function
-    | Head p1 ->
+       xp_field ~html print (c,i)
+    | Branch b ->
+       print#string (if b then "#true" else "#false")
+    | Head ->
+       xp_index ~html print 0
+    | Tail -> assert false
+    | Alias (x,_p) ->
+       print#string " ";
+       xp_var ~html print x
+  and aux_tail ~html print i = function
+    | Head::p1 ->
        xp_index ~html print i;
        aux ~html print p1
-    | Tail p1 ->
-       xp_tail ~html print (i+1) p1
+    | Tail::p1 ->
+       aux_tail ~html print (i+1) p1
     | p1 ->
        xp_slice ~html print i;
        aux ~html print p1
@@ -779,51 +787,34 @@ let write
 
   
 (* paths and model refinement *)
-
-let reverse_path (p : 'constr path) : 'constr path =
-  let rec aux = function
-    | This -> (fun rp -> rp)
-    | Field (c,i,p1) ->
-       let ctx1 = aux p1 in
-       (fun rp -> ctx1 (Field (c,i,rp)))
-    | Branch (b,p1) ->
-       let ctx1 = aux p1 in
-       (fun rp -> ctx1 (Branch (b,rp)))
-    | Head p1 ->
-       let ctx1 = aux p1 in
-       (fun rp -> ctx1 (Head rp))
-    | Tail p1 ->
-       let ctx1 = aux p1 in
-       (fun rp -> ctx1 (Tail rp))
-  in
-  let ctx = aux p in
-  ctx This       
   
 let refine (* replace submodel of [m] at [p] by [r] *) 
-    : 'constr path -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
+    : ('var,'constr) path -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
   let rec aux p r m =
     match p, m with
     | _, Def (x,m1) ->
        let new_m1 = aux p r m1 in
-       Def (x,new_m1)
-    | This, _ -> r
-    | Field (c,i,p1), Pat (t,c',args) when c = c' && i < Array.length args ->
+       Def (x,new_m1) 
+    | Alias (x,p0) :: p1, _ ->
+       aux (List.rev_append p0 p1) r m
+    | [], _ -> r
+    | Field (c,i) :: p1, Pat (t,c',args) when c = c' && i < Array.length args ->
        let new_args = Array.copy args in
        new_args.(i) <- aux p1 r args.(i);
        Pat (t, c, new_args)
-    | Branch (true,p1), Alt (xc,c,m1,m2) ->
+    | Branch true :: p1, Alt (xc,c,m1,m2) ->
        let new_m1 = aux p1 r m1 in
        Alt (xc,c,new_m1,m2)
-    | Branch (false,p1), Alt (xc,c,m1,m2) ->
+    | Branch false :: p1, Alt (xc,c,m1,m2) ->
        let new_m2 = aux p1 r m2 in
        Alt (xc,c,m1,new_m2)
     | _, Loop m1 ->
        let new_m1 = aux p r m1 in
        Loop new_m1
-    | Head p1, Cons (m0,m1) ->
+    | Head :: p1, Cons (m0,m1) ->
        let new_m0 = aux p1 r m0 in
        Cons (new_m0,m1)
-    | Tail p1, Cons (m0,m1) ->
+    | Tail :: p1, Cons (m0,m1) ->
        let new_m1 = aux p1 r m1 in
        Cons (m0,new_m1)
     | _ -> assert false

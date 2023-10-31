@@ -46,7 +46,7 @@ module type TYPES =
     type data = (value,dconstr) Data.data
     val xp_data : data html_xp
               
-    type path = constr Model.path
+    type path = (var,constr) Model.path
     val xp_path : path html_xp
 
     type varseq = var Myseq.t
@@ -100,8 +100,8 @@ module Defined_types (T : BASIC_TYPES) =
     type data = (value,dconstr) Data.data
     let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dpat
                                
-    type path = constr Model.path
-    let xp_path : path html_xp = Model.xp_path ~xp_field
+    type path = (var,constr) Model.path
+    let xp_path : path html_xp = Model.xp_path ~xp_var ~xp_field
 
     type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars

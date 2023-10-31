@@ -191,7 +191,7 @@ type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   (('typ,'value,'var,'constr,'func) Model.model as 'model) ->
   'var Myseq.t -> (* fresh variables viz the model *)
   ('typ,'value,'dconstr,'var,'func) Model.read list list
-  -> ('constr Model.path (* refinement location *)
+  -> (('var,'constr) Model.path (* refinement location *)
       * 'model (* refined submodel *)
       * int (* support *)
       * dl (* new DL *)
@@ -218,12 +218,12 @@ let refinements
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   fun ~nb_env_vars ~dl_M m0 varseq0 reads ->
   let aux_gen (type r)
-        ctx m selected_reads
+        ctx (* reverse path *) m selected_reads
         (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
         ?(make_cons : (r -> 'model -> 'varseq -> r * 'varseq) option)
         (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
-    let p = ctx Model.This in (* local path *)
+    let p = List.rev ctx in (* local path *)
     let dl_m = dl_model ~nb_env_vars m in
     let rec read_refs_cons (read,data) = (* to handle the insertion of Cons (_,_) *)
       let refs = read_refs (read,data) in
@@ -269,6 +269,7 @@ let refinements
   else
     match m with
     | Model.Def (x,m1) ->
+       let ctx = [Model.Alias (x,ctx)] in
        aux ctx m1 selected_reads
     | Model.Pat (t,c,args) ->
        Myseq.interleave
@@ -277,7 +278,7 @@ let refinements
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
-                   let ctxi = (fun p1 -> ctx (Model.Field (c,i,p1))) in
+                   let ctxi = Model.Field (c,i)::ctx in
                    aux ctxi mi
                      (map_reads
                         (function
@@ -300,7 +301,7 @@ let refinements
             | True | False -> assert false
             | BoolExpr _ -> Myseq.empty);
            
-           (let ctx1 = (fun p1 -> ctx (Model.Branch (true,p1))) in
+           (let ctx1 = Model.Branch true :: ctx in
             let sel1 =
               filter_map_reads
                 (function
@@ -312,7 +313,7 @@ let refinements
                 selected_reads in
             aux ctx1 m1 sel1);
                         
-           (let ctx2 = (fun p1 -> ctx (Model.Branch (false,p1))) in
+           (let ctx2 = Model.Branch false :: ctx in
             let sel2 =
               filter_map_reads
                 (function
@@ -333,7 +334,7 @@ let refinements
     | Model.Nil t -> Myseq.empty
     | Model.Cons (m0,m1) ->
        Myseq.interleave
-         [ (let ctx0 = (fun p1 -> ctx (Model.Head p1)) in
+         [ (let ctx0 = Model.Head :: ctx in
             let sel0 =
               map_reads_ndtree
                 (fun data ->
@@ -343,7 +344,7 @@ let refinements
                 selected_reads in
             aux ctx0 m0 sel0);
 
-           (let ctx1 = (fun p1 -> ctx (Model.Tail p1)) in
+           (let ctx1 = Model.Tail :: ctx in
             let sel1 =
               map_reads_ndtree
                 (fun data ->

@@ -192,8 +192,8 @@ let apply
   
 type ('typ,'value,'var,'constr,'func) refinement =
   | RInit
-  | Rinput of 'constr path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
-  | Routput of 'constr path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Rinput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Routput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
 
 let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
@@ -201,7 +201,7 @@ let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = fu
   | Routput (_,_,supp,_) -> supp             
 
 let xp_refinement
-      ~(xp_path : 'constr path html_xp)
+      ~(xp_path : ('var,'constr) path html_xp)
       ~(xp_model : ('typ,'value,'var,'constr,'func) model html_xp)
     : ('typ,'value,'var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
@@ -213,11 +213,11 @@ let xp_refinement
       print#string (Printf.sprintf " (~%.3f) " dl'); *)
     if supp <> 0 (* undefined value *) then
       aux_support ~html print supp;
-    xp_html_elt "span" ~classe:"model-refinement" ~html print
-      (fun () -> xp_model ~html print r);
-    print#string " → ";
     print#string in_out;
-    xp_path ~html print p    
+    xp_path ~html print p;
+    print#string " ← "; (* → *)
+    xp_html_elt "span" ~classe:"model-refinement" ~html print
+      (fun () -> xp_model ~html print r)
   and aux_support ~html print supp =
     print#string " #"; print#int supp; print#string " "
   in
