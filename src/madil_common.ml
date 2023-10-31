@@ -154,6 +154,9 @@ let pp_endline xp x =
   pp xp x;
   print_newline ()
 
+let to_string (xp : 'a html_xp) (x : 'a) : string =
+  Xprint.to_string (xp ~html:false) x
+  
 let xp_newline : unit html_xp =
   fun ~html print () ->
   if html

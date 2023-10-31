@@ -52,6 +52,7 @@ module type TYPES =
     type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars
     type bindings = (var,typ,value) Expr.bindings
+    val xp_bindings : bindings html_xp
           
     type expr = (var,func) Expr.expr
     val xp_expr : expr html_xp
@@ -75,6 +76,7 @@ module type TYPES =
     type parseur = (input,value,dconstr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
+    val xp_expr_index : expr_index html_xp
 
     type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 
@@ -104,6 +106,7 @@ module Defined_types (T : BASIC_TYPES) =
     type varseq = var Myseq.t
     type binding_vars = var Expr.binding_vars
     type bindings = (var,typ,value) Expr.bindings
+    let xp_bindings : bindings html_xp = Expr.xp_bindings ~xp_var ~xp_typ ~xp_value
           
     type expr = (var,func) Expr.expr
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
@@ -127,6 +130,7 @@ module Defined_types (T : BASIC_TYPES) =
     type parseur = (input,value,dconstr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
+    let xp_expr_index : expr_index html_xp = Expr.Index.xp ~xp_typ ~xp_value ~xp_var ~xp_func
 
     type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 

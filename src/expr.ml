@@ -35,6 +35,24 @@ let xp_expr
   Xprint.bracket ("{","}") (aux ~html)
     print e
 
+let xp_bindings
+      ~(xp_var : 'var html_xp)
+      ~(xp_typ : 'typ html_xp)
+      ~(xp_value : 'value html_xp)
+    : ('var,'typ,'value) bindings html_xp =
+  fun ~html print bindings ->
+  print#string "BINDINGS";
+  xp_newline ~html print ();
+  Mymap.iter
+    (fun x (t,v_tree) ->
+      xp_var ~html print x;
+      print#string " : ";
+      xp_typ ~html print t;
+      print#string " = ";
+      Ndtree.xp ~xp_elt:xp_value ~html print v_tree;
+      xp_newline ~html print ())
+    bindings
+  
 (* expression evaluation *)
 
 let eval
@@ -63,6 +81,7 @@ let eval
 module type EXPRSET =
   sig
     type ('var,'func) t
+    val xp : xp_var:'var html_xp -> xp_func:'func html_xp -> ('var,'func) t html_xp
     val to_seq : ('var,'func) t -> ('var,'func) expr Myseq.t
     val mem : ('var,'func) expr -> ('var,'func) t -> bool
     val empty : ('var,'func) t
@@ -80,6 +99,8 @@ and ('var,'func) item =
   | SArg
   | SFun of ('var,'func) t
 
+let xp ~xp_var ~xp_func ~html print es = raise TODO
+          
 let rec to_seq (es : ('var,'func) t) : ('var,'func) expr Myseq.t =
   let* item = Myseq.from_list es in
   item_to_seq item
@@ -147,14 +168,14 @@ and item_inter (item1 : ('var,'func) item) (item2 : ('var,'func) item) : ('var,'
 
   end
 
-module Exprset : EXPRSET =
+module Exprset_new : EXPRSET =
   struct
     type ('var,'func) t =
       { refs : 'var Bintree.t;
         applies : ('func, ('var,'func) t array Bintree.t) Mymap.t;
         args : bool;
         funs : ('var,'func) t option }
-
+      
     let rec to_seq es : ('var,'func) expr Myseq.t =
       Myseq.concat
         [ (let* x = Myseq.from_bintree es.refs in
@@ -177,7 +198,34 @@ module Exprset : EXPRSET =
            let* e = to_seq es1 in
            Myseq.return (Fun e))
         ]
-      
+
+    let xp
+          ~(xp_var : 'var html_xp)
+          ~(xp_func : 'func html_xp)
+        : ('var,'func) t html_xp =
+      let rec aux ~html print es =
+        print#string "[";
+        Bintree.iter
+          (fun x ->
+            xp_var ~html print x;
+            print#string "  ")
+          es.refs;
+        Mymap.iter
+          (fun f es_args_set ->
+            xp_func ~html print f;
+            Bintree.iter
+              (fun es_args ->
+                if es_args <> [||] then
+                  xp_array ~delims:("(",")")
+                    aux
+                    ~html print es_args)
+              es_args_set;
+            print#string "  ")
+          es.applies;
+        print#string "]"
+      in
+      aux
+
     let rec mem e es =
       match e with
       | Ref x -> Bintree.mem x es.refs
@@ -254,11 +302,33 @@ module Exprset : EXPRSET =
            | Some es1, Some es2 -> Some (inter es1 es2)) } 
   end
 
+module Exprset = Exprset_new
+  
 (* indexes : idea inspired from FlashMeta *)
 
 module Index =
   struct
     type ('typ,'value,'var,'func) t = ('typ * 'value Ndtree.t, ('var,'func) Exprset.t) Mymap.t
+
+    let xp
+          ~(xp_typ : 'typ html_xp)
+          ~(xp_value : 'value html_xp)
+          ~(xp_var : 'var html_xp)
+          ~(xp_func : 'func html_xp)
+        : ('typ,'value,'var,'func) t html_xp =
+      let xp_exprset = Exprset.xp ~xp_var ~xp_func in
+      fun ~html print index ->
+      print#string "INDEX";
+      xp_newline ~html print ();
+      Mymap.iter
+        (fun (t,v_tree) es ->
+          xp_typ ~html print t;
+          print#string " ";
+          Ndtree.xp ~xp_elt:xp_value ~html print v_tree;
+          print#string " = ";
+          xp_exprset ~html print es;
+          xp_newline ~html print ())
+        index
 
     let empty = Mymap.empty
                 
@@ -279,6 +349,8 @@ module Index =
     let find_opt = Mymap.find_opt
 
     let fold = Mymap.fold
+
+    let iter = Mymap.iter
                 
     let lookup (tv : 'typ * 'value Ndtree.t) (index : ('typ,'value,'var,'func) t) : ('var,'func) Exprset.t =
       match find_opt tv index with
@@ -304,8 +376,9 @@ let index_apply_functions
         Array.make k (Obj.magic () : 'value Ndtree.t),
         Array.make k (Obj.magic () : ('var,'func) Exprset.t)) in
   let rec aux k res =
-    let t_args_k, v_args_k, es_args_k = args_k.(k) in
     let res = (* generating and applying functions for arity k *)
+      let t_args_k, v_args_k, es_args_k = args_k.(k) in
+      let es_args_k = Array.copy es_args_k in (* because it is inserted into the index *)
       get_functions (t_args_k, v_args_k)
       |> List.fold_left
            (fun res (t,f) ->
@@ -328,6 +401,7 @@ let index_apply_functions
         index res
   in
   aux 0 index
+
 
 (* expr encoding *)
 

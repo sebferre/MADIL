@@ -12,6 +12,24 @@ type 'a t =
   { ndim : int;
     tree: 'a tree }
 
+let xp ~(xp_elt : 'a html_xp) : 'a t html_xp =
+  let rec aux ~html print = function
+    | Scalar x_opt -> aux_elt_opt ~html print x_opt
+    | Vector1 vx ->
+       xp_array ~delims:("<",">") ~sep:" ; "
+         aux_elt_opt
+         ~html print vx
+    | Vector v ->
+       xp_array ~delims:("<",">") ~sep:" ; "
+         aux
+         ~html print v
+  and aux_elt_opt ~html print = function
+    | None -> print#string "-"
+    | Some x -> xp_elt ~html print x
+  in
+  fun ~html print t ->
+  aux ~html print t.tree
+
 exception Wrong_ndim
 exception Undefined (* None *)
 
