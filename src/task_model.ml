@@ -6,11 +6,10 @@ open Model
 (* task models *)
    
 type ('typ,'value,'var,'constr,'func) task_model =
-  { input_model : ('typ,'value,'var,'constr,'func) model; (* no reference *)
-    input_varseq : 'var Myseq.t;
+  { varseq : 'var Myseq.t; (* variable generator *)
+    input_model : ('typ,'value,'var,'constr,'func) model; (* no reference *)
     nb_env_vars : int; (* nb of visible vars in input model *)
     output_model : ('typ,'value,'var,'constr,'func) model;
-    output_varseq : 'var Myseq.t
   }
        
 let xp_task_model
