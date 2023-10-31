@@ -352,7 +352,13 @@ let refinements
                   | Some data1 -> data1
                   | None -> assert false)
                 selected_reads in
-            aux ctx1 m1 sel1) ]
+            aux ctx1 m1 sel1);
+
+           (* pruning Cons *)
+           aux_gen ctx m selected_reads
+             (fun (read, data : _ read) -> [m1, varseq0, data])
+             (fun m' varseq' ~supp ~nb ~alt best_reads ->
+               Myseq.return (m', varseq', best_reads)) ]
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
   and aux_expr ctx m selected_reads =
