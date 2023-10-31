@@ -46,6 +46,7 @@ and arc_suggestion =
   | ResetTask
   | ChangeStage of arc_state
   | RefinedState of arc_state * bool (* compressive *)
+  | FailedRefinement of refinement * exn
 
 type arc_focus = arc_state
                
@@ -92,7 +93,7 @@ object
     k_extent focus;
     if focus.suggestions = [] then (
       Jsutils.firebug "Computing suggestions...";
-      let _, suggestions = (* selecting up to [refine_degree] compressive refinements, keeping other for information *)
+      let _, refinements, errors = (* selecting up to [refine_degree] compressive refinements, keeping other for information *)
         (try
            match focus.stage with
            | Build -> task_refinements focus.model focus.prs focus.dsri focus.dsro
@@ -102,7 +103,7 @@ object
            print_endline (Printexc.to_string exn);
            Myseq.empty)
         |> Myseq.fold_left
-             (fun (quota_compressive,suggestions as res) (r,m) ->
+             (fun (quota_compressive,refinements, errors as res) (r,m) ->
                if quota_compressive <= 0
                then res (* TODO: stop generating sequence *)
                else
@@ -110,11 +111,15 @@ object
                  | Result.Ok state ->
                     let compressive = state.norm_dl < focus.norm_dl in
                     (if compressive then quota_compressive - 1 else quota_compressive),
-                    (compressive,state)::suggestions
-                 | Result.Error _ -> res)
-             (!max_refinements, []) in
-      let suggestions =
-        suggestions
+                    (compressive,state)::refinements,
+                    errors
+                 | Result.Error err ->
+                    quota_compressive,
+                    refinements,
+                    (r,err)::errors)
+             (!max_refinements, [], []) in
+      let refinements =
+        refinements
         |> List.rev (* to preserve ordering from sequence *) 
         |> List.sort (* sorting by decreasing support, then increasing DL *)
              (fun (compr1,s1) (compr2,s2) ->
@@ -130,7 +135,10 @@ object
         :: ResetTask
         :: List.map (fun (compressive,s) ->
                RefinedState ((s :> arc_state), compressive))
-             suggestions
+             refinements
+        @ List.map (fun (r,err) ->
+              FailedRefinement (r,err))
+            errors
         @ (let new_stage =
              match focus.stage with
              | Build -> Prune
@@ -159,6 +167,7 @@ object
        Some (new arc_place lis s)
     | RefinedState (s,_) ->
        Some (new arc_place lis s)
+    | FailedRefinement _ -> None
 
   method abort = ()
 
@@ -235,6 +244,11 @@ let html_of_suggestion ~input_dico = function
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
        (Printf.sprintf "(%f)  " s.norm_dl
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
+  | FailedRefinement (r,err) ->
+     Html.span ~classe:"failed-refinement"
+       ("(ERROR) "
+        ^ Xprint.to_string (xp_refinement ~html) r
+        ^ " | " ^ Jsutils.escapeHTML (Printexc.to_string err))
 
 let html_of_value v =
   Xprint.to_string (xp_value ~html) v
