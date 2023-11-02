@@ -127,12 +127,12 @@ let index (t : 'a t) (is : int option list) : 'a t option =
   let rec aux_ndim ndim is =
     match is with
     | [] -> ndim
-    | (Some _)::is1 -> aux_ndim (ndim-1) is1 (* axis elimination *)
-    | None::is1 -> 1 + aux_ndim (ndim-1) is1 in
+    | (Some _)::is1 -> aux_ndim (max 0 (ndim-1)) is1 (* axis elimination *)
+    | None::is1 -> 1 + aux_ndim (max 0 (ndim-1)) is1 in
   let rec aux_tree tree is =
     match tree, is with
     | _, [] -> tree
-    | Scalar _, _ -> failwith "Ndtree.index: invalid index, too many dims"
+    | Scalar _, _ -> tree (* some form of broadcasting *)
     | Vector1 v, (Some i)::_ ->
        let n = Array.length v in
        if i >= 0 && i < n then Scalar v.(i)
