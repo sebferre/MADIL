@@ -34,7 +34,13 @@ exception Wrong_ndim
 exception Undefined (* None *)
 
 let ndim (t : 'a t) : int = t.ndim [@@inline]
-        
+
+let length (t : 'a t) : int option =
+  match t.tree with
+  | Scalar _ -> None
+  | Vector1 vx -> Some (Array.length vx)
+  | Vector v -> Some (Array.length v)
+                          
 let scalar (x_opt : 'a option) : 'a t =
   { ndim = 0;
     tree = Scalar x_opt} [@@inline]
