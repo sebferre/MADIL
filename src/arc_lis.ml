@@ -368,7 +368,7 @@ let render_place place k =
         (fun sugg ->
           match place#activate sugg with
           | Some p -> k ~push_in_history:true p
-          | None -> assert false) in
+          | None -> Jsutils.alert "This suggestion cannot be activated") in
       w_suggestions#on_suggestion_selection suggestion_handler;
       let _on = Jsutils.toggle_class elt_lis "computing" in (* turn off *)
       ()))

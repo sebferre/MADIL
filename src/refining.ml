@@ -225,17 +225,22 @@ let refinements
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
     let p = List.rev ctx in (* local path *)
     let dl_m = dl_model ~nb_env_vars m in
+    let seq_len_m = Model.seq_length m in
     let rec read_refs_cons (read,data) = (* to handle the insertion of Cons (_,_) *)
       let refs = read_refs (read,data) in
-      match make_cons, Ndtree.head_opt data with
-      | Some make_cons, Some data1 ->
-         List.fold_left
-           (fun refs (m1',varseq1',data1') ->
-             let m', varseq' = make_cons m1' m varseq1' in
-             let data' = Ndtree.replace_head data data1' in
-             (m',varseq',data')::refs)
-           refs (read_refs_cons (read,data1))
-      | _ -> refs
+      match seq_len_m with
+      | Range.Closed _ -> refs (* would entail length inconsistency *)
+      | Range.Open a when a > 0 -> refs (* not preprending Cons *)
+      | _ ->
+         match make_cons, Ndtree.head_opt data with
+         | Some make_cons, Some data1 ->
+            List.fold_left
+              (fun refs (m1',varseq1',data1') ->
+                let m', varseq' = make_cons m1' m varseq1' in
+                let data' = Ndtree.replace_head data data1' in
+                (m',varseq',data')::refs)
+              refs (read_refs_cons (read,data1))
+         | _ -> refs
     in
     let r_best_reads = inter_union_reads read_refs_cons selected_reads in
     let* r, (varseq', best_reads) = Mymap.to_seq r_best_reads in
