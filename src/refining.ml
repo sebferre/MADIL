@@ -355,8 +355,13 @@ let refinements
             aux ctx1 m1 sel1);
 
            (* pruning Cons *)
+           let m0 = Model.undef m0 in
+           let m1 = Model.undef m1 in
            aux_gen ctx m selected_reads
-             (fun (read, data : _ read) -> [m1, varseq0, data])
+             ?make_cons:None
+             (fun (read, data : _ read) ->
+               [m0, varseq0, data; (* for cases where repeated elements *)
+                m1, varseq0, data])
              (fun m' varseq' ~supp ~nb ~alt best_reads ->
                Myseq.return (m', varseq', best_reads)) ]
     | Model.Expr (k,e) -> Myseq.empty
@@ -391,7 +396,8 @@ let refinements
             (fun d -> input_of_value t (Data.value d))
             data in
         match Ndtree.choose data with
-        | None -> []
+        | None ->
+           [Model.make_nil t, varseq0, data] (* maybe end of sequence *)
         | Some d -> (* computing refinements on a sample data *)
            refinements_pat t c args varseq0 d
            |> List.filter_map
@@ -416,7 +422,7 @@ let refinements
           m_new m varseq' best_reads)
   and aux_alt_prune ctx m m1 m2 selected_reads =
     aux_gen ctx m selected_reads
-      ~make_cons
+      ?make_cons:None
       (fun (read, data : _ read) ->
         if Ndtree.for_all_defined
              (function
@@ -455,6 +461,7 @@ let refinements
         else Myseq.empty)
   and aux_alt_cond_undet ctx m xc c m1 m2 selected_reads =
     aux_gen ctx m selected_reads
+      ?make_cons:None
       (fun (read, data : _ read) ->
         let vc_tree =
           Ndtree.map

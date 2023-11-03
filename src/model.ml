@@ -42,6 +42,11 @@ let make_loop (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,
 let make_nil t = Nil t
 let make_cons m0 m1 = Cons (m0,m1)
 
+let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
+  function
+  | Def (_,m) -> m
+  | m -> m
+                    
 let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Def (x,m1) -> typ m1
   | Pat (t,c,args) -> t
@@ -52,7 +57,29 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Cons (m0,m1) -> typ m0
   | Expr (t,e) -> t
   | Value _ -> assert false
-  
+
+let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = function
+  | Def (x,m1) -> seq_length m1
+  | Pat (t,c,args) ->
+     if args = [||]
+     then Range.make_open 0
+     else
+       Array.to_list args
+       |> List.map seq_length
+       |> Range.inter_list
+  | Fail -> Range.make_open 0
+  | Alt (xc,c,m1,m2) ->
+     Range.union (seq_length m1) (seq_length m2)
+  | Loop m1 -> seq_length m1
+  | Nil _ -> Range.make_exact 0
+  | Cons (m0,m1) ->
+     Range.add (Range.make_exact 1) (seq_length m1)
+  | Expr _ -> Range.make_open 0
+  | Value (t,v_tree) ->
+     (match Ndtree.length v_tree with
+      | Some n -> Range.make_exact n
+      | None -> Range.make_open 0)
+             
 (* printing *)
   
 let xp_model
@@ -213,7 +240,7 @@ class virtual ['typ,'constr,'func] asd =
     method virtual expr_opt : 'typ -> 'typ option
     method virtual alt_opt : 'typ -> bool
   end
-        
+
 (* model evaluation *)
 
 let binding_vars
@@ -419,6 +446,7 @@ let generator (* on evaluated models: no expr, no def *)
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
     | Loop m1 ->
+       let seq_len_m1 = seq_length m1 in
        let gen_m1 i = gen (i::rev_is) m1 in
        let rec seq_gen_m1 i info =
          if i < 9 (* TODO: find a better way *)
@@ -439,7 +467,7 @@ let generator (* on evaluated models: no expr, no def *)
          let ds1 = Array.of_list ld1 in
          let n = Array.length ds1 in
          let v = value_of_seq (Array.map Data.value ds1) in
-         Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1))))
+         Myseq.return (D (v, DSeq (n, seq_len_m1, ds1))))
     | Nil t ->
        (fun info ->
          Myseq.empty)
@@ -493,6 +521,7 @@ let parseur (* on evaluated models: no expr, no def *)
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
     | Loop m1 ->
+       let seq_len_m1 = seq_length m1 in
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
          Myseq.return (parse (i::rev_is) m1) in
@@ -500,7 +529,7 @@ let parseur (* on evaluated models: no expr, no def *)
        let ds1 = Array.of_list ld1 in
        let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       Myseq.return (D (v, DSeq (n, Range.make_open 0, ds1)), input)
+       Myseq.return (D (v, DSeq (n, seq_len_m1, ds1)), input)
     | Nil t -> Myseq.empty
     | Cons (m0,m1) ->
        let is = List.rev rev_is in
@@ -513,7 +542,7 @@ let parseur (* on evaluated models: no expr, no def *)
        let is = List.rev rev_is in
        (match Ndtree.lookup v_tree is with
        | Some v -> parseur_value v input
-       | None ->Myseq.empty)
+       | None -> Myseq.empty)
   in
   fun m ?(is = []) input ->
   parse (List.rev is) m input
