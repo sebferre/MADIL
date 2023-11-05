@@ -447,7 +447,21 @@ let generator (* on evaluated models: no expr, no def *)
          Myseq.return (D (v, DAlt (prob, b, d12))))
     | Loop m1 ->
        let seq_len_m1 = seq_length m1 in
-       let gen_m1 i = gen (i::rev_is) m1 in
+       let gen_nil = Myseq.return [] in
+       let rec gen_seq_m1 i info =
+         if i < Range.lower seq_len_m1 then
+           gen_cons i info
+         else if i < (match Range.upper seq_len_m1 with
+                      | None -> 9
+                      | Some b -> min 9 b) then
+           Myseq.if_not_empty_else (gen_cons i info) gen_nil
+         else
+           gen_nil
+       and gen_cons i info =
+         let* di = gen (i::rev_is) m1 info in
+         let* ld = gen_seq_m1 (i+1) info in
+         Myseq.return (di::ld) in
+       (* let gen_m1 i = gen (i::rev_is) m1 in
        let rec seq_gen_m1 i info =
          if i < 9 (* TODO: find a better way *)
          then Myseq.if_not_empty_else
@@ -455,18 +469,13 @@ let generator (* on evaluated models: no expr, no def *)
                  let* ld = seq_gen_m1 (i+1) info in
                  Myseq.return (di::ld))
                 (Myseq.return [])
-         else Myseq.return [] in
-       (*       let gen_m1 i info =
-         let* di = gen (i::rev_is) m1 info in
-         Myseq.return (di, info) in
-       let seq_gen_m1 =
-         let* i = Myseq.counter 0 in
-         Myseq.return (gen_m1 i) in *)
+         else Myseq.return [] in *)
        (fun info ->
-         let* ld1 = seq_gen_m1 0 info in
+         let* ld1 = gen_seq_m1 0 info in
          let ds1 = Array.of_list ld1 in
          let n = Array.length ds1 in
          let v = value_of_seq (Array.map Data.value ds1) in
+         assert (Range.mem n seq_len_m1);
          Myseq.return (D (v, DSeq (n, seq_len_m1, ds1))))
     | Nil t ->
        (fun info ->
@@ -529,7 +538,9 @@ let parseur (* on evaluated models: no expr, no def *)
        let ds1 = Array.of_list ld1 in
        let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       Myseq.return (D (v, DSeq (n, seq_len_m1, ds1)), input)
+       if Range.mem n seq_len_m1
+       then Myseq.return (D (v, DSeq (n, seq_len_m1, ds1)), input)
+       else Myseq.empty (* could not parse the expected number of elements *)
     | Nil t -> Myseq.empty
     | Cons (m0,m1) ->
        let is = List.rev rev_is in
