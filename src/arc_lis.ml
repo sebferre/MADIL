@@ -73,8 +73,8 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
   with exn ->
     print_endline "FAILURE to compute new state for some refinement";
     print_endline (Printexc.to_string exn);
-    print_string "refinement: "; pp xp_refinement refinement;
-    print_string "model: "; pp xp_task_model model;
+    print_string "refinement: "; pp_endline xp_refinement refinement;
+    print_string "model: "; pp_endline xp_task_model model;
     Result.Error exn
                
 let initial_focus (name : string) (task : task) : arc_focus =
