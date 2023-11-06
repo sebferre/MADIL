@@ -12,6 +12,15 @@ type 'a t =
   { ndim : int;
     tree: 'a tree }
 
+let is_well_formed (t : 'a t) : bool =
+  (* checking that the ndtree is well-formed *)
+  let rec aux ndim = function
+    | Scalar x_opt -> ndim=0
+    | Vector1 vx -> ndim=1
+    | Vector v -> Array.for_all (fun ti -> aux (ndim-1) ti) v
+  in
+  aux t.ndim t.tree
+  
 let xp ~(xp_elt : 'a html_xp) : 'a t html_xp =
   let rec aux ~html print = function
     | Scalar x_opt -> aux_elt_opt ~html print x_opt
@@ -156,7 +165,9 @@ let index (t : 'a t) (is : int option list) : 'a t option =
   try
     let ndim = aux_ndim t.ndim is in
     let tree = aux_tree t.tree is in
-    Some { ndim; tree }
+    let t = {ndim; tree} in
+    (*assert (is_well_formed t);*)
+    Some t
   with Not_found -> None
 
 let head_opt (t : 'a t) : 'a t option = (* t[0] *)
@@ -168,7 +179,10 @@ let head_opt (t : 'a t) : 'a t option = (* t[0] *)
      else None
   | Vector v ->
      if v <> [||]
-     then Some {ndim = t.ndim - 1; tree = v.(0)}
+     then
+       let t' = {ndim = t.ndim - 1; tree = v.(0)} in
+       (*assert (is_well_formed t');*)
+       Some t'
      else None
 
 let replace_head (t : 'a t) (t0 : 'a t) : 'a t = (* t[0] <- t0, not in place *)
@@ -183,7 +197,9 @@ let replace_head (t : 'a t) (t0 : 'a t) : 'a t = (* t[0] <- t0, not in place *)
      if v = [||] then failwith "Ndtree.replace_head: empty vector, no head";
      let v' = Array.copy v in
      v'.(0) <- tree0;
-     {ndim = t.ndim; tree = Vector v'}
+     let t' = {ndim = t.ndim; tree = Vector v'} in
+     (*assert (is_well_formed t');*)
+     t'
   | _ -> assert false
   
 let tail_opt  (t : 'a t) : 'a t option = (* t[1:] *)
@@ -197,7 +213,10 @@ let tail_opt  (t : 'a t) : 'a t option = (* t[1:] *)
   | Vector v ->
      let n = Array.length v in
      if n > 0
-     then Some {ndim = t.ndim; tree = Vector (Array.sub v 1 (n-1))}
+     then
+       let t' = {ndim = t.ndim; tree = Vector (Array.sub v 1 (n-1))} in
+       (*assert (is_well_formed t');*)
+       Some t'
      else None
 
                   
@@ -271,7 +290,9 @@ let map_result (f : 'a -> 'b result) (t : 'a t) : 'b t result =
        Result.Ok (Vector v')
   in
   let| tree' = aux t.tree in
-  Result.Ok { t with tree = tree' }
+  let t' = { t with tree = tree' } in
+  (*assert (is_well_formed t');*)
+  Result.Ok t'
 
 let mapi_result (f : int list -> 'a -> 'b result) (t : 'a t) : 'b t result =
   let rec aux rev_is = function
@@ -301,20 +322,33 @@ let mapi_result (f : int list -> 'a -> 'b result) (t : 'a t) : 'b t result =
        Result.Ok (Vector v')
   in
   let| tree' = aux [] t.tree in
-  Result.Ok { t with tree = tree' }
+  let t' = { t with tree = tree' } in
+  (*assert (is_well_formed t');*)
+  Result.Ok t'
 
 let bind (f : 'a option -> 'b t) (t : 'a t) : 'b t =
-  let ndim_incr = ref 0 in
+  let ref_ndim_incr = ref (-1) in (* ndim of f-results, to be defined *)
+  let set_ndim_incr n =
+    let ndim_incr = !ref_ndim_incr in
+    if ndim_incr < 0 then ref_ndim_incr := n
+    else if ndim_incr <> n then failwith "Ndtree.bind: inconsistent ndim of the function results"
+    else () in
+  let f_tree x_opt =
+    let t2 = f x_opt in
+    set_ndim_incr t2.ndim;
+    t2.tree [@@inline] in
   let rec aux = function
-    | Scalar x_opt ->
-       let t = f x_opt in
-       ndim_incr := t.ndim; (* should be constant for all calls to f *)
-       t.tree
-    | Vector1 vx -> pack_tree (Array.map (fun x_opt -> (f x_opt).tree) vx)
+    | Scalar x_opt -> f_tree x_opt
+    | Vector1 [||] -> Vector1 [||]
+    | Vector1 vx -> pack_tree (Array.map f_tree vx)
+    | Vector [||] -> Vector [||]
     | Vector v -> pack_tree (Array.map aux v)
   in
-  let tree = aux t.tree in
-  { ndim = t.ndim + !ndim_incr; tree }
+  let tree = aux t.tree in (* defines ref_ndim_incr *)
+  let ndim = t.ndim + (max 0 !ref_ndim_incr) in
+  let t' = { ndim; tree } in
+  (*assert (is_well_formed t');*)
+  t'
 
 let for_all (f : 'a option -> bool) (t : 'a t) : bool =
   let rec aux = function
@@ -417,7 +451,9 @@ let broadcast_result (f : 'a array -> 'b result) (ts : 'a t array) : 'b t result
                    ts in
                aux ts_i)
              (Array.init size (fun i -> i)) in
-         Result.Ok (pack ts_y)
+         let t_y = pack ts_y in
+         (*assert (is_well_formed t_y);*)
+         Result.Ok t_y
       | None ->
          Result.Error Invalid_broadcast
   in
