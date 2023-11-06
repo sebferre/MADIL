@@ -218,7 +218,7 @@ let refinements
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   fun ~nb_env_vars ~dl_M m0 varseq0 reads ->
   let aux_gen (type r)
-        ctx (* reverse path *) m selected_reads
+        ctx m selected_reads (* ctx is reverse path *)
         (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
         ?(make_cons : (r -> 'model -> 'varseq -> r * 'varseq) option)
         (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
@@ -234,12 +234,14 @@ let refinements
       | _ ->
          match make_cons, Ndtree.head_opt data with
          | Some make_cons, Some data1 ->
-            List.fold_left
-              (fun refs (m1',varseq1',data1') ->
-                let m', varseq' = make_cons m1' m varseq1' in
-                let data' = Ndtree.replace_head data data1' in
-                (m',varseq',data')::refs)
-              refs (read_refs_cons (read,data1))
+            read_refs_cons (read,data1)
+            |> List.fold_left
+                 (fun refs (m1',varseq1',data1') ->
+                   assert (Ndtree.ndim data1' = Ndtree.ndim data1);
+                   let m', varseq' = make_cons m1' m varseq1' in
+                   let data' = Ndtree.replace_head data data1' in
+                   (m',varseq',data')::refs)
+                 refs
          | _ -> refs
     in
     let r_best_reads = inter_union_reads read_refs_cons selected_reads in
@@ -329,7 +331,7 @@ let refinements
                  | _ -> assert false)
                 selected_reads in
             aux ctx2 m2 sel2) ]
-    | Model.Loop m1 ->
+    | Model.Loop m1 -> (* TODO: add exprs *)
        aux ctx m1
          (bind_reads
             (function
@@ -339,7 +341,9 @@ let refinements
     | Model.Nil t -> Myseq.empty
     | Model.Cons (m0,m1) ->
        Myseq.interleave
-         [ (let ctx0 = Model.Head :: ctx in
+         [ aux_expr ctx m selected_reads;
+           
+           (let ctx0 = Model.Head :: ctx in
             let sel0 =
               map_reads_ndtree
                 (fun data ->
@@ -360,13 +364,12 @@ let refinements
             aux ctx1 m1 sel1);
 
            (* pruning Cons *)
-           let m0 = Model.undef m0 in
            let m1 = Model.undef m1 in
            aux_gen ctx m selected_reads
              ?make_cons:None
              (fun (read, data : _ read) ->
-               [m0, varseq0, data; (* for cases where repeated elements *)
-                m1, varseq0, data])
+               [m1, varseq0, data])
+             (* not m0 because it raises ndim errors because scalar becomes vector *)
              (fun m' varseq' ~supp ~nb ~alt best_reads ->
                Myseq.return (m', varseq', best_reads)) ]
     | Model.Expr (k,e) -> Myseq.empty
@@ -378,15 +381,37 @@ let refinements
     | Some t1 ->
        let allowed = asd#alt_opt t in
        aux_gen ctx m selected_reads
-         ~make_cons
+         ?make_cons:None
          (fun (read, data : _ read) ->
            let v_tree = Ndtree.map Data.value data in
-           let es = Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index) in
            let dv_tree = (* new data for an expression *)
              Ndtree.map (fun v -> Data.make_dexpr v) v_tree in
-           Myseq.fold_left
-             (fun rs e -> (Model.Expr (t,e), varseq0, dv_tree) :: rs)
-             [] (Expr.Exprset.to_seq es))
+           let rec aux refs depth ndim v_tree dv_tree dv_trees =
+             (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
+             let es = Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index) in
+             let refs =
+               Myseq.fold_left
+                 (fun refs e ->
+                   let rec aux2 refs me varseq dv_trees_down =
+                     (* for each level, generate e, Cons (e,m), Cons (Cons (e,m), m)... *)
+                     match dv_trees_down with
+                     | [] -> refs
+                     | dv_tree::dv_trees1 ->
+                        let refs = (me,varseq,dv_tree)::refs in
+                        let me_cons, varseq = make_cons me m varseq in
+                        aux2 refs me_cons varseq dv_trees1
+                   in
+                   aux2 refs (Model.make_expr t e) varseq0 (List.rev (dv_tree::dv_trees)))
+                 refs (Expr.Exprset.to_seq es) in
+             if ndim >= 1
+             then
+               match Ndtree.head_opt v_tree, Ndtree.head_opt dv_tree with
+               | Some v_tree_0, Some dv_tree_0 ->
+                  aux refs (depth+1) (ndim-1) v_tree_0 dv_tree_0 (dv_tree::dv_trees)
+               | _ -> (Model.make_nil t, varseq0, dv_tree) :: refs (* empty ndtree *)
+             else refs
+           in
+           aux [] 0 (Ndtree.ndim v_tree) v_tree dv_tree [])
          (fun m_new varseq' ~supp ~nb ~alt best_reads ->
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
@@ -400,7 +425,7 @@ let refinements
           Ndtree.map
             (fun d -> input_of_value t (Data.value d))
             data in
-        match Ndtree.choose data with
+        match Ndtree.choose data with (* should be at index [0] *)
         | None ->
            [Model.make_nil t, varseq0, data] (* maybe end of sequence *)
         | Some d -> (* computing refinements on a sample data *)

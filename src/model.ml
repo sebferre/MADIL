@@ -41,6 +41,7 @@ let make_loop (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,
   Loop m1
 let make_nil t = Nil t
 let make_cons m0 m1 = Cons (m0,m1)
+let make_expr t e = Expr (t,e)
 
 let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
   function
@@ -551,6 +552,7 @@ let parseur (* on evaluated models: no expr, no def *)
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
        let is = List.rev rev_is in
+       assert (List.length is >= Ndtree.ndim v_tree);
        (match Ndtree.lookup v_tree is with
        | Some v -> parseur_value v input
        | None -> Myseq.empty)
