@@ -216,35 +216,21 @@ let refinements
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
+
+  let parse_best m is input =
+    match parse_bests m ~is input with
+    | Result.Ok ((d',dl')::_) -> Result.Ok d'
+    | _ -> Result.Error Not_found
+  in
   fun ~nb_env_vars ~dl_M m0 varseq0 reads ->
   let aux_gen (type r)
         ctx m selected_reads (* ctx is reverse path *)
         (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
-        ?(make_cons : (r -> 'model -> 'varseq -> r * 'varseq) option)
         (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
     let p = List.rev ctx in (* local path *)
     let dl_m = dl_model ~nb_env_vars m in
-    let seq_len_m = Model.seq_length m in
-    let rec read_refs_cons (read,data) = (* to handle the insertion of Cons (_,_) *)
-      let refs = read_refs (read,data) in
-      match seq_len_m with
-      | Range.Closed _ -> refs (* would entail length inconsistency *)
-      | Range.Open a when a > 0 -> refs (* not preprending Cons *)
-      | _ ->
-         match make_cons, Ndtree.head_opt data with
-         | Some make_cons, Some data1 ->
-            read_refs_cons (read,data1)
-            |> List.fold_left
-                 (fun refs (m1',varseq1',data1') ->
-                   assert (Ndtree.ndim data1' = Ndtree.ndim data1);
-                   let m', varseq' = make_cons m1' m varseq1' in
-                   let data' = Ndtree.replace_head data data1' in
-                   (m',varseq',data')::refs)
-                 refs
-         | _ -> refs
-    in
-    let r_best_reads = inter_union_reads read_refs_cons selected_reads in
+    let r_best_reads = inter_union_reads read_refs selected_reads in
     let* r, (varseq', best_reads) = Mymap.to_seq r_best_reads in
     let supp, nb = best_reads_stats best_reads in
     let alt = (supp < nb) in
@@ -366,7 +352,6 @@ let refinements
            (* pruning Cons *)
            let m1 = Model.undef m1 in
            aux_gen ctx m selected_reads
-             ?make_cons:None
              (fun (read, data : _ read) ->
                [m1, varseq0, data])
              (* not m0 because it raises ndim errors because scalar becomes vector *)
@@ -381,7 +366,6 @@ let refinements
     | Some t1 ->
        let allowed = asd#alt_opt t in
        aux_gen ctx m selected_reads
-         ?make_cons:None
          (fun (read, data : _ read) ->
            let v_tree = Ndtree.map Data.value data in
            let dv_tree = (* new data for an expression *)
@@ -418,32 +402,48 @@ let refinements
              m_new m varseq' best_reads)
   and aux_pat ctx m t c args selected_reads =
     let allowed = asd#alt_opt t in
+    let ok_cons =
+      match Model.seq_length m with
+      | Range.Open 0 -> true
+      | _ -> false in (* prepending Cons not safe *)
     aux_gen ctx m selected_reads
-      ~make_cons
       (fun (read, data : _ read) ->
         let input_tree =
           Ndtree.map
             (fun d -> input_of_value t (Data.value d))
             data in
-        match Ndtree.choose data with (* should be at index [0] *)
+        match Ndtree.choose data with (* TODO: should be at index [0,...,0] *)
         | None ->
            [Model.make_nil t, varseq0, data] (* maybe end of sequence *)
         | Some d -> (* computing refinements on a sample data *)
            refinements_pat t c args varseq0 d
-           |> List.filter_map
-                (fun (m',varseq') ->
-                  let data'_res =
-                    let| m' = eval m' read.bindings in
-                    Ndtree.mapi_result
-                      (fun is input ->
-                        let| parse_res = parse_bests m' ~is input in
-                        match parse_res with
-                        | (d',dl')::_ -> Result.Ok d'
-                        | _ -> assert false)
-                      input_tree in
-                  match data'_res with
-                  | Result.Ok data' -> Some (m',varseq',data')
-                  | _ -> None))
+           |> List.fold_left
+                (fun refs (m',varseq') ->
+                  let ref_cons = (* considering the need to nest m' into Cons *)
+                    let| m'_eval = eval m' read.bindings in
+                    let rec aux_cons data input_tree = (* itering through heads of heads *)
+                      let data'_res =
+                        Ndtree.mapi_result
+                          (fun is input -> parse_best m'_eval is input)
+                          input_tree in
+                      match data'_res with
+                      | Result.Ok data' ->
+                         Result.Ok (m',varseq',data') (* could add what follows as an alternative *)
+                      | _ -> (* does not match full sequence, look at head *)
+                         match ok_cons, Ndtree.head_opt data, Ndtree.head_opt input_tree with
+                         | true, Some data1, Some input_tree1 ->
+                            let| m1', varseq1', data1' = aux_cons data1 input_tree1 in
+                            assert (Ndtree.ndim data1' = Ndtree.ndim data1);
+                            let m', varseq' = make_cons m' m varseq' in
+                            let data' = Ndtree.replace_head data data1' in
+                            Result.Ok (m',varseq',data')
+                         | _ -> Result.Error Not_found
+                    in
+                    aux_cons data input_tree in
+                  match ref_cons with (* adding it to refs *)
+                  | Result.Ok ref_cons -> ref_cons::refs
+                  | Result.Error _ -> refs)
+                [])
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         let* m_new, best_reads =
           postprocessing t c args m' ~supp ~nb ~alt best_reads in
@@ -452,7 +452,6 @@ let refinements
           m_new m varseq' best_reads)
   and aux_alt_prune ctx m m1 m2 selected_reads =
     aux_gen ctx m selected_reads
-      ?make_cons:None
       (fun (read, data : _ read) ->
         if Ndtree.for_all_defined
              (function
@@ -491,7 +490,6 @@ let refinements
         else Myseq.empty)
   and aux_alt_cond_undet ctx m xc c m1 m2 selected_reads =
     aux_gen ctx m selected_reads
-      ?make_cons:None
       (fun (read, data : _ read) ->
         let vc_tree =
           Ndtree.map
