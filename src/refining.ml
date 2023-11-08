@@ -212,6 +212,7 @@ let refinements
       ~(eval : 'model -> ('var,'typ,'value) Expr.bindings -> 'model result)
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ?is:(int list) -> ('input,'value,'dconstr) Model.parse_bests)
+      ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'var Myseq.t) list)
       ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
@@ -357,6 +358,14 @@ let refinements
              (* not m0 because it raises ndim errors because scalar becomes vector *)
              (fun m' varseq' ~supp ~nb ~alt best_reads ->
                Myseq.return (m', varseq', best_reads)) ]
+    | Model.Expr (k, Expr.Const (t,v)) ->
+       (* only for pruning, TODO optimize *)
+       aux_gen ctx m selected_reads
+         (fun (read, data : _ read) ->
+           refinements_value t v varseq0
+           |> List.map (fun (m',varseq') -> (m',varseq',data)))
+         (fun m' varseq' ~supp ~nb ~alt best_reads ->
+           Myseq.return (m', varseq', best_reads))
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
   and aux_expr ctx m selected_reads =
@@ -370,9 +379,15 @@ let refinements
            let v_tree = Ndtree.map Data.value data in
            let dv_tree = (* new data for an expression *)
              Ndtree.map (fun v -> Data.make_dexpr v) v_tree in
-           let rec aux refs depth ndim v_tree dv_tree dv_trees =
+           let rec aux refs depth ndim v_tree dv_tree dv_trees = (* TODO: rationalize along with equivalent process in aux_pat *)
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
-             let es = Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index) in
+             let s_expr = (* index expressions evaluating to v_tree *)
+               Expr.Exprset.to_seq
+                 (Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index)) in
+             let s_expr = (* is v_tree a constant ndtree? *)
+               match Ndtree.is_constant v_tree with
+               | None -> s_expr
+               | Some vc -> Myseq.cons (Expr.Const (t1,vc)) s_expr in
              let refs =
                Myseq.fold_left
                  (fun refs e ->
@@ -386,7 +401,7 @@ let refinements
                         aux2 refs me_cons varseq dv_trees1
                    in
                    aux2 refs (Model.make_expr t e) varseq0 (List.rev (dv_tree::dv_trees)))
-                 refs (Expr.Exprset.to_seq es) in
+                 refs s_expr in
              if ndim >= 1
              then
                match Ndtree.head_opt v_tree, Ndtree.head_opt dv_tree with

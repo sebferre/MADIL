@@ -2,13 +2,21 @@
 open Madil_common
 open Data
 
-type ('var,'func) expr =
-  | Ref of 'var
-  | Apply of 'func * ('var,'func) expr array
-  | Arg (* implicit unique argument of functions *)
-  | Fun of ('var,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
+type ('typ,'value,'var,'func) expr =
+  | Const of 'typ * 'value
+  | Ref of 'typ * 'var
+  | Apply of 'typ * 'func * ('typ,'value,'var,'func) expr array
+  | Arg of 'typ (* implicit unique argument of functions *)
+  | Fun of 'typ (* arg type *) * ('typ,'value,'var,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
 (* TODO: add indexing construct for ndtree values ? with exprs for the ndtree and the indexes ? *)
 
+let typ : ('typ,'value,'var,'func) expr -> 'typ = function
+  | Const (t,v) -> t
+  | Ref (t,x) -> t
+  | Apply (t,f,args) -> t
+  | Arg t -> t
+  | Fun (t,e) -> raise TODO (* functional type: t -> typ(e) *)
+         
 type 'var binding_vars = 'var Bintree.t
 let binding_vars0 = Bintree.empty
 
@@ -16,20 +24,22 @@ type ('var,'typ,'value) bindings = ('var, 'typ * 'value Ndtree.t) Mymap.t
 let bindings0 = Mymap.empty
 
 let xp_expr
+      ~(xp_value : 'value html_xp)
       ~(xp_var : 'var html_xp)
       ~(xp_func : 'func html_xp)
-    : ('var,'func) expr html_xp =
+    : ('typ,'value,'var,'func) expr html_xp =
   let rec aux ~html print e =
     match e with
-    | Ref x -> xp_var ~html print x
-    | Apply (f,args) ->
+    | Const (t,v) -> xp_value ~html print v
+    | Ref (t,x) -> xp_var ~html print x
+    | Apply (t,f,args) ->
        xp_func ~html print f;
        if args <> [||] then
          Xprint.bracket ("(",")")
            (Xprint.sep_array ", " (aux ~html))
            print args
-    | Arg -> print#string "_"
-    | Fun e1 -> print#string "fun { "; aux ~html print e1; print#string " }"
+    | Arg t -> print#string "_"
+    | Fun (t,e1) -> print#string "fun { "; aux ~html print e1; print#string " }"
   in
   fun ~html print e ->
   Xprint.bracket ("{","}") (aux ~html)
@@ -59,19 +69,21 @@ let eval
       ~(eval_unbound_var : 'var -> 'value Ndtree.t result) (* ex: return some null value, or fail *)
       ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
       ~(eval_arg : unit -> 'value Ndtree.t result) (* the value should be the identity function *)
-      (e : ('var,'func) expr) (bindings : ('var,'typ,'value) bindings)
+      (e : ('typ,'value,'var,'func) expr) (bindings : ('var,'typ,'value) bindings)
     : 'value Ndtree.t result =
   let rec aux e =
     match e with
-    | Ref x ->
+    | Const (t,v) ->
+       Result.Ok (Ndtree.scalar (Some v))
+    | Ref (t,x) ->
        (match Mymap.find_opt x bindings with
         | Some (t,v) -> Result.Ok v
         | None -> eval_unbound_var x)
-    | Apply (f,args) ->
+    | Apply (t,f,args) ->
        let| lv = list_map_result aux (Array.to_list args) in
        eval_func f (Array.of_list lv)
-    | Arg -> eval_arg ()
-    | Fun e1 -> aux e1
+    | Arg t -> eval_arg ()
+    | Fun (t,e1) -> aux e1
   in
   aux e
 
@@ -80,32 +92,37 @@ let eval
 
 module type EXPRSET =
   sig
-    type ('var,'func) t
-    val xp : xp_var:'var html_xp -> xp_func:'func html_xp -> ('var,'func) t html_xp
-    val to_seq : ('var,'func) t -> ('var,'func) expr Myseq.t
-    val mem : ('var,'func) expr -> ('var,'func) t -> bool
-    val empty : ('var,'func) t
-    val add_ref : 'var -> ('var,'func) t -> ('var,'func) t
-    val add_apply : 'func -> ('var,'func) t array -> ('var,'func) t -> ('var,'func) t
+    type ('typ,'value,'var,'func) t
+    val xp : xp_value:'value html_xp -> xp_var:'var html_xp -> xp_func:'func html_xp -> ('typ,'value,'var,'func) t html_xp
+    val to_seq : ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) expr Myseq.t
+    val mem : ('typ,'value,'var,'func) expr -> ('typ,'value,'var,'func) t -> bool
+    val empty : 'typ -> ('typ,'value,'var,'func) t
+    val value : 'typ -> 'value -> ('typ,'value,'var,'func) t
+    val add_const : 'value -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
+    val add_ref : 'var -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
+    val add_apply : 'func -> ('typ,'value,'var,'func) t array -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
   end
-  
+
+(* DEPRECATED
 module Exprset_old : EXPRSET =
   struct
   
-type ('var,'func) t = ('var,'func) item list
-and ('var,'func) item =
+type ('typ,'value,'var,'func) t = ('typ,'value,'var,'func) item list
+and ('typ,'value,'var,'func) item =
+  | SConst of 'value
   | SRef of 'var
-  | SApply of 'func * ('var,'func) t array
+  | SApply of 'func * ('typ,'value,'var,'func) t array
   | SArg
-  | SFun of ('var,'func) t
+  | SFun of ('typ,'value,'var,'func) t
 
-let xp ~xp_var ~xp_func ~html print es = raise TODO
+let xp ~xp_value ~xp_var ~xp_func ~html print es = raise TODO
           
-let rec to_seq (es : ('var,'func) t) : ('var,'func) expr Myseq.t =
+let rec to_seq (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
   let* item = Myseq.from_list es in
   item_to_seq item
-and item_to_seq : ('var,'func) item -> ('var,'func) expr Myseq.t =
+and item_to_seq : ('typ,'value,'var,'func) item -> ('typ,'value,'var,'func) expr Myseq.t =
   function
+  | SConst v -> Myseq.return (Const v)
   | SRef x -> Myseq.return (Ref x)
   | SApply (f,es_args) ->
      let seq_args = Array.map to_seq es_args in
@@ -117,10 +134,11 @@ and item_to_seq : ('var,'func) item -> ('var,'func) expr Myseq.t =
      let* e1 = to_seq es1 in
      Myseq.return (Fun e1)
 
-let rec mem (e : ('var,'func) expr) (es : ('var,'func) t) : bool =
+let rec mem (e : ('typ,'value,'var,'func) expr) (es : ('typ,'value,'var,'func) t) : bool =
   List.exists (item_mem e) es
 and item_mem e item =
   match e, item with
+  | Const v, SConst w -> v=w 
   | Ref x, SRef y -> x=y
   | Apply (f,args), SApply (g,es_args) ->
      f = g
@@ -130,18 +148,21 @@ and item_mem e item =
   | Fun e, SFun es -> mem e es
   | _ -> false
 
-let empty : ('var,'func) t = []
+let empty : ('typ,'value,'var,'func) t = []
        
-let add_ref (x : 'var) (es : ('var,'func) t) : ('var,'func) t =
+let add_const (v : 'value) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+  SConst v :: es
+
+let add_ref (x : 'var) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
   SRef x :: es
 
-let add_apply (f : 'func) (es_args : ('var,'func) t array) (es : ('var,'func) t) : ('var,'func) t =
+let add_apply (f : 'func) (es_args : ('typ,'value,'var,'func) t array) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
   SApply (f,es_args) :: es
 
-let union (es1 : ('var,'func) t) (es2 : ('var,'func) t) : ('var,'func) t =
+let union (es1 : ('typ,'value,'var,'func) t) (es2 : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
   List.rev_append es1 es2
   
-let rec inter (es1 : ('var,'func) t) (es2 : ('var,'func) t) : ('var,'func) t =
+let rec inter (es1 : ('typ,'value,'var,'func) t) (es2 : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
   List.fold_left
     (fun res item1 ->
       List.fold_left
@@ -151,8 +172,9 @@ let rec inter (es1 : ('var,'func) t) (es2 : ('var,'func) t) : ('var,'func) t =
           | Some item -> item::res)
         res es2)
     [] es1
-and item_inter (item1 : ('var,'func) item) (item2 : ('var,'func) item) : ('var,'func) item option =
+and item_inter (item1 : ('typ,'value,'var,'func) item) (item2 : ('typ,'value,'var,'func) item) : ('typ,'value,'var,'func) item option =
   match item1, item2 with
+  | SConst v1, SConst v2 when v1 = v2 -> Some (SConst v1)
   | SRef x1, SRef x2 when x1 = x2 -> Some (SRef x1)
   | SApply (f1,es_args1), SApply (f2,es_args2) when f1 = f2 ->
      let es_args = Array.map2 inter es_args1 es_args2 in
@@ -167,21 +189,28 @@ and item_inter (item1 : ('var,'func) item) (item2 : ('var,'func) item) : ('var,'
   | _ -> None
 
   end
-
+ *)
+  
 module Exprset_new : EXPRSET =
   struct
-    type ('var,'func) t =
-      { refs : 'var Bintree.t;
-        applies : ('func, ('var,'func) t array Bintree.t) Mymap.t;
+    type ('typ,'value,'var,'func) t =
+      { typ : 'typ;
+        consts : 'value Bintree.t;
+        refs : 'var Bintree.t;
+        applies : ('func, ('typ,'value,'var,'func) t array Bintree.t) Mymap.t;
         args : bool;
-        funs : ('var,'func) t option }
+        funs : ('typ,'value,'var,'func) t option }
       
-    let rec to_seq es : ('var,'func) expr Myseq.t =
+    let rec to_seq es : ('typ,'value,'var,'func) expr Myseq.t =
+      let t = es.typ in
       Myseq.concat
-        [ (let* x = Myseq.from_bintree es.refs in
-           Myseq.return (Ref x));
+        [ (let* v = Myseq.from_bintree es.consts in
+           Myseq.return (Const (t,v)));
 
-          (if es.args then Myseq.return Arg
+          (let* x = Myseq.from_bintree es.refs in
+           Myseq.return (Ref (t,x)));
+
+          (if es.args then Myseq.return (Arg t)
            else Myseq.empty);
           
           (Myseq.interleave
@@ -191,20 +220,26 @@ module Exprset_new : EXPRSET =
                   let seq_args = Array.map to_seq es_args in
                   let* l_args = Myseq.product_fair (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
                   let args = Array.of_list l_args in
-                  Myseq.return (Apply (f,args)))
+                  Myseq.return (Apply (t,f,args)))
                 (Mymap.bindings es.applies)));
           
-          (let* es1 = Myseq.from_option es.funs in
+          (* let* es1 = Myseq.from_option es.funs in
            let* e = to_seq es1 in
-           Myseq.return (Fun e))
+           Myseq.return (Fun (t_arg,e) *) (* needs to decompose t as (t_arg -> es1.typ) *) 
         ]
 
     let xp
+          ~(xp_value : 'value html_xp)
           ~(xp_var : 'var html_xp)
           ~(xp_func : 'func html_xp)
-        : ('var,'func) t html_xp =
+        : ('typ,'value,'var,'func) t html_xp =
       let rec aux ~html print es =
         print#string "[";
+        Bintree.iter
+          (fun v ->
+            xp_value ~html print v;
+            print#string "  ")
+          es.consts;
         Bintree.iter
           (fun x ->
             xp_var ~html print x;
@@ -227,9 +262,11 @@ module Exprset_new : EXPRSET =
       aux
 
     let rec mem e es =
+      (* assuming compatible type *)
       match e with
-      | Ref x -> Bintree.mem x es.refs
-      | Apply (f,args) ->
+      | Const (t,v) -> Bintree.mem v es.consts
+      | Ref (t,x) -> Bintree.mem x es.refs
+      | Apply (t,f,args) ->
          (match Mymap.find_opt f es.applies with
           | None -> false
           | Some es_args_set ->
@@ -238,17 +275,25 @@ module Exprset_new : EXPRSET =
                  Array.length args = Array.length es_args
                  && Array.for_all2 mem args es_args)
                es_args_set)
-      | Arg -> es.args
-      | Fun e ->
+      | Arg t -> es.args
+      | Fun (t,e) ->
          (match es.funs with
           | None -> false
           | Some es1 -> mem e es1)
 
-    let empty =
-      { refs = Bintree.empty;
+    let empty t =
+      { typ = t;
+        consts = Bintree.empty;
+        refs = Bintree.empty;
         applies = Mymap.empty;
         args = false;
         funs = None }
+
+    let add_const v es =
+      { es with
+        consts = Bintree.add v es.consts }
+
+    let value t v = add_const v (empty t) [@@inline]
 
     let add_ref x es =
       { es with
@@ -264,7 +309,10 @@ module Exprset_new : EXPRSET =
             es.applies }
 
     let rec union es1 es2 =
-      { refs = Bintree.union es1.refs es2.refs;
+      assert (es1.typ = es2.typ);
+      { typ = es1.typ;
+        consts = Bintree.union es1.consts es2.consts;
+        refs = Bintree.union es1.refs es2.refs;
         applies =
           Mymap.merge
             (fun f es_args_set1_opt es_args_set2_opt ->
@@ -283,7 +331,10 @@ module Exprset_new : EXPRSET =
            | Some es1, Some es2 -> Some (union es1 es2)) } 
                   
     let rec inter es1 es2 =
-      { refs = Bintree.inter es1.refs es2.refs;
+      assert (es1.typ = es2.typ);
+      { typ = es1.typ;
+        consts = Bintree.inter es1.consts es2.consts;
+        refs = Bintree.inter es1.refs es2.refs;
         applies =
           Mymap.merge
             (fun f es_args_set1_opt es_args_set2_opt ->
@@ -308,7 +359,7 @@ module Exprset = Exprset_new
 
 module Index =
   struct
-    type ('typ,'value,'var,'func) t = ('typ * 'value Ndtree.t, ('var,'func) Exprset.t) Mymap.t
+    type ('typ,'value,'var,'func) t = ('typ * 'value Ndtree.t, ('typ,'value,'var,'func) Exprset.t) Mymap.t
 
     let xp
           ~(xp_typ : 'typ html_xp)
@@ -316,7 +367,7 @@ module Index =
           ~(xp_var : 'var html_xp)
           ~(xp_func : 'func html_xp)
         : ('typ,'value,'var,'func) t html_xp =
-      let xp_exprset = Exprset.xp ~xp_var ~xp_func in
+      let xp_exprset = Exprset.xp ~xp_value ~xp_var ~xp_func in
       fun ~html print index ->
       print#string "INDEX";
       xp_newline ~html print ();
@@ -335,14 +386,14 @@ module Index =
     let bind_ref (tv : 'typ * 'value Ndtree.t) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
       Mymap.update tv
         (function
-         | None -> Some (Exprset.add_ref x Exprset.empty)
+         | None -> Some (Exprset.add_ref x (Exprset.empty (fst tv)))
          | Some es -> Some (Exprset.add_ref x es))
         index
       
-    let bind_apply (tv : 'typ * 'value Ndtree.t) (f : 'func) (es_args : ('var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t = (* QUICK *)
+    let bind_apply (tv : 'typ * 'value Ndtree.t) (f : 'func) (es_args : ('typ,'value,'var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t = (* QUICK *)
       Mymap.update tv
         (function
-         | None -> Some (Exprset.add_apply f es_args Exprset.empty)
+         | None -> Some (Exprset.add_apply f es_args (Exprset.empty (fst tv)))
          | Some es -> Some (Exprset.add_apply f es_args es))
         index
       
@@ -352,9 +403,9 @@ module Index =
 
     let iter = Mymap.iter
                 
-    let lookup (tv : 'typ * 'value Ndtree.t) (index : ('typ,'value,'var,'func) t) : ('var,'func) Exprset.t =
+    let lookup (tv : 'typ * 'value Ndtree.t) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) Exprset.t =
       match find_opt tv index with
-      | None -> Exprset.empty
+      | None -> Exprset.empty (fst tv)
       | Some exprs -> exprs
   end
            
@@ -367,23 +418,23 @@ let index_apply_functions
       ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
       index
       (max_arity : int)
-      (get_functions : 'typ array * 'value Ndtree.t array -> ('typ * 'func) list)
+      (get_functions : 'typ array * 'value Ndtree.t array * (('typ,'value,'var,'func) Exprset.t array as 'args) -> ('typ * 'func * 'args) list)
     : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   let args_k =
     Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
       (fun k -> (* three undefined arrays for types, values, and exprsets *)
         Array.make k (Obj.magic () : 'typ),
         Array.make k (Obj.magic () : 'value Ndtree.t),
-        Array.make k (Obj.magic () : ('var,'func) Exprset.t)) in
+        Array.make k (Obj.magic () : ('typ,'value,'var,'func) Exprset.t)) in
   let rec aux k res =
     let res = (* generating and applying functions for arity k *)
       let t_args_k, v_args_k, es_args_k = args_k.(k) in
       let es_args_k = Array.copy es_args_k in (* because it is inserted into the index *)
-      get_functions (t_args_k, v_args_k)
+      get_functions (t_args_k, v_args_k, es_args_k)
       |> List.fold_left
-           (fun res (t,f) ->
+           (fun res (t,f,es_args) ->
              match eval_func f v_args_k with
-             | Result.Ok v -> Index.bind_apply (t,v) f es_args_k res
+             | Result.Ok v -> Index.bind_apply (t,v) f es_args res
              | Result.Error _ -> res)
            res in
     if k >= max_arity
@@ -406,12 +457,13 @@ let index_apply_functions
 (* expr encoding *)
 
 let size_expr_ast (* for DL computing *)
-    : ('var,'func) expr -> int =
+    : ('typ,'value,'var,'func) expr -> int =
   let rec aux = function
-    | Ref x -> 1
-    | Apply (f,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
-    | Arg -> 1
-    | Fun e1 -> 1 + aux e1
+    | Const (t,v) -> 1
+    | Ref (t,x) -> 1
+    | Apply (t,f,args) -> Array.fold_left (fun res arg -> res + aux arg) 1 args
+    | Arg t -> 1
+    | Fun (t,e1) -> 1 + aux e1
   in
   aux
 
@@ -424,9 +476,9 @@ let nb_expr_ast (* for DL computing *)
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
     | None -> (* QUICK *)
-       let nb = (* counting Ref *)
+       let nb = (* counting Const and Ref *)
          if size = 1
-         then 1.
+         then 2. (* Const or Ref *)
          else 0. in
        let nb = (* counting Apply-s *)
          List.fold_left
@@ -445,17 +497,19 @@ let nb_expr_ast (* for DL computing *)
   aux, reset
   
 let dl_expr_params
-      ~(dl_func_params : 'func -> dl)
-      ~(dl_var : 'var -> dl)
-    : ('var,'func) expr -> dl =
+      ~(dl_value : 'typ -> 'value -> dl)
+      ~(dl_var : 'typ -> 'var -> dl)
+      ~(dl_func_params : 'typ -> 'func -> dl)
+    : ('typ,'value,'var,'func) expr -> dl =
   let rec aux = function
-    | Ref x -> dl_var x
-    | Apply (f,args) ->
+    | Const (t,v) -> dl_value t v
+    | Ref (t,x) -> dl_var t x
+    | Apply (t,f,args) ->
        let dl_args_params =
          Array.map aux args
          |> Array.fold_left (+.) 0. in
-       dl_func_params f +. dl_args_params
-    | Arg -> 0.
-    | Fun e1 -> aux e1
+       dl_func_params t f +. dl_args_params
+    | Arg t -> 0.
+    | Fun (t,e1) -> aux e1
   in
   aux

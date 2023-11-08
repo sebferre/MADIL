@@ -3,21 +3,21 @@ open Madil_common
 open Ndtree.Operators
 open Data
 
-type ('var,'func) cond_model =
+type ('typ,'value,'var,'func) cond_model =
   | Undet of float (* undetermined condition, probability for left choice *)
   | True (* always true condition - only in evaluated model *)
   | False (* always false condition - only in evaluated model *)
-  | BoolExpr of ('var,'func) Expr.expr (* computed condition - not in evaluated model *)
+  | BoolExpr of ('typ,'value,'var,'func) Expr.expr (* computed condition - not in evaluated model *)
  
 type ('typ,'value,'var,'constr,'func) model =
   | Def of 'var * ('typ,'value,'var,'constr,'func) model (* a var is an id for the value at this sub-model - not in evaluated model *)
   | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Fail (* like an empty alternative - only in evaluated model *)
-  | Alt of 'var (* condition var *) * ('var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
+  | Alt of 'var (* condition var *) * ('typ,'value,'var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
   | Loop of ('typ,'value,'var,'constr,'func) model
   | Nil of 'typ
   | Cons of ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
-  | Expr of 'typ * ('var,'func) Expr.expr (* not in evaluated model *)
+  | Expr of 'typ * ('typ,'value,'var,'func) Expr.expr (* not in evaluated model *)
   | Value of 'typ * 'value Ndtree.t (* only in evaluated model *)
 
 type ('var,'constr) path = ('var,'constr) path_step list
@@ -35,7 +35,7 @@ let make_def (x : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'v
   Def (x,m1)
 let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) model array) : ('typ,'value,'var,'constr,'func) model =
   Pat (t,c,args)
-let make_alt (xc : 'var) (cond : ('var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
+let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Alt (xc,cond,m1,m2)
 let make_loop (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Loop m1
@@ -84,6 +84,7 @@ let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = functio
 (* printing *)
   
 let xp_model
+      ~(xp_value : 'value html_xp)
       ~(xp_var : 'var html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
       ~(xp_func : 'func html_xp)
@@ -157,7 +158,7 @@ let xp_model
     | Expr (_t,e) ->
        xp_html_elt "span" ~classe:"model-expr" ~html print
          (fun () ->
-           Expr.xp_expr ~xp_var ~xp_func ~html print e)
+           Expr.xp_expr ~xp_value ~xp_var ~xp_func ~html print e)
     | Value _ -> assert false
   and aux_cond ~html print = function
     | Undet prob ->
@@ -166,7 +167,7 @@ let xp_model
     | False -> assert false
     | BoolExpr e ->
        xp_html_elt "span" ~classe:"model-expr" ~html print
-         (fun () -> Expr.xp_expr ~xp_var ~xp_func ~html print e)
+         (fun () -> Expr.xp_expr ~xp_value ~xp_var ~xp_func ~html print e)
   and aux_prob ~html print prob =
     let p1 = int_of_float (prob *. 10.) in
     let p2 = 10 - p1 in
@@ -353,7 +354,7 @@ exception EmptyAlt
   
 let eval (* from model to evaluated model: resolving expr, ignoring def *)
       ~asd
-      ~(eval_expr : ('var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
+      ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
       ~(bool_of_value : 'value -> bool result)
       (m : ('typ,'value,'var,'constr,'func) model)
       (bindings : ('var,'typ,'value) Expr.bindings)
@@ -685,12 +686,13 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
   aux, reset
 
 let dl_model_params
+      ~(dl_value : 'typ -> 'value -> dl)
+      ~(dl_var : 'typ -> 'var -> dl)
       ~(dl_constr_params : 'typ -> 'constr -> dl)
-      ~(dl_func_params : 'func -> dl)
-      ~(dl_var : 'var -> dl)
+      ~(dl_func_params : 'typ -> 'func -> dl)
     : ('typ,'value,'var,'constr,'func) model -> dl =
   let dl_expr_params =
-    Expr.dl_expr_params ~dl_func_params ~dl_var in
+    Expr.dl_expr_params ~dl_value ~dl_var ~dl_func_params in
   let rec aux = function
     | Def (x,m1) -> aux m1 (* variable names do not matter, only variable choice in expr matters *)
     | Pat (t,c,args) ->
@@ -716,8 +718,8 @@ let dl_model_params
 let dl
       ~(size_model_ast : ('typ,'value,'var,'constr,'func) model -> int)
       ~(nb_model_ast : 'typ -> int -> float)
-      ~(dl_model_params : dl_var:('var -> dl) -> ('typ,'value,'var,'constr,'func) model -> dl)
-      ~(dl_var : nb_env_vars:int -> 'var -> dl) =
+      ~(dl_model_params : dl_var:('typ -> 'var -> dl) -> ('typ,'value,'var,'constr,'func) model -> dl)
+      ~(dl_var : nb_env_vars:int -> 'typ -> 'var -> dl) =
   fun
     ~(nb_env_vars : int)
     (m : ('typ,'value,'var,'constr,'func) model) -> (* QUICK *)

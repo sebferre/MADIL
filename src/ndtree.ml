@@ -367,6 +367,14 @@ let for_all_defined (f : 'a -> bool) (t : 'a t) : bool =
   in
   aux t.tree
 
+let is_constant (t : 'a t) : 'a option =
+  match choose t with
+  | None -> None
+  | Some x ->
+     if for_all_defined (fun y -> y = x) t
+     then Some x
+     else None
+
 let all_same_size_or_one (ts : 'a t array) : int option =
   Array.fold_left
     (fun size_opt t ->

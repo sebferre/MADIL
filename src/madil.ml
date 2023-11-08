@@ -54,7 +54,7 @@ module type TYPES =
     type bindings = (var,typ,value) Expr.bindings
     val xp_bindings : bindings html_xp
           
-    type expr = (var,func) Expr.expr
+    type expr = (typ,value,var,func) Expr.expr
     val xp_expr : expr html_xp
 
     type model = (typ,value,var,constr,func) Model.model
@@ -108,11 +108,11 @@ module Defined_types (T : BASIC_TYPES) =
     type bindings = (var,typ,value) Expr.bindings
     let xp_bindings : bindings html_xp = Expr.xp_bindings ~xp_var ~xp_typ ~xp_value
           
-    type expr = (var,func) Expr.expr
-    let xp_expr : expr html_xp = Expr.xp_expr ~xp_var ~xp_func
+    type expr = (typ,value,var,func) Expr.expr
+    let xp_expr : expr html_xp = Expr.xp_expr ~xp_value ~xp_var ~xp_func
 
     type model = (typ,value,var,constr,func) Model.model
-    let xp_model : model html_xp = Model.xp_model ~xp_var ~xp_pat ~xp_func
+    let xp_model : model html_xp = Model.xp_model ~xp_value ~xp_var ~xp_pat ~xp_func
 
     type asd = (typ,constr,func) Model.asd
 
@@ -180,9 +180,10 @@ module type DOMAIN =
     val encoding_expr_value : value -> encoding
     val dl_of_encoding : encoding -> dl
 
+    val dl_value : typ -> value -> dl
+    val dl_var : nb_env_vars:int -> typ -> var -> dl
     val dl_constr_params : typ -> constr -> dl
-    val dl_func_params : func -> dl
-    val dl_var : nb_env_vars:int -> var -> dl
+    val dl_func_params : typ -> func -> dl
       
     (* expression index *)
 
@@ -193,6 +194,7 @@ module type DOMAIN =
     val refinements_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq) list
     val refinements_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
+    val prunings_value : typ -> value -> varseq -> (model * varseq) list
     val prunings_pat : typ -> constr -> model array -> varseq -> data -> (model * varseq) list
     val prunings_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
@@ -273,6 +275,7 @@ module Make (Domain : DOMAIN) =
           ~nb_expr_ast in
       let dl_model_params =
         Model.dl_model_params
+          ~dl_value
           ~dl_constr_params
           ~dl_func_params in
       Model.dl
@@ -317,6 +320,7 @@ module Make (Domain : DOMAIN) =
         ~eval
         ~input_of_value
         ~parse_bests
+        ~refinements_value:(fun t v varseq -> []) (* TODO: is a custom definition useful? *)
         ~refinements_pat
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
@@ -333,6 +337,7 @@ module Make (Domain : DOMAIN) =
         ~eval
         ~input_of_value
         ~parse_bests
+        ~refinements_value:prunings_value
         ~refinements_pat:prunings_pat
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
