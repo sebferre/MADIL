@@ -372,7 +372,7 @@ let refinements
     let t = Model.typ m in
     match asd#expr_opt t with
     | None -> Myseq.empty (* no expression here *)
-    | Some t1 ->
+    | Some (t1,const_ok) ->
        let allowed = asd#alt_opt t in
        aux_gen ctx m selected_reads
          (fun (read, data : _ read) ->
@@ -385,9 +385,11 @@ let refinements
                Expr.Exprset.to_seq
                  (Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index)) in
              let s_expr = (* is v_tree a constant ndtree? *)
-               match Ndtree.is_constant v_tree with
-               | None -> s_expr
-               | Some vc -> Myseq.cons (Expr.Const (t1,vc)) s_expr in
+               if const_ok then
+                 match Ndtree.is_constant v_tree with
+                 | Some vc -> Myseq.cons (Expr.Const (t1,vc)) s_expr
+                 | None -> s_expr
+               else s_expr in
              let refs =
                Myseq.fold_left
                  (fun refs e ->

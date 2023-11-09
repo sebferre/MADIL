@@ -414,11 +414,15 @@ let index_add_bindings index (bindings : ('var,'typ,'value) bindings) : ('typ,'v
     (fun x tv res -> Index.bind_ref tv x res)
     bindings index
 
+type ('typ,'value) args_spec =
+  [ `Default
+  | `Custom of [`Pos of int | `Val of 'typ * 'value] array ]
+  
 let index_apply_functions
       ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
       index
       (max_arity : int)
-      (get_functions : 'typ array * 'value Ndtree.t array * (('typ,'value,'var,'func) Exprset.t array as 'args) -> ('typ * 'func * 'args) list)
+      (get_functions : 'typ array * 'value Ndtree.t array -> ('typ * 'func * ('typ,'value) args_spec) list)
     : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   let args_k =
     Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
@@ -430,10 +434,29 @@ let index_apply_functions
     let res = (* generating and applying functions for arity k *)
       let t_args_k, v_args_k, es_args_k = args_k.(k) in
       let es_args_k = Array.copy es_args_k in (* because it is inserted into the index *)
-      get_functions (t_args_k, v_args_k, es_args_k)
+      get_functions (t_args_k, v_args_k)
       |> List.fold_left
-           (fun res (t,f,es_args) ->
-             match eval_func f v_args_k with
+           (fun res (t,f,args_spec) ->
+             let v_args, es_args =
+               match args_spec with
+               | `Default -> v_args_k, es_args_k
+               | `Custom ar ->
+                  let v_args =
+                    Array.map
+                      (function
+                       | `Pos i ->
+                          if not (i>=0 && i < k) then failwith "Expr.index_apply_functions: invalid position in args_spec";
+                          v_args_k.(i)
+                       | `Val (t,v) -> Ndtree.scalar (Some v))
+                      ar in
+                  let es_args =
+                    Array.map
+                      (function
+                       | `Pos i -> es_args_k.(i)
+                       | `Val (t,v) -> Exprset.value t v)
+                      ar in
+                  v_args, es_args in
+             match eval_func f v_args with
              | Result.Ok v -> Index.bind_apply (t,v) f es_args res
              | Result.Error _ -> res)
            res in

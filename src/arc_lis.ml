@@ -337,10 +337,12 @@ let render_place place k =
   in
  Jsutils.jquery "#lis-suggestions" (fun elt_lis ->
   let> _ = Jsutils.toggle_class elt_lis "computing" in (* turn on *)
+  Jsutils.firebug "Displaying the new model...";   
   let xml = xml_of_focus place#focus in
   w_focus#set_syntax xml;
   place#eval
     (fun ext ->
+      Jsutils.firebug "Displaying the examples...";
       let l_bindings =
         List.map
           (fun pair ->
@@ -363,6 +365,7 @@ let render_place place k =
           ext.task.train ext.prs.reads l_bindings in
       w_results#set_contents cols l_bindings)
     (fun suggestions ->
+      Jsutils.firebug "Displaying the refinements...";
       w_suggestions#set_suggestions ["col-md-12 col-xs-12"] suggestions;
       let suggestion_handler =
         (fun sugg ->
@@ -370,6 +373,7 @@ let render_place place k =
           | Some p -> k ~push_in_history:true p
           | None -> Jsutils.alert "This suggestion cannot be activated") in
       w_suggestions#on_suggestion_selection suggestion_handler;
+      Jsutils.firebug "DONE";
       let _on = Jsutils.toggle_class elt_lis "computing" in (* turn off *)
       ()))
 

@@ -155,6 +155,8 @@ let xp_model
                xp_html_elt "span" ~classe:"model-meta-operator" ~html print
                  (fun () -> print#string "; ");
                aux ~html ~prio_ctx:1 print m1))
+    | Expr (_, Expr.Const (_,v)) ->
+       xp_value ~html print v
     | Expr (_t,e) ->
        xp_html_elt "span" ~classe:"model-expr" ~html print
          (fun () ->
@@ -239,7 +241,7 @@ class virtual ['typ,'constr,'func] asd =
     method virtual is_default_constr : 'constr -> bool
     method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * ('typ * int) array) list (* the int is the ndim of the field *)
     method virtual funcs : 'typ -> ('func * 'typ array) list (* None when expressions not allowed for this type *)
-    method virtual expr_opt : 'typ -> 'typ option
+    method virtual expr_opt : 'typ -> ('typ * bool) option (* bool for Const-ok? *)
     method virtual alt_opt : 'typ -> bool
   end
 
@@ -639,7 +641,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
        let nb = (* counting possible expressions *)
          match asd#expr_opt t with
          | None -> nb
-         | Some t1 -> nb +. nb_expr_ast t1 size in
+         | Some (t1, _const_ok) -> nb +. nb_expr_ast t1 size in
        let nb = (* counting possible alternatives *)
          if size >= size_alt && asd#alt_opt t
          then nb +. sum_conv [aux_cond; aux t; aux t] (size - size_alt)
