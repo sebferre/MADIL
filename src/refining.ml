@@ -432,8 +432,7 @@ let refinements
             (fun d -> input_of_value t (Data.value d))
             data in
         match Ndtree.choose data with (* TODO: should be at index [0,...,0] *)
-        | None ->
-           [Model.make_nil t, varseq0, data] (* maybe end of sequence *)
+        | None -> []
         | Some d -> (* computing refinements on a sample data *)
            refinements_pat t c args varseq0 d
            |> List.fold_left
