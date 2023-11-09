@@ -36,10 +36,8 @@ let read_pairs
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
-               lazy_index:(('typ,'value,'var,'func) Expr.Index.t Lazy.t) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
-      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)
       
       ~(pruning : bool)
       ~(env : 'data)
@@ -59,7 +57,6 @@ let read_pairs
                   ~dl_assuming_contents_known:pruning
                   ~env
                   ~bindings:Expr.bindings0
-                  ~lazy_index:(lazy Expr.Index.empty)
                   m.input_model input)
                (fun ri ->
                  let bindings = get_bindings m.input_model ri.data in
@@ -68,8 +65,6 @@ let read_pairs
                      ~dl_assuming_contents_known:false
                      ~env:ri.data
                      ~bindings
-                     ~lazy_index:(lazy (Common.prof "Task_model.read_pairs/make_index" (fun () ->
-                                            make_index bindings)))
                      m.output_model output in
                  Myseq.return (ri, ro, ri.dl +. ro.dl)) in
            if input_reads = [] (* implies pair_reads = [] *)
@@ -150,7 +145,6 @@ let apply
       ~(read : dl_assuming_contents_known:bool ->
                env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
-               lazy_index:(('typ,'value,'var,'func) Expr.Index.t Lazy.t) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value ->
                ('typ,'value,'dconstr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
@@ -165,7 +159,7 @@ let apply
       ~size1:max_nb_reads ~size2:max_nb_writes
       (read
          ~dl_assuming_contents_known:true
-         ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
+         ~env ~bindings:Expr.bindings0
          m.input_model v_i)
       (fun read_i ->
         let data_i = read_i.data in

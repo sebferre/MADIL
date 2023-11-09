@@ -320,6 +320,7 @@ module Make (Domain : DOMAIN) =
         ~eval
         ~input_of_value
         ~parse_bests
+        ~make_index
         ~refinements_value:(fun t v varseq -> []) (* TODO: is a custom definition useful? *)
         ~refinements_pat
         ~postprocessing:refinements_postprocessing
@@ -337,6 +338,7 @@ module Make (Domain : DOMAIN) =
         ~eval
         ~input_of_value
         ~parse_bests
+        ~make_index
         ~refinements_value:prunings_value
         ~refinements_pat:prunings_pat
         ~postprocessing:prunings_postprocessing
@@ -357,7 +359,6 @@ module Make (Domain : DOMAIN) =
         ~dl_task_model
         ~read
         ~get_bindings
-        ~make_index
 
     let apply =
       Task_model.apply

@@ -101,7 +101,7 @@ let score_learned_model
                  Myseq.take (!max_nb_reads)
                    (read
                       ~dl_assuming_contents_known:false
-                      ~env ~bindings:Expr.bindings0 ~lazy_index:(lazy Expr.Index.empty)
+                      ~env ~bindings:Expr.bindings0
                       m.Task_model.input_model input) in
                if input_reads = []
                then Result.Error Not_found

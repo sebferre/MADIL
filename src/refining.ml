@@ -212,6 +212,7 @@ let refinements
       ~(eval : 'model -> ('var,'typ,'value) Expr.bindings -> 'model result)
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ?is:(int list) -> ('input,'value,'dconstr) Model.parse_bests)
+      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'var Myseq.t) list)
       ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
@@ -383,7 +384,8 @@ let refinements
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
              let s_expr = (* index expressions evaluating to v_tree *)
                Expr.Exprset.to_seq
-                 (Expr.Index.lookup (t1, v_tree) (Lazy.force read.lazy_index)) in
+                 (Expr.Index.lookup (t1, v_tree)
+                    (Model.force_index ~make_index read)) in
              let s_expr = (* is v_tree a constant ndtree? *)
                if const_ok then
                  match Ndtree.is_constant v_tree with
@@ -514,7 +516,9 @@ let refinements
            | Data.D (v, DAlt (_prob, b, d12)) -> value_of_bool b
            | _ -> assert false)
           data in
-        let es : _ Expr.Exprset.t = Expr.Index.lookup (typ_bool, vc_tree) (Lazy.force read.lazy_index) in
+        let es : _ Expr.Exprset.t =
+          Expr.Index.lookup (typ_bool, vc_tree)
+            (Model.force_index ~make_index read) in
         let new_data = (* new data *)
           Ndtree.map
             (function

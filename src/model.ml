@@ -740,10 +740,22 @@ let dl
 type ('typ,'value,'dconstr,'var,'func) read =
   { env : ('value,'dconstr) data;
     bindings : ('var,'typ,'value) Expr.bindings;
-    lazy_index : ('typ,'value,'var,'func) Expr.Index.t Lazy.t;
+    mutable lazy_index : ('typ,'value,'var,'func) Expr.Index.t option; (* not using Lazy.t because breaks comparisons and hash *)
     data : ('value,'dconstr) data;
     dl : dl }
 
+let force_index
+      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)
+      (read : ('typ,'value,'dconstr,'var,'func) read)
+    : ('typ,'value,'var,'func) Expr.Index.t =
+  match read.lazy_index with
+  | Some index -> index
+  | None ->
+     let index = Common.prof "Model.make_index" (fun () ->
+                     make_index read.bindings) in
+     read.lazy_index <- Some index;
+     index [@@inline]
+  
 (* let limit_dl ~(max_parse_dl_factor : float) (f_dl : 'a -> dl) (l : 'a list) : 'a list = (* QUICK *)
   match l with
   | [] -> []
@@ -794,7 +806,6 @@ let read
       ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('var,'typ,'value) Expr.bindings)
-      ~(lazy_index : ('typ,'value,'var,'func) Expr.Index.t Lazy.t)
       (m0 : ('typ,'value,'var,'constr,'func) model)
       (v : 'value)
     : ('typ,'value,'dconstr,'var,'func) read Myseq.t =
@@ -809,7 +820,7 @@ let read
     if dl_assuming_contents_known
     then dl_rank
     else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
-  Myseq.return { env; bindings; lazy_index; data; dl })
+  Myseq.return { env; bindings; lazy_index=None; data; dl })
 
 
 (* writing *)
