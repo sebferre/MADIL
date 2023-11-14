@@ -335,7 +335,8 @@ let main () : unit =
 	    (List.length task.Task.test);
           process_task
             name task
-            count sum_ms
+            count sum_ms;
+          reset_memoization ()
         );
        rank-1)
       nb_tasks !names in
