@@ -241,7 +241,7 @@ class virtual ['typ,'constr,'func] asd =
     method virtual is_default_constr : 'constr -> bool
     method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * ('typ * int) array) list (* the int is the ndim of the field *)
     method virtual funcs : 'typ -> ('func * 'typ array) list (* None when expressions not allowed for this type *)
-    method virtual expr_opt : 'typ -> ('typ * bool) option (* bool for Const-ok? *)
+    method virtual expr_opt : 'typ -> bool * 'typ list (* OK to produce constant values, and list of compatible types  *)
     method virtual alt_opt : 'typ -> bool
   end
 
@@ -639,9 +639,10 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
     | None -> (* QUICK *)
        let nb = 0. in
        let nb = (* counting possible expressions *)
-         match asd#expr_opt t with
-         | None -> nb
-         | Some (t1, _const_ok) -> nb +. nb_expr_ast t1 size in
+         let const_ok, ts1 = asd#expr_opt t in
+         List.fold_left (* not sure this is best to sum over all ts1 if they share a lot *)
+           (fun nb t1 -> nb +. nb_expr_ast t1 size)
+           nb ts1 in
        let nb = (* counting possible alternatives *)
          if size >= size_alt && asd#alt_opt t
          then nb +. sum_conv [aux_cond; aux t; aux t] (size - size_alt)

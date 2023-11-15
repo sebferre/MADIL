@@ -372,8 +372,8 @@ let refinements
   and aux_expr ctx m selected_reads =
     let t = Model.typ m in
     match asd#expr_opt t with
-    | None -> Myseq.empty (* no expression here *)
-    | Some (t1,const_ok) ->
+    | false, [] -> Myseq.empty (* no expression here *)
+    | const_ok, ts1 ->
        let allowed = asd#alt_opt t in
        aux_gen ctx m selected_reads
          (fun (read, data : _ read) ->
@@ -383,13 +383,14 @@ let refinements
            let rec aux refs depth ndim v_tree dv_tree dv_trees = (* TODO: rationalize along with equivalent process in aux_pat *)
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
              let s_expr = (* index expressions evaluating to v_tree *)
+               let* t1 = Myseq.from_list ts1 in
                Expr.Exprset.to_seq
                  (Expr.Index.lookup (t1, v_tree)
                     (Model.force_index ~make_index read)) in
              let s_expr = (* is v_tree a constant ndtree? *)
                if const_ok then
                  match Ndtree.is_constant v_tree with
-                 | Some vc -> Myseq.cons (Expr.Const (t1,vc)) s_expr
+                 | Some vc -> Myseq.cons (Expr.Const (t,vc)) s_expr
                  | None -> s_expr
                else s_expr in
              let refs =
