@@ -76,7 +76,7 @@ module type TYPES =
     type parseur = (input,value,dconstr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
-    val xp_expr_index : expr_index html_xp
+    val xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp
 
     type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 
@@ -130,7 +130,7 @@ module Defined_types (T : BASIC_TYPES) =
     type parseur = (input,value,dconstr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
-    let xp_expr_index : expr_index html_xp = Expr.Index.xp ~xp_typ ~xp_value ~xp_var ~xp_func
+    let xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp = Expr.Index.xp ~xp_typ ~xp_value ~xp_var ~xp_func
 
     type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 

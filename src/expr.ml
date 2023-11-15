@@ -308,15 +308,15 @@ module Exprset_new : EXPRSET =
              | Some es_args_set -> Some (Bintree.add es_args es_args_set))
             es.applies }
 
-    let rec union es1 es2 =
+    let rec union es1 es2 = (* not used, not tested *)
       assert (es1.typ = es2.typ);
       { typ = es1.typ;
         consts = Bintree.union es1.consts es2.consts;
         refs = Bintree.union es1.refs es2.refs;
         applies =
           Mymap.merge
-            (fun f es_args_set1_opt es_args_set2_opt ->
-              match es_args_set1_opt, es_args_set2_opt with
+            (fun f es_args_s1_opt es_args_s2_opt ->
+              match es_args_s1_opt, es_args_s2_opt with
               | None, None -> assert false
               | Some s1, None -> Some s1
               | None, Some s2 -> Some s2
@@ -330,19 +330,23 @@ module Exprset_new : EXPRSET =
            | Some es1, None -> Some es1
            | Some es1, Some es2 -> Some (union es1 es2)) } 
                   
-    let rec inter es1 es2 =
+    let rec inter es1 es2 = (* not used, not tested *)
       assert (es1.typ = es2.typ);
       { typ = es1.typ;
         consts = Bintree.inter es1.consts es2.consts;
         refs = Bintree.inter es1.refs es2.refs;
         applies =
           Mymap.merge
-            (fun f es_args_set1_opt es_args_set2_opt ->
-              match es_args_set1_opt, es_args_set2_opt with
+            (fun f es_args_s1_opt es_args_s2_opt ->
+              match es_args_s1_opt, es_args_s2_opt with
               | None, None -> assert false
               | Some s1, None -> None
               | None, Some s2 -> None
-              | Some s1, Some s2 -> Some (Bintree.inter s1 s2))
+              | Some s1, Some s2 ->
+                 let s = Bintree.inter s1 s2 in
+                 if Bintree.is_empty s
+                 then None
+                 else Some s)
             es1.applies es2.applies;
         args = es1.args && es2.args;
         funs =
@@ -366,19 +370,22 @@ module Index =
           ~(xp_value : 'value html_xp)
           ~(xp_var : 'var html_xp)
           ~(xp_func : 'func html_xp)
-        : ('typ,'value,'var,'func) t html_xp =
+        : ?on_typ:('typ -> bool) -> ('typ,'value,'var,'func) t html_xp =
       let xp_exprset = Exprset.xp ~xp_value ~xp_var ~xp_func in
-      fun ~html print index ->
+      fun ?(on_typ : 'typ -> bool = fun _ -> true)
+          ~html print index ->
       print#string "INDEX";
       xp_newline ~html print ();
       Mymap.iter
         (fun (t,v_tree) es ->
-          xp_typ ~html print t;
-          print#string " ";
-          Ndtree.xp ~xp_elt:xp_value ~html print v_tree;
-          print#string " = ";
-          xp_exprset ~html print es;
-          xp_newline ~html print ())
+          if on_typ t then (
+            xp_typ ~html print t;
+            print#string " ";
+            Ndtree.xp ~xp_elt:xp_value ~html print v_tree;
+            print#string " = ";
+            xp_exprset ~html print es;
+            xp_newline ~html print ()
+        ))
         index
 
     let empty = Mymap.empty
