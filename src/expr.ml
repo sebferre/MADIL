@@ -107,7 +107,9 @@ module type EXPRSET =
 module Exprset_old : EXPRSET =
   struct
   
-type ('typ,'value,'var,'func) t = ('typ,'value,'var,'func) item list
+type ('typ,'value,'var,'func) t =
+  { typ : 'typ;
+    items : ('typ,'value,'var,'func) item list }
 and ('typ,'value,'var,'func) item =
   | SConst of 'value
   | SRef of 'var
@@ -118,47 +120,50 @@ and ('typ,'value,'var,'func) item =
 let xp ~xp_value ~xp_var ~xp_func ~html print es = raise TODO
           
 let rec to_seq (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
-  let* item = Myseq.from_list es in
-  item_to_seq item
-and item_to_seq : ('typ,'value,'var,'func) item -> ('typ,'value,'var,'func) expr Myseq.t =
+  let* item = Myseq.from_list es.items in
+  item_to_seq es.typ item
+and item_to_seq t : ('typ,'value,'var,'func) item -> ('typ,'value,'var,'func) expr Myseq.t =
   function
-  | SConst v -> Myseq.return (Const v)
-  | SRef x -> Myseq.return (Ref x)
+  | SConst v -> Myseq.return (Const (t,v))
+  | SRef x -> Myseq.return (Ref (t,x))
   | SApply (f,es_args) ->
      let seq_args = Array.map to_seq es_args in
      let* l_args = Myseq.product (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
      let args = Array.of_list l_args in
-     Myseq.return (Apply (f,args))
-  | SArg -> Myseq.return Arg
+     Myseq.return (Apply (t,f,args))
+  | SArg -> Myseq.return (Arg t)
   | SFun es1 ->
      let* e1 = to_seq es1 in
-     Myseq.return (Fun e1)
+     Myseq.return (Fun (t,e1))
 
 let rec mem (e : ('typ,'value,'var,'func) expr) (es : ('typ,'value,'var,'func) t) : bool =
-  List.exists (item_mem e) es
+  List.exists (item_mem e) es.items
 and item_mem e item =
   match e, item with
-  | Const v, SConst w -> v=w 
-  | Ref x, SRef y -> x=y
-  | Apply (f,args), SApply (g,es_args) ->
+  | Const (t,v), SConst w -> v=w 
+  | Ref (t,x), SRef y -> x=y
+  | Apply (t,f,args), SApply (g,es_args) ->
      f = g
      && Array.length args = Array.length es_args
      && Array.for_all2 mem args es_args
-  | Arg, SArg -> true
-  | Fun e, SFun es -> mem e es
+  | Arg t, SArg -> true
+  | Fun (t,e), SFun es -> mem e es
   | _ -> false
 
-let empty : ('typ,'value,'var,'func) t = []
+let empty t : ('typ,'value,'var,'func) t = { typ = t; items = [] }
        
 let add_const (v : 'value) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
-  SConst v :: es
+  { es with items = SConst v :: es.items }
 
+let value t v = add_const v (empty t) [@@inline]
+  
 let add_ref (x : 'var) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
-  SRef x :: es
+  { es with items = SRef x :: es.items }
 
 let add_apply (f : 'func) (es_args : ('typ,'value,'var,'func) t array) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
-  SApply (f,es_args) :: es
+  { es with items = SApply (f,es_args) :: es.items }
 
+(*  
 let union (es1 : ('typ,'value,'var,'func) t) (es2 : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
   List.rev_append es1 es2
   
@@ -187,7 +192,8 @@ and item_inter (item1 : ('typ,'value,'var,'func) item) (item2 : ('typ,'value,'va
       | [] -> None
       | es -> Some (SFun es))
   | _ -> None
-
+ *)
+  
   end
  *)
   
@@ -234,7 +240,7 @@ module Exprset_new : EXPRSET =
           ~(xp_func : 'func html_xp)
         : ('typ,'value,'var,'func) t html_xp =
       let rec aux ~html print es =
-        print#string "[";
+        print#string "{";
         Bintree.iter
           (fun v ->
             xp_value ~html print v;
@@ -257,7 +263,7 @@ module Exprset_new : EXPRSET =
               es_args_set;
             print#string "  ")
           es.applies;
-        print#string "]"
+        print#string "}"
       in
       aux
 
