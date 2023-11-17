@@ -375,12 +375,14 @@ let refinements
     | false, [] -> Myseq.empty (* no expression here *)
     | const_ok, ts1 ->
        let allowed = asd#alt_opt t in
+       let m_is_nil_or_cons =
+         match m with
+         | Model.Nil _ | Model.Cons _ -> true
+         | _ -> false in
        aux_gen ctx m selected_reads
          (fun (read, data : _ read) ->
            let v_tree = Ndtree.map Data.value data in
-           let dv_tree = (* new data for an expression *)
-             Ndtree.map (fun v -> Data.make_dexpr v) v_tree in
-           let rec aux refs depth ndim v_tree dv_tree dv_trees = (* TODO: rationalize along with equivalent process in aux_pat *)
+           let rec aux refs depth ndim v_tree d_tree d_trees =
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
              let s_expr = (* index expressions evaluating to v_tree *)
                let* t1 = Myseq.from_list ts1 in
@@ -396,26 +398,31 @@ let refinements
              let refs =
                Myseq.fold_left
                  (fun refs e ->
-                   let rec aux2 refs me varseq dv_trees_down =
-                     (* for each level, generate e, Cons (e,m), Cons (Cons (e,m), m)... *)
-                     match dv_trees_down with
-                     | [] -> refs
-                     | dv_tree::dv_trees1 ->
-                        let refs = (me,varseq,dv_tree)::refs in
-                        let me_cons, varseq = make_cons me m varseq in
-                        aux2 refs me_cons varseq dv_trees1
+                   let rec aux_cons refs me varseq d_tree' d_trees =
+                     (* adding Cons around e, and replacing head by d_tree', depth times *)
+                     match d_trees with
+                     | [] -> (me,varseq,d_tree')::refs
+                     | d_tree1::d_trees1 ->
+                        let me1, varseq1 = make_cons me m varseq in
+                        let d_tree1' = Ndtree.replace_head d_tree1 d_tree' in
+                        aux_cons refs me1 varseq1 d_tree1' d_trees1
                    in
-                   aux2 refs (Model.make_expr t e) varseq0 (List.rev (dv_tree::dv_trees)))
+                   let me = Model.make_expr t e in
+                   let d_tree' = (* values in v_tree/d_tree are explained by expr *)
+                     Ndtree.map (fun v -> Data.make_dexpr v) v_tree in
+                   aux_cons refs me varseq0 d_tree' d_trees)                 
                  refs s_expr in
-             if ndim >= 1
+             if ndim >= 1 && not m_is_nil_or_cons
+                                 (* nil/cons-able and not already a nil/cons *)
              then
-               match Ndtree.head_opt v_tree, Ndtree.head_opt dv_tree with
-               | Some v_tree_0, Some dv_tree_0 ->
-                  aux refs (depth+1) (ndim-1) v_tree_0 dv_tree_0 (dv_tree::dv_trees)
-               | _ -> (Model.make_nil t, varseq0, dv_tree) :: refs (* empty ndtree *)
+               match Ndtree.head_opt v_tree, Ndtree.head_opt d_tree with
+               | Some v_tree_0, Some d_tree_0 ->
+                  aux refs (depth+1) (ndim-1) v_tree_0 d_tree_0 (d_tree::d_trees)
+               | _ ->
+                  (Model.make_nil t, varseq0, d_tree) :: refs (* empty ndtree *)
              else refs
            in
-           aux [] 0 (Ndtree.ndim v_tree) v_tree dv_tree [])
+           aux [] 0 (Ndtree.ndim v_tree) v_tree data [])
          (fun m_new varseq' ~supp ~nb ~alt best_reads ->
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
