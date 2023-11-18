@@ -2,7 +2,7 @@
 open Madil_common
 open Task_model
 
-(* learning *)
+(* learning : used by batch only, replicate changes in arc_lis *)
 
 let learn
       ~(alpha : float)
@@ -34,14 +34,25 @@ let learn
     : ('task_model * 'pairs_reads * bool) double
   = Common.prof "Model.learn_model" (fun () ->
   let norm_dl_model_data = make_norm_dl_model_data ~alpha () in
-  let data_of_model ~pruning r m =
+  let data_of_model ?pred ~pruning r m =
     try
       let res_opt =
         Result.to_option
           (let| prs = read_pairs ~pruning ~env m pairs in
-           let drsi, drso = split_pairs_read prs in
            let dl_triples = norm_dl_model_data prs in
            let (lmi,lmo,lm), (ldi,ldo,ld), (_lmdi,_lmdo,lmd) = dl_triples in
+           let| () =
+             if pruning
+             then (* checking that no loss on parsing ranks *)
+               match pred with (* previous state *)
+               | None -> Result.Ok () (* none, at initial state *)
+               | Some (_rm0, (_prs0,_drsi0,_drso0,dl_triples0,_lmd0), _) ->
+                  let _, (_ldi0,_ldo0,ld0), _ = dl_triples0 in
+                  if ld <= ld0
+                  then Result.Ok ()
+                  else Result.Error (Failure "The pruning degrades parsing rank")
+             else Result.Ok () in
+           let drsi, drso = split_pairs_read prs in
            Result.Ok (prs,drsi,drso,dl_triples,lmd)) in
       let status =
         match res_opt with
@@ -65,7 +76,7 @@ let learn
       ~beam_width
       ~refine_degree
       ~m0:(RInit, init_task_model)
-      ~data:(fun (r,m) -> data_of_model ~pruning:false r m)
+      ~data:(fun ?pred (r,m) -> data_of_model ?pred ~pruning:false r m)
       ~code:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) -> lmd)
       ~refinements:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) dl ->
         log_refining r m prs dl;
@@ -84,7 +95,7 @@ let learn
            ~beam_width:1
            ~refine_degree
            ~m0:(RInit, m_refine)
-           ~data:(fun (r,m) -> data_of_model ~pruning:true r m)
+           ~data:(fun ?pred (r,m) -> data_of_model ?pred ~pruning:true r m)
            ~code:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) -> lmd)
            (* only parse ranks counted for input grids *)
            ~refinements:(fun (r,m) (prs,dsri,dsro,dl_triples,lmd) dl ->

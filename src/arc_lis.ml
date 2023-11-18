@@ -109,7 +109,14 @@ object
                else
                  match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage r focus.env m focus.info_o with
                  | Result.Ok state ->
-                    let compressive = state.norm_dl < focus.norm_dl in
+                    let compressive =
+                      state.norm_dl < focus.norm_dl
+                      && (if focus.stage = Prune && state.stage = Prune
+                          then (* in pruning stage, L(D|M) must not increase *)
+                            let _, (_, _, ld0), _ = focus.dls in
+                            let _, (_, _, ld), _ = state.dls in
+                            ld <= ld0
+                          else true) in
                     (if compressive then quota_compressive - 1 else quota_compressive),
                     (compressive,state)::refinements,
                     errors
@@ -128,8 +135,8 @@ object
                  | Build -> s2.refinement_support, s1.refinement_support
                  | Prune -> s1.refinement_support, s2.refinement_support in*)
                Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
-                 ((*compr2, sup1,*) s1.norm_dl)
-                 ((*compr1, sup2,*) s2.norm_dl)) in
+                 (compr2, (*sup1,*) s1.norm_dl)
+                 (compr1, (*sup2,*) s2.norm_dl)) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask
