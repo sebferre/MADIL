@@ -352,13 +352,16 @@ let refinements
             aux ctx1 m1 sel1);
 
            (* pruning Cons *)
-           let m1 = Model.undef m1 in
-           aux_gen ctx m selected_reads
-             (fun (read, data : _ read) ->
-               [m1, varseq0, data])
-             (* not m0 because it raises ndim errors because scalar becomes vector *)
-             (fun m' varseq' ~supp ~nb ~alt best_reads ->
-               Myseq.return (m', varseq', best_reads)) ]
+           (if Model.is_index_invariant m1
+            then
+              let m1 = Model.undef m1 in
+              aux_gen ctx m selected_reads
+                (fun (read, data : _ read) ->
+                  [m1, varseq0, data])
+                (* not m0 because it raises ndim errors because scalar becomes vector *)
+                (fun m' varseq' ~supp ~nb ~alt best_reads ->
+                  Myseq.return (m', varseq', best_reads))
+            else Myseq.empty) ]
     | Model.Expr (k, Expr.Const (t,v)) ->
        (* only for pruning, TODO optimize *)
        aux_gen ctx m selected_reads
@@ -375,10 +378,7 @@ let refinements
     | false, [] -> Myseq.empty (* no expression here *)
     | const_ok, ts1 ->
        let allowed = asd#alt_opt t in
-       let m_is_nil_or_cons =
-         match m with
-         | Model.Nil _ | Model.Cons _ -> true
-         | _ -> false in
+       let m_is_index_invariant = Model.is_index_invariant m in
        aux_gen ctx m selected_reads
          (fun (read, data : _ read) ->
            let rec aux refs depth ndim v_tree d_tree vd_trees =
@@ -420,8 +420,7 @@ let refinements
                      Ndtree.map Data.make_dexpr v_tree in
                    aux_cons refs is_const me varseq0 d_tree' vd_trees)
                  refs s_expr in
-             if ndim >= 1 && not m_is_nil_or_cons
-                                 (* nil/cons-able and not already a nil/cons *)
+             if ndim >= 1 && m_is_index_invariant (* not m_is_nil_or_cons *)
              then
                match Ndtree.head_opt v_tree, Ndtree.head_opt d_tree with
                | Some v_tree_0, Some d_tree_0 ->
@@ -438,10 +437,7 @@ let refinements
              m_new m varseq' best_reads)
   and aux_pat ctx m t c args selected_reads =
     let allowed = asd#alt_opt t in
-    let ok_cons =
-      match Model.seq_length m with
-      | Range.Open 0 -> true
-      | _ -> false in (* prepending Cons not safe *)
+    let ok_cons = Model.is_index_invariant m in
     aux_gen ctx m selected_reads
       (fun (read, data : _ read) ->
         let input_tree =

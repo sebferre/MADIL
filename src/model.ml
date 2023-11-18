@@ -80,7 +80,18 @@ let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = functio
      (match Ndtree.length v_tree with
       | Some n -> Range.make_exact n
       | None -> Range.make_open 0)
-             
+
+let rec is_index_invariant :  ('typ,'value,'var,'constr,'func) model -> bool = function
+  | Def (x,m1) -> is_index_invariant m1
+  | Pat (t,c,args) -> Array.for_all is_index_invariant args
+  | Fail -> assert false
+  | Alt (xc,c,m1,m2) -> is_index_invariant m1 && is_index_invariant m2
+  | Loop m1 -> is_index_invariant m1
+  | Nil _ -> false
+  | Cons _ -> false
+  | Expr _ -> false (* in case it evaluates to a non-scalar ndtree *)
+  | Value _ -> assert false
+    
 (* printing *)
   
 let xp_model
