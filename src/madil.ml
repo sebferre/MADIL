@@ -8,6 +8,7 @@ module type BASIC_TYPES =
     type value
     val xp_value : value html_xp
     val value_of_json : Yojson.Safe.t -> value
+    val json_of_value : value -> Yojson.Safe.t
 
     type typ
     val typ_bool : typ
