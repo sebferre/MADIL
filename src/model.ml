@@ -732,15 +732,21 @@ let dl_model_params
 let dl
       ~(size_model_ast : ('typ,'value,'var,'constr,'func) model -> int)
       ~(nb_model_ast : 'typ -> int -> float)
-      ~(dl_model_params : dl_var:('typ -> 'var -> dl) -> ('typ,'value,'var,'constr,'func) model -> dl)
-      ~(dl_var : nb_env_vars:int -> 'typ -> 'var -> dl) =
+      ~(dl_model_params : dl_var:('typ -> 'var -> dl) -> (('typ,'value,'var,'constr,'func) model as 'model) -> dl)
+      ~(dl_var : nb_env_vars:int -> 'typ -> 'var -> dl)
+      ~(xp_model : 'model html_xp)
+      ~(xp_typ : 'typ html_xp) =
   fun
     ~(nb_env_vars : int)
-    (m : ('typ,'value,'var,'constr,'func) model) -> (* QUICK *)
+    (m : 'model) -> (* QUICK *)
   let size = size_model_ast m in
   let t = typ m in    
   let nb = nb_model_ast t size in
-  assert (nb > 0.); (* as [m] has this size, the nb of AST of this size must not be zero *)
+  if not (nb > 0.) then ( (* as [m] has this size, the nb of AST of this size must not be zero *)
+    Printf.printf "Failed assertion in Model.dl: size=%d\ttyp=" size;
+    pp xp_typ t;
+    print_string "\tmodel="; pp_endline xp_model m;
+    assert false);
   Mdl.Code.universal_int_star size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
   +. dl_model_params

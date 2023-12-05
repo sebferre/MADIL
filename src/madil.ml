@@ -283,7 +283,9 @@ module Make (Domain : DOMAIN) =
         ~size_model_ast
         ~nb_model_ast
         ~dl_model_params
-        ~dl_var,
+        ~dl_var
+        ~xp_model
+        ~xp_typ,
       (fun () ->
         reset_nb_expr_ast ();
         reset_nb_model_ast ())
