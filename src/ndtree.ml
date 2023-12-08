@@ -144,7 +144,7 @@ let index (t : 'a t) (is : int option list) : 'a t option =
     | [] -> ndim
     | (Some _)::is1 -> aux_ndim (max 0 (ndim-1)) is1 (* axis elimination *)
     | None::is1 -> 1 + aux_ndim (max 0 (ndim-1)) is1 in
-  let rec aux_tree tree is =
+  let rec aux_tree res_ndim tree is =
     match tree, is with
     | _, [] -> tree
     | Scalar _, _ -> tree (* some form of broadcasting *)
@@ -156,15 +156,19 @@ let index (t : 'a t) (is : int option list) : 'a t option =
     | Vector1 v, None::_ -> tree
     | Vector v, (Some i)::is1 ->
        let n = Array.length v in
-       if i >= 0 && i < n then aux_tree v.(i) is1
-       else if i < 0 && i > -n then aux_tree v.(n+i) is1
+       if i >= 0 && i < n then aux_tree res_ndim v.(i) is1
+       else if i < 0 && i > -n then aux_tree res_ndim v.(n+i) is1
        else raise Not_found
+    | Vector [||], None::is1 ->
+       if res_ndim = 1
+       then Vector1 [||]
+       else Vector [||]
     | Vector v, None::is1 ->
-       pack_tree (Array.map (fun tree1 -> aux_tree tree1 is1) v)
+       pack_tree (Array.map (fun tree1 -> aux_tree (res_ndim-1) tree1 is1) v)
   in
   try
     let ndim = aux_ndim t.ndim is in
-    let tree = aux_tree t.tree is in
+    let tree = aux_tree ndim t.tree is in
     let t = {ndim; tree} in
     (*assert (is_well_formed t);*)
     Some t
