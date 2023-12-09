@@ -867,12 +867,11 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     : ('var,'constr) path -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
   let rec aux p r m =
     match p, m with
-    | _, Def (x,m1) ->
-       let new_m1 = aux p r m1 in
-       Def (x,new_m1) 
     | Alias (x,p0) :: p1, _ ->
        aux (List.rev_append p0 p1) r m
-    | [], _ -> r
+    | _, Def (x,m1) ->
+       let new_m1 = aux p r m1 in
+       Def (x,new_m1)
     | Field (c,i) :: p1, Pat (t,c',args) when c = c' && i < Array.length args ->
        let new_args = Array.copy args in
        new_args.(i) <- aux p1 r args.(i);
@@ -892,6 +891,7 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | Tail :: p1, Cons (m0,m1) ->
        let new_m1 = aux p1 r m1 in
        Cons (m0,new_m1)
+    | [], _ -> r
     | _ -> assert false
   in
   aux
