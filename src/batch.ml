@@ -189,7 +189,7 @@ let print_learned_model
           ~memout_refine:(!memout_refine)
           ~timeout_refine:(!timeout_refine)
           ~timeout_prune:(!timeout_prune)
-          ~beam_width:1 ~refine_degree:(!max_refinements)
+          ~jump_width:(!jump_width) ~refine_degree:(!max_refinements)
           ~env ~init_task_model
           task.train)
   in
@@ -308,15 +308,15 @@ let main () : unit =
      "-eval", Unit (fun () -> training := false), "Evaluation mode to avoid disclosing task contents";
      "-timeout_refine", Set_int timeout_refine, "Learning/refining timeout per task (default: 60s)";
      "-timeout_prune", Set_int timeout_prune, "Learning/pruning timeout per task (default: 10s)";
+     "-timeout_predict", Set_int timeout_predict, "Prediction timeout per test case (default: 10s)";
      "-viz", Set viz, "Show train strings, as understood by the model";
      "-pause", Set_float pause, "Time delay (in seconds, default=0.0) at each step during learning, useful in combination with -viz";
      "-v", Set_int verbose, "Verbose level (default=1)";
     ]
     (fun str -> ())
-    "test [-dir PATH] [-all|-sample N|-tasks ID,ID,...] [-r N] [-alpha N] [-timeout_refine N] [-timeout_prune] [-viz [-pause T]] [-v N]";
+    "test [-dir PATH] [-all|-sample N|-tasks ID,ID,...] [-r N] [-eval] [-timeout_refine N] [-timeout_prune] [-viz [-pause T]] [-v N]";
   
   print_endline "## options";
-  Printf.printf "alpha = %.1f\n" !alpha;
   Printf.printf "mode = %s\n" (if !training then "training" else "evaluation");
   Printf.printf "timeout_refine = %d\n" !timeout_refine;
   Printf.printf "timeout_prune = %d\n" !timeout_prune;

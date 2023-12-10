@@ -144,14 +144,14 @@ let myseq_bind_sample_fair ~(size1 : int) ~(size2 : int) (s : 'a Myseq.t) (f : '
   ok1, List.rev rev_acc1, List.rev rev_acc12
 
 let myseq_find_map_k (k : int) (f : 'a -> 'b option) (s : 'a Myseq.t) : 'b list =
-  let rec aux k s acc =
-    if k = 0 then acc
+  let rec aux i s acc =
+    if i >= k then acc
     else
       match Myseq.find_map f s with
-      | Some (y,next) -> aux (k-1) next (y::acc)
+      | Some (y,next) -> aux (i+1) next (y::acc)
       | None -> acc
   in
-  List.rev (aux k s [])
+  List.rev (aux 0 s [])
   
 (* xprint *)
 

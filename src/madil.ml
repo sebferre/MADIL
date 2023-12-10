@@ -152,6 +152,7 @@ module type DOMAIN =
     val max_nb_writes : int ref
     val alpha : float ref
     val max_refinements : int ref
+    val jump_width : int ref
 
     include TYPES
 

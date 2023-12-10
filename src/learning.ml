@@ -24,7 +24,15 @@ type ('typ,'value,'dconstr,'var,'constr,'func) state =
     ld : dl; (* data normalized DL *)
     lmd : dl; (* whole normalized DL *)
   }
-    
+
+let print_jumps jumps =
+  jumps
+  |> List.rev
+  |> List.iter
+       (function
+        | 0 -> print_string " -"
+        | rank -> print_char ' '; print_int rank)
+  
 let learn
       ~(alpha : float)
       ~(read_pairs :
@@ -48,7 +56,7 @@ let learn
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> unit)
 
       ~memout_refine ~timeout_refine ~timeout_prune
-      ~(beam_width : int) ~(refine_degree : int)
+      ~(jump_width : int) ~(refine_degree : int)
       ~env (* environment data to the input model *)
       ~init_task_model
       (pairs : 'value Task.pair list)
@@ -96,7 +104,7 @@ let learn
     | Some state0 -> state0
     | None -> failwith "Learning.learn: invalid initial task model" in
   let state_refine_ref = ref state0 in
-  let rec loop_refine state delta conts =
+  let rec loop_refine jumps state delta conts =
     log_refining state.r state.m state.prs state.lmd;
     if state.ldo = 0. (* end of search *)
     then state_refine_ref := state
@@ -117,10 +125,14 @@ let learn
           state_refine_ref := state; (* recording current state as best state *)
         try (* jumping to most promising continuation *)
           let delta1, ostate1 = Bintree.min_elt conts in
-          let state1 = ostate1#get in
+          let jumps1 = ostate1#jumps in
+          let state1 = ostate1#state in
           let conts = Bintree.remove_min_elt conts in
-          print_endline "JUMPING"; (* TODO: be more precise on which jump *)
-          loop_refine state1 delta1 conts
+          let () = (* showing JUMP *)
+            print_string "JUMP TO";
+            print_jumps jumps1;
+            print_newline () in
+          loop_refine jumps1 state1 delta1 conts
         with Not_found -> () ) (* no continuation *)
       else
         let lstate1 =
@@ -131,24 +143,37 @@ let learn
         | [] -> assert false
         | state1::others ->
            let lmd1 = state1.lmd in
-           let conts =
+           let jumps1 = 0::jumps in
+           let nb_alts, conts =
              List.fold_left
-               (fun res state2 ->
+               (fun (rank,res) state2 ->
                  let ok =
-                   match state1.r, state2.r with
-                   | Task_model.Routput (_, Model.Expr _, _, _), _ -> false (* not for exprs *)
-                   | Rinput (p1,sm1,_,_), Rinput (p2,sm2,_,_) -> p1 = p2 (* same path *)
-                   | Routput (p1,sm1,_,_), Routput (p2,sm2,_,_) -> p1 = p2 (* same path *)
-                   | _ -> false in
+                   rank < jump_width &&
+                     (match state1.r, state2.r with
+                      | Task_model.Routput (_, Model.Expr _, _, _), _ -> false (* not for exprs *)
+                      | Rinput (p1,sm1,_,_), Rinput (p2,sm2,_,_) -> p1 = p2 (* same path *)
+                      | Routput (p1,sm1,_,_), Routput (p2,sm2,_,_) -> p1 = p2 (* same path *)
+                      | _ -> false) in
                  if ok
                  then
                    let lmd2 = state2.lmd in
+                   let jumps2 = rank :: jumps in
                    let delta2 = delta +. (lmd2 -. lmd1) in
-                   let ostate2 = object method get = state2 end in (* object to hide some mysterious functional value inside *)
-                   Bintree.add (delta2, ostate2) res
-                 else res)
-               conts others in                 
-           loop_refine state1 delta conts
+                   let ostate2 =
+                     object
+                       method jumps = jumps2
+                       method state = state2
+                     end in (* object to hide some mysterious functional value inside *)
+                   rank+1, Bintree.add (delta2, ostate2) res
+                 else rank, res)
+               (1,conts) others in
+           let () = (* showing point of choice *)
+             if nb_alts > 1 then (
+               print_string "CHOICE AT";
+               print_jumps jumps;
+               print_newline ()
+             ) in
+           loop_refine jumps1 state1 delta conts
   in
   let state_refine, timed_out_refine, memed_out_refine =
     print_endline "REFINING PHASE";
@@ -157,7 +182,7 @@ let learn
         (fun () ->
           Common.do_timeout timeout_refine
             (fun () ->
-              loop_refine state0 0. Bintree.empty)) in
+              loop_refine [] state0 0. Bintree.empty)) in
     !state_refine_ref, (res_opt = Some None), (res_opt = None) in
   let result_refining =
     { task_model = state_refine.m;
