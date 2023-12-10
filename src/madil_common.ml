@@ -143,6 +143,16 @@ let myseq_bind_sample_fair ~(size1 : int) ~(size2 : int) (s : 'a Myseq.t) (f : '
   let ok1, rev_acc1, rev_acc12 = aux size1 false [] [] s in
   ok1, List.rev rev_acc1, List.rev rev_acc12
 
+let myseq_find_map_k (k : int) (f : 'a -> 'b option) (s : 'a Myseq.t) : 'b list =
+  let rec aux k s acc =
+    if k = 0 then acc
+    else
+      match Myseq.find_map f s with
+      | Some (y,next) -> aux (k-1) next (y::acc)
+      | None -> acc
+  in
+  List.rev (aux k s [])
+  
 (* xprint *)
 
 type 'a html_xp = html:bool -> 'a Xprint.xp

@@ -9,6 +9,7 @@ module Make (Domain : Madil.DOMAIN) =
 
 let training = ref true (* should be set to false on evaluation set *)
 let start_rank = ref max_int
+let memout_refine = ref 5000
 let timeout_refine = ref 60
 let timeout_prune = ref 10
 let timeout_predict = ref 10
@@ -185,6 +186,7 @@ let print_learned_model
   let runtime, res =
     Common.chrono (fun () ->
         learn
+          ~memout_refine:(!memout_refine)
           ~timeout_refine:(!timeout_refine)
           ~timeout_prune:(!timeout_prune)
           ~beam_width:1 ~refine_degree:(!max_refinements)
@@ -206,26 +208,27 @@ let print_learned_model
           "acc-test-mrr", `MRR, 0.;
         ] in
       ms    
-  | Common.Val ((m_refine,psr_refine,timed_out_refine), (m_prune,psr_prune,timed_out_prune)) ->
-     if timed_out_refine then print_endline "TIMEOUT";
+  | Common.Val (res : _ Learning.results) -> (* ((m_refine,psr_refine,timed_out_refine), (m_prune,psr_prune,timed_out_prune)) -> *)
+     let learned_task_model = res.result_pruning.task_model in
+     if res.result_refining.timed_out then print_endline "TIMEOUT or MEMOUT";
      print_endline "\n# Learned model (decriptive, before pruning):";
-     pp_task_model m_refine;
+     pp_task_model res.result_refining.task_model;
      print_newline ();
-     let _ = print_dl_md psr_refine in
+     let _ = print_dl_md res.result_refining.pairs_reads in
      print_endline "\n# Learned model (predictive, after pruning):";
-     pp_task_model m_prune;
+     pp_task_model learned_task_model;
      print_newline ();
-     let ldo = print_dl_md psr_prune in
+     let ldo = print_dl_md res.result_pruning.pairs_reads in
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
          ~env ~info_o
-         name m_prune (`TRAIN psr_prune) task.train in
+         name learned_task_model (`TRAIN res.result_pruning.pairs_reads) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
          ~env ~info_o
-         name m_prune (`TEST) task.test in
+         name learned_task_model (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
        [ "runtime-learning", `Seconds, runtime;
