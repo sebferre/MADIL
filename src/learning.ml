@@ -55,7 +55,7 @@ let learn
                  | `Error of exn] -> unit)
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> unit)
 
-      ~memout_refine ~timeout_refine ~timeout_prune
+      ~memout ~timeout_refine ~timeout_prune
       ~(jump_width : int) ~(refine_degree : int)
       ~env (* environment data to the input model *)
       ~init_task_model
@@ -63,23 +63,13 @@ let learn
     : ('typ,'value,'dconstr,'var,'constr,'func) results
   = Common.prof "Learning.learn" (fun () ->
   let norm_dl_model_data = make_norm_dl_model_data ~alpha () in
-  let data_of_model ?pred ~pruning r m =
+  let data_of_model ~pruning r m =
     try
       let state_opt =
         Result.to_option
           (let| prs = read_pairs ~pruning ~env m pairs in
            let dl_triples = norm_dl_model_data prs in
            let (_lmi,_lmo,_lm), (_ldi,ldo,ld), (_lmdi,_lmdo,lmd) = dl_triples in
-           let| () =
-             if pruning
-             then (* checking that no loss on parsing ranks *)
-               match pred with (* previous state *)
-               | None -> Result.Ok () (* none, at initial state *)
-               | Some (_rm0, state0, _) ->
-                  if ld <= state0.ld
-                  then Result.Ok ()
-                  else Result.Error (Failure "The pruning degrades parsing rank")
-             else Result.Ok () in
            let drsi, drso = split_pairs_read prs in
            Result.Ok {r; m; prs; drsi; drso; dl_triples; ldo; ld; lmd}) in
       let status =
@@ -97,32 +87,34 @@ let learn
        log_reading r m ~status;
        raise exn
   in
-  (* experimental: triggers memory exhaustion, and process termination*)
+  (* initialization *)
   let r0, m0 = RInit, init_task_model in
   let state0 =
-    match data_of_model ?pred:None ~pruning:false r0 m0 with
+    match data_of_model ~pruning:false r0 m0 with
     | Some state0 -> state0
     | None -> failwith "Learning.learn: invalid initial task model" in
-  let state_refine_ref = ref state0 in
+  let state_ref = ref state0 in
+  (* refining phase *)
   let rec loop_refine jumps state delta conts =
     log_refining state.r state.m state.prs state.lmd;
     if state.ldo = 0. (* end of search *)
-    then state_refine_ref := state
+    then state_ref := state
     else
       let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
         myseq_find_map_k refine_degree
           (fun (r1,m1) ->
-            match data_of_model ?pred:None ~pruning:false r1 m1 with
+            match data_of_model ~pruning:false r1 m1 with
             | None -> None (* failure to parse with model m1 *)
             | Some state1 ->
                if state1.lmd < state.lmd
                then Some state1
                else None)
-          (task_refinements state.m state.prs state.drsi state.drso) in
+          (Common.prof "Learing.task_refinements" (fun () ->
+               task_refinements state.m state.prs state.drsi state.drso)) in
       if lstate1 = [] (* no compressive refinement *)
       then (
-        if state.lmd < (!state_refine_ref).lmd then
-          state_refine_ref := state; (* recording current state as best state *)
+        if state.lmd < (!state_ref).lmd then
+          state_ref := state; (* recording current state as best state *)
         try (* jumping to most promising continuation *)
           let delta1, ostate1 = Bintree.min_elt conts in
           let jumps1 = ostate1#jumps in
@@ -178,17 +170,64 @@ let learn
   let state_refine, timed_out_refine, memed_out_refine =
     print_endline "REFINING PHASE";
     let res_opt =
-      Common.do_memout memout_refine (* 1000 *) (* Mbytes *)
+      Common.do_memout memout (* Mbytes *)
         (fun () ->
           Common.do_timeout timeout_refine
             (fun () ->
               loop_refine [] state0 0. Bintree.empty)) in
-    !state_refine_ref, (res_opt = Some None), (res_opt = None) in
+    !state_ref, (res_opt = Some None), (res_opt = None) in
   let result_refining =
     { task_model = state_refine.m;
       pairs_reads = state_refine.prs;
       timed_out = timed_out_refine;
       memed_out = memed_out_refine } in
+  (* pruning phase *)
+  let () =
+    match data_of_model ~pruning:true RInit state_refine.m with
+    | Some state0prune -> state_ref := state0prune
+    | None -> assert false in
+  let rec loop_prune state =
+    log_refining state.r state.m state.prs state.lmd;
+    let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
+      myseq_find_map_k refine_degree
+        (fun (r1,m1) ->
+          match data_of_model ~pruning:true r1 m1 with
+          | None -> None (* failure to parse with model m1 *)
+          | Some state1 ->
+             if state1.lmd < state.lmd && state1.ld <= state.ld (* must not degrade parse ranks *)
+             then Some state1
+             else None)
+        (Common.prof "Learning.task_prunings" (fun () ->
+             task_prunings state.m state.drsi)) in
+    let lstate1 =
+      List.stable_sort
+        (fun state1 state2 -> Stdlib.compare state1.lmd state2.lmd)
+        lstate1 in
+    match lstate1 with
+    | [] -> ()
+    | state1::_ ->
+       state_ref := state; (* recording current state as best state *)           
+       loop_prune state1
+  in
+  let state_prune, timed_out_prune, memed_out_prune =
+    print_endline "PRUNING PHASE";
+    let res_opt =
+      Common.do_memout memout (* Mbytes *)
+        (fun () ->
+          Common.do_timeout timeout_prune
+            (fun () ->
+              loop_prune !state_ref)) in
+    !state_ref, (res_opt = Some None), (res_opt = None) in
+  let result_pruning =
+    { task_model = state_prune.m;
+      pairs_reads = state_prune.prs;
+      timed_out = timed_out_prune;
+      memed_out = memed_out_prune } in
+  (* finalization *)
+  { result_refining;
+    result_pruning })
+    
+(* REM  
   let lm_refine = [(state_refine.r, state_refine.m), state_refine, state_refine.lmd] in
 (*
   let lm_refine, timed_out_refine =      
@@ -237,3 +276,4 @@ let learn
             memed_out = false } in
         { result_refining;
           result_pruning })
+ *)

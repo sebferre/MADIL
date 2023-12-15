@@ -9,7 +9,7 @@ module Make (Domain : Madil.DOMAIN) =
 
 let training = ref true (* should be set to false on evaluation set *)
 let start_rank = ref max_int
-let memout_refine = ref 5000
+let memout = ref 5000
 let timeout_refine = ref 60
 let timeout_prune = ref 10
 let timeout_predict = ref 10
@@ -186,7 +186,7 @@ let print_learned_model
   let runtime, res =
     Common.chrono (fun () ->
         learn
-          ~memout_refine:(!memout_refine)
+          ~memout:(!memout)
           ~timeout_refine:(!timeout_refine)
           ~timeout_prune:(!timeout_prune)
           ~jump_width:(!jump_width) ~refine_degree:(!max_refinements)
@@ -210,7 +210,8 @@ let print_learned_model
       ms    
   | Common.Val (res : _ Learning.results) -> (* ((m_refine,psr_refine,timed_out_refine), (m_prune,psr_prune,timed_out_prune)) -> *)
      let learned_task_model = res.result_pruning.task_model in
-     if res.result_refining.timed_out then print_endline "TIMEOUT or MEMOUT";
+     if res.result_refining.timed_out then print_endline "TIMEOUT";
+     if res.result_refining.memed_out then print_endline "MEMOUT";
      print_endline "\n# Learned model (decriptive, before pruning):";
      pp_task_model res.result_refining.task_model;
      print_newline ();
