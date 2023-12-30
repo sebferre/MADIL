@@ -206,7 +206,7 @@ let learn
     match lstate1 with
     | [] -> ()
     | state1::_ ->
-       state_ref := state; (* recording current state as best state *)           
+       state_ref := state1; (* recording current state as best state *)           
        loop_prune state1
   in
   let state_prune, timed_out_prune, memed_out_prune =
