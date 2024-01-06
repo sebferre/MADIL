@@ -14,7 +14,7 @@ type ('typ,'value,'var,'constr,'func) model =
   | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Fail (* like an empty alternative - only in evaluated model *)
   | Alt of 'var (* condition var *) * ('typ,'value,'var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
-  | Loop of ('typ,'value,'var,'constr,'func) model
+  | Loop of Range.t (* seq length, given by parent pattern *) * ('typ,'value,'var,'constr,'func) model
   | Nil of 'typ
   | Cons of ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
   | Expr of 'typ * ('typ,'value,'var,'func) Expr.expr (* not in evaluated model *)
@@ -37,8 +37,8 @@ let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) mod
   Pat (t,c,args)
 let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Alt (xc,cond,m1,m2)
-let make_loop (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
-  Loop m1
+let make_loop (rlen : Range.t) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
+  Loop (rlen,m1)
 let make_nil t = Nil t
 let make_cons m0 m1 = Cons (m0,m1)
 let make_expr t e = Expr (t,e)
@@ -53,7 +53,7 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Pat (t,c,args) -> t
   | Fail -> assert false
   | Alt (xc,c,m1,m2) -> typ m1
-  | Loop m1 -> typ m1
+  | Loop (rlen,m1) -> typ m1
   | Nil t -> t
   | Cons (m0,m1) -> typ m0
   | Expr (t,e) -> t
@@ -63,7 +63,7 @@ let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = functio
   | Def (x,m1) -> seq_length m1
   | Pat (t,c,args) ->
      if args = [||]
-     then Range.make_open 0
+     then Range.make_open 0 (* broadcasting scalar *)
      else
        Array.to_list args
        |> List.map seq_length
@@ -71,7 +71,7 @@ let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = functio
   | Fail -> Range.make_open 0
   | Alt (xc,c,m1,m2) ->
      Range.union (seq_length m1) (seq_length m2)
-  | Loop m1 -> seq_length m1
+  | Loop (rlen,m1) -> seq_length m1
   | Nil _ -> Range.make_exact 0
   | Cons (m0,m1) ->
      Range.add (Range.make_exact 1) (seq_length m1)
@@ -79,14 +79,14 @@ let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = functio
   | Value (t,v_tree) ->
      (match Ndtree.length v_tree with
       | Some n -> Range.make_exact n
-      | None -> Range.make_open 0)
+      | None -> Range.make_open 0) (* broadcasting scalar *)
 
 let rec is_index_invariant :  ('typ,'value,'var,'constr,'func) model -> bool = function
   | Def (x,m1) -> is_index_invariant m1
   | Pat (t,c,args) -> Array.for_all is_index_invariant args
   | Fail -> assert false
   | Alt (xc,c,m1,m2) -> is_index_invariant m1 && is_index_invariant m2
-  | Loop m1 -> is_index_invariant m1
+  | Loop (rlen,m1) -> is_index_invariant m1
   | Nil _ -> false
   | Cons _ -> false
   | Expr _ -> false (* in case it evaluates to a non-scalar ndtree *)
@@ -150,7 +150,7 @@ let xp_model
                print#string " ";
                aux ~html ~prio_ctx:2 print m2))
       
-    | Loop m1 ->
+    | Loop (rlen,m1) ->
        xp_html_elt "div" ~classe:"model-block" ~html print
          (fun () -> aux ~prio_ctx:2 ~html print m1)
     (* xp_tuple1 ~delims:("〈", " ...〉") (aux ~prio_ctx:2) ~html print m1 *)
@@ -273,7 +273,7 @@ let binding_vars
        let acc = aux m1 acc in
        let acc = aux m2 acc in
        Bintree.add xc acc
-    | Loop m1 -> aux m1 acc
+    | Loop (rlen,m1) -> aux m1 acc
     | Nil t -> acc
     | Cons (m0,m1) ->
        let acc = aux m0 acc in
@@ -334,7 +334,7 @@ let get_bindings  (* QUICK *)
          | D (_v, DAlt (_prob,b,d12)) -> value_of_bool b
          | _ -> assert false in
        Mymap.add xc (typ_bool, vc_tree) acc
-    | Loop m1 ->
+    | Loop (rlen,m1) ->
        let d1_tree =
          let<* d = d_tree in
          match d with
@@ -393,9 +393,9 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
           | True, Fail, _
           | False, _, Fail -> Result.Error EmptyAlt
         | _ -> Result.Ok (Alt (xc,c',m1',m2')))
-    | Loop m1 ->
+    | Loop (rlen,m1) ->
        let| m1' = aux m1 in
-       Result.Ok (Loop m1')
+       Result.Ok (Loop (rlen,m1'))
     | Nil t ->
        Result.Ok (Nil t)
     | Cons (m0,m1) ->
@@ -460,8 +460,8 @@ let generator (* on evaluated models: no expr, no def *)
          let* prob, b, d12 = gen_b_d12 info in
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
-    | Loop m1 ->
-       let seq_len_m1 = seq_length m1 in
+    | Loop (rlen,m1) ->
+       let seq_len_m1 = Range.inter rlen (seq_length m1) in
        let gen_nil = Myseq.return [] in
        let rec gen_seq_m1 i info =
          if i < Range.lower seq_len_m1 then
@@ -476,15 +476,6 @@ let generator (* on evaluated models: no expr, no def *)
          let* di = gen (i::rev_is) m1 info in
          let* ld = gen_seq_m1 (i+1) info in
          Myseq.return (di::ld) in
-       (* let gen_m1 i = gen (i::rev_is) m1 in
-       let rec seq_gen_m1 i info =
-         if i < 9 (* TODO: find a better way *)
-         then Myseq.if_not_empty_else
-                (let* di = gen_m1 i info in
-                 let* ld = seq_gen_m1 (i+1) info in
-                 Myseq.return (di::ld))
-                (Myseq.return [])
-         else Myseq.return [] in *)
        (fun info ->
          let* ld1 = gen_seq_m1 0 info in
          let ds1 = Array.of_list ld1 in
@@ -544,12 +535,12 @@ let parseur (* on evaluated models: no expr, no def *)
         | True -> seq1 1.
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
-    | Loop m1 ->
-       let seq_len_m1 = seq_length m1 in
+    | Loop (rlen,m1) ->
+       let seq_len_m1 = Range.inter rlen (seq_length m1) in
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
          Myseq.return (parse (i::rev_is) m1) in
-       let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in
+       let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in (* TODO: use seq_len_m1 to bound |ld1| *)
        let ds1 = Array.of_list ld1 in
        let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
@@ -626,7 +617,7 @@ let size_model_ast (* for DL computing, QUICK *)
          args
     | Fail -> assert false
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Loop m1 -> size_loop + aux m1
+    | Loop (rlen,m1) -> size_loop + aux m1
     | Nil t -> size_nil
     | Cons (m0,m1) -> size_cons + aux m0 + aux m1
     | Expr (t,e) -> Expr.size_expr_ast e
@@ -717,7 +708,7 @@ let dl_model_params
     | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
-    | Loop m1 -> aux m1
+    | Loop (rlen,m1) -> aux m1 (* rlen encoded by parent pattern *)
     | Nil t -> 0.
     | Cons (m0,m1) -> aux m0 +. aux m1
     | Expr (t,e) -> dl_expr_params e
@@ -882,9 +873,9 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | Branch false :: p1, Alt (xc,c,m1,m2) ->
        let new_m2 = aux p1 r m2 in
        Alt (xc,c,m1,new_m2)
-    | _, Loop m1 ->
+    | _, Loop (rlen,m1) ->
        let new_m1 = aux p r m1 in
-       Loop new_m1
+       Loop (rlen,new_m1)
     | Head :: p1, Cons (m0,m1) ->
        let new_m0 = aux p1 r m0 in
        Cons (new_m0,m1)
