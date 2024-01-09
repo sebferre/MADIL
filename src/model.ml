@@ -259,20 +259,22 @@ class virtual ['typ,'constr,'func] asd =
 (* model evaluation *)
 
 let binding_vars
+      ~(typ_bool : 'typ)
       (m0 : ('typ,'value,'var,'constr,'func) model)
-    : 'var Expr.binding_vars =
+    : ('var, 'typ) Expr.binding_vars =
   let rec aux m acc =
     match m with
     | Def (x,m1) ->
+       let t = typ m1 in
        let acc = aux m1 acc in
-       Bintree.add x acc
+       Mymap.add x t acc
     | Pat (t,c,args) ->
        Array.fold_right aux args acc
     | Fail -> assert false
     | Alt (xc,cond,m1,m2) ->
        let acc = aux m1 acc in
        let acc = aux m2 acc in
-       Bintree.add xc acc
+       Mymap.add xc typ_bool acc
     | Loop (rlen,m1) -> aux m1 acc
     | Nil t -> acc
     | Cons (m0,m1) ->
@@ -282,8 +284,7 @@ let binding_vars
     | Expr (t,e) -> acc
     | Value _ -> assert false
   in
-  aux m0 Bintree.empty
-
+  aux m0 Mymap.empty
   
 let get_bindings  (* QUICK *)
       ~(typ_bool : 'typ)

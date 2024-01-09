@@ -607,7 +607,7 @@ let refinements
 
   
 let task_refinements
-      ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> 'var Expr.binding_vars)
+      ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
       ~(input_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       ~(output_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       
@@ -620,16 +620,17 @@ let task_refinements
     [ (let* p, ri, suppi, dli', mi, varseq =
          input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
            m.input_model m.varseq dsri.reads in
-       let m' = Task_model.make varseq mi m.output_model in 
+       let m' = Task_model.make ~binding_vars varseq mi m.output_model in 
        Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), m'));
 
       (let* p, ro, suppo, dlo', mo, varseq =
          output_refinements ~nb_env_vars:m.nb_env_vars ~dl_M:prs.dl_mo
            m.output_model m.varseq dsro.reads in
-       let m' = Task_model.make varseq m.input_model mo in
+       let m' = Task_model.make ~binding_vars varseq m.input_model mo in
        Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), m')) ]
 
 let task_prunings
+      ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
       ~(input_prunings : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
       
       (m : (('typ,'value,'var,'constr,'func) Task_model.task_model as 'task_model))
@@ -638,5 +639,5 @@ let task_prunings
   let* pi, ri, suppi, dli', mi', varseq =
     input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m
       m.input_model m.varseq dsri.reads in
-  let m' = Task_model.make varseq mi' m.output_model in
+  let m' = Task_model.make ~binding_vars varseq mi' m.output_model in
   Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), m')

@@ -8,19 +8,22 @@ open Model
 type ('typ,'value,'var,'constr,'func) task_model =
   { varseq : 'var Myseq.t; (* variable generator *)
     input_model : ('typ,'value,'var,'constr,'func) model; (* no reference *)
+    env_vars : ('var,'typ) Expr.binding_vars; (* references in input model *)
     nb_env_vars : int; (* nb of visible vars in input model *)
     output_model : ('typ,'value,'var,'constr,'func) model;
   }
 
 let make
+      ~(binding_vars : ('typ,'value,'var,'constr,'func) model -> ('var,'typ) Expr.binding_vars)
       (varseq : 'var Myseq.t)
       (input_model : ('typ,'value,'var,'constr,'func) model)
       (output_model : ('typ,'value,'var,'constr,'func) model)
     : ('typ,'value,'var,'constr,'func) task_model =
   let env_vars = binding_vars input_model in
-  let nb_env_vars = Bintree.cardinal env_vars in
+  let nb_env_vars = Mymap.cardinal env_vars in
   { varseq;
     input_model;
+    env_vars;
     nb_env_vars;
     output_model }
                                                  
@@ -229,13 +232,17 @@ let xp_refinement
   in
   aux
 
-let refine (r : ('typ,'value,'var,'constr,'func) refinement) (m : ('typ,'value,'var,'constr,'func) task_model)
+let refine
+      ~(binding_vars : ('typ,'value,'var,'constr,'func) model -> ('var,'typ) Expr.binding_vars)
+      (r : ('typ,'value,'var,'constr,'func) refinement) (m : ('typ,'value,'var,'constr,'func) task_model)
     : (('typ,'value,'var,'constr,'func) refinement * ('typ,'value,'var,'constr,'func) task_model) result =
   match r with
   | RInit -> Result.Error (Failure "Task_model.refine")
   | Rinput (p,ri,supp,dl') ->
-     let m' = make m.varseq (Model.refine p ri m.input_model) m.output_model in
+     let m' = make ~binding_vars m.varseq
+                (Model.refine p ri m.input_model) m.output_model in
      Result.Ok (r, m')
   | Routput (p,ro,supp,dl') ->
-     let m' = make m.varseq m.input_model (Model.refine p ro m.output_model) in
+     let m' = make ~binding_vars m.varseq
+                m.input_model (Model.refine p ro m.output_model) in
      Result.Ok (r, m')

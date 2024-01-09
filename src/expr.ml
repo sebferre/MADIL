@@ -17,8 +17,8 @@ let typ : ('typ,'value,'var,'func) expr -> 'typ = function
   | Arg t -> t
   | Fun (t,e) -> raise TODO (* functional type: t -> typ(e) *)
          
-type 'var binding_vars = 'var Bintree.t
-let binding_vars0 = Bintree.empty
+type ('var,'typ) binding_vars = ('var, 'typ) Mymap.t
+let binding_vars0 = Mymap.empty
 
 type ('var,'typ,'value) bindings = ('var, 'typ * 'value Ndtree.t) Mymap.t
 let bindings0 = Mymap.empty

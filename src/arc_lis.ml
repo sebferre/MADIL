@@ -79,8 +79,9 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
                
 let initial_focus (name : string) (task : task) : arc_focus =
   let norm_dl_model_data = Task_model.make_norm_dl_model_data ~alpha:(!alpha) () in
-  let env, init_model, info_o = get_init_task_model name task in
-  match state_of_model name task norm_dl_model_data Build Task_model.RInit env init_model info_o with
+  let {env; varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
+  let init_task_model = make_task_model varseq input_model output_model in
+  match state_of_model name task norm_dl_model_data Build Task_model.RInit env init_task_model info_o with
   | Result.Ok s -> s
   | Result.Error exn -> raise exn
 

@@ -51,7 +51,7 @@ module type TYPES =
     val xp_path : path html_xp
 
     type varseq = var Myseq.t
-    type binding_vars = var Expr.binding_vars
+    type binding_vars = (var,typ) Expr.binding_vars
     type bindings = (var,typ,value) Expr.bindings
     val xp_bindings : bindings html_xp
           
@@ -87,6 +87,13 @@ module type TYPES =
       | `Timeout
       | `Error of exn ]
 
+    type init_config =
+      { env : data;
+        varseq : varseq;
+        input_model : model;
+        output_model : model;
+        output_generator_info : generator_info }
+
   end
 
 module Defined_types (T : BASIC_TYPES) =
@@ -105,7 +112,7 @@ module Defined_types (T : BASIC_TYPES) =
     let xp_path : path html_xp = Model.xp_path ~xp_var ~xp_field
 
     type varseq = var Myseq.t
-    type binding_vars = var Expr.binding_vars
+    type binding_vars = (var,typ) Expr.binding_vars
     type bindings = (var,typ,value) Expr.bindings
     let xp_bindings : bindings html_xp = Expr.xp_bindings ~xp_var ~xp_typ ~xp_value
           
@@ -140,6 +147,13 @@ module Defined_types (T : BASIC_TYPES) =
       | `Failure
       | `Timeout
       | `Error of exn ]
+
+    type init_config =
+      { env : data;
+        varseq : varseq;
+        input_model : model;
+        output_model : model;
+        output_generator_info : generator_info }
                      
   end
   
@@ -201,8 +215,8 @@ module type DOMAIN =
     val prunings_postprocessing : typ -> constr -> model array -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
-
-    val get_init_task_model : string (* task name *) -> task -> data (* env0 *) * task_model * generator_info
+      
+    val get_init_config : string (* task name *) -> task -> init_config
     val log_reading : refinement -> task_model -> status:status -> unit
     val log_refining : refinement -> task_model -> pairs_reads -> dl -> unit
 
@@ -222,6 +236,7 @@ module Make (Domain : DOMAIN) =
                   
     let binding_vars : model -> binding_vars =
       Model.binding_vars
+        ~typ_bool
   
     let get_bindings : model -> data -> bindings =
       Model.get_bindings
@@ -351,6 +366,10 @@ module Make (Domain : DOMAIN) =
 
     (* task models *)
 
+    let make_task_model =
+      Task_model.make
+        ~binding_vars
+      
     let dl_task_model (m : task_model) : dl * dl =
       dl_model ~nb_env_vars:0
         m.input_model,
@@ -380,6 +399,7 @@ module Make (Domain : DOMAIN) =
 
     let task_prunings =
       Refining.task_prunings
+        ~binding_vars
         ~input_prunings:prunings
     
     let learn =

@@ -253,7 +253,8 @@ let task_of_name dir name =
 let process_task
       name task
       count sum_ms =
-      let env, init_task_model, info_o = get_init_task_model name task in
+      let {env; varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
+      let init_task_model = make_task_model varseq input_model output_model in
       print_endline "\n# evaluating init_task_model";
       print_dl_task_model ~env name task init_task_model;
       print_endline "\n# learning a model for train pairs";
