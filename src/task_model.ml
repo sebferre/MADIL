@@ -11,7 +11,19 @@ type ('typ,'value,'var,'constr,'func) task_model =
     nb_env_vars : int; (* nb of visible vars in input model *)
     output_model : ('typ,'value,'var,'constr,'func) model;
   }
-       
+
+let make
+      (varseq : 'var Myseq.t)
+      (input_model : ('typ,'value,'var,'constr,'func) model)
+      (output_model : ('typ,'value,'var,'constr,'func) model)
+    : ('typ,'value,'var,'constr,'func) task_model =
+  let env_vars = binding_vars input_model in
+  let nb_env_vars = Bintree.cardinal env_vars in
+  { varseq;
+    input_model;
+    nb_env_vars;
+    output_model }
+                                                 
 let xp_task_model
       ~(xp_model : ('typ,'value,'var,'constr,'func) model html_xp)
     :  ('typ,'value,'var,'constr,'func) task_model html_xp =
@@ -222,6 +234,8 @@ let refine (r : ('typ,'value,'var,'constr,'func) refinement) (m : ('typ,'value,'
   match r with
   | RInit -> Result.Error (Failure "Task_model.refine")
   | Rinput (p,ri,supp,dl') ->
-     Result.Ok (r, {m with input_model = Model.refine p ri m.input_model})
+     let m' = make m.varseq (Model.refine p ri m.input_model) m.output_model in
+     Result.Ok (r, m')
   | Routput (p,ro,supp,dl') ->
-     Result.Ok (r, {m with output_model = Model.refine p ro m.output_model})
+     let m' = make m.varseq m.input_model (Model.refine p ro m.output_model) in
+     Result.Ok (r, m')

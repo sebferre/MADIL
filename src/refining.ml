@@ -620,16 +620,14 @@ let task_refinements
     [ (let* p, ri, suppi, dli', mi, varseq =
          input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
            m.input_model m.varseq dsri.reads in
-       let nb_env_vars = Bintree.cardinal (binding_vars mi) in
-       Myseq.return
-         (Task_model.Rinput (p,ri,suppi,dli'),
-          {m with varseq; input_model = mi; nb_env_vars}));
+       let m' = Task_model.make varseq mi m.output_model in 
+       Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), m'));
+
       (let* p, ro, suppo, dlo', mo, varseq =
          output_refinements ~nb_env_vars:m.nb_env_vars ~dl_M:prs.dl_mo
            m.output_model m.varseq dsro.reads in
-       Myseq.return
-         (Task_model.Routput (p,ro,suppo,dlo'),
-          {m with varseq; output_model = mo})) ]
+       let m' = Task_model.make varseq m.input_model mo in
+       Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), m')) ]
 
 let task_prunings
       ~(input_prunings : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
@@ -640,7 +638,5 @@ let task_prunings
   let* pi, ri, suppi, dli', mi', varseq =
     input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m
       m.input_model m.varseq dsri.reads in
-  Myseq.return
-    (Task_model.Rinput (pi,ri,suppi,dli'),
-     {m with varseq; input_model = mi'})
-
+  let m' = Task_model.make varseq mi' m.output_model in
+  Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), m')
