@@ -186,6 +186,7 @@ let make_cons m1' m varseq1' =
        
 type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   nb_env_vars:int ->
+  env_vars:('var,'typ) Expr.binding_vars ->
   dl_M:dl -> (* current model DL *)
   (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
   (('typ,'value,'var,'constr,'func) Model.model as 'model) ->
@@ -213,8 +214,8 @@ let refinements
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ?is:(int list) -> ('input,'value,'dconstr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
-      ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'var Myseq.t) list)
-      ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'var Myseq.t) list) (* refined submodel with remaining fresh vars *)
+      ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
+      ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
@@ -224,7 +225,7 @@ let refinements
     | Result.Ok ((d',dl')::_) -> Result.Ok d'
     | _ -> Result.Error Not_found
   in
-  fun ~nb_env_vars ~dl_M m0 varseq0 reads ->
+  fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
   let aux_gen (type r)
         ctx m selected_reads (* ctx is reverse path *)
         (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
@@ -447,7 +448,7 @@ let refinements
         match Ndtree.choose data with (* TODO: should be at index [0,...,0] *)
         | None -> []
         | Some d -> (* computing refinements on a sample data *)
-           refinements_pat t c args varseq0 d
+           refinements_pat ~env_vars t c args varseq0 d
            |> List.fold_left
                 (fun refs (m',varseq') ->
                   let ref_cons = (* considering the need to nest m' into Cons *)
@@ -618,13 +619,13 @@ let task_refinements
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseq =
-         input_refinements ~nb_env_vars:0 ~dl_M:prs.dl_mi
+         input_refinements ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:prs.dl_mi
            m.input_model m.varseq dsri.reads in
        let m' = Task_model.make ~binding_vars varseq mi m.output_model in 
        Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), m'));
 
       (let* p, ro, suppo, dlo', mo, varseq =
-         output_refinements ~nb_env_vars:m.nb_env_vars ~dl_M:prs.dl_mo
+         output_refinements ~nb_env_vars:m.nb_env_vars ~env_vars:m.env_vars ~dl_M:prs.dl_mo
            m.output_model m.varseq dsro.reads in
        let m' = Task_model.make ~binding_vars varseq m.input_model mo in
        Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), m')) ]
@@ -637,7 +638,7 @@ let task_prunings
       (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   let* pi, ri, suppi, dli', mi', varseq =
-    input_prunings ~nb_env_vars:0 ~dl_M:dsri.dl_m
+    input_prunings ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:dsri.dl_m
       m.input_model m.varseq dsri.reads in
   let m' = Task_model.make ~binding_vars varseq mi' m.output_model in
   Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), m')
