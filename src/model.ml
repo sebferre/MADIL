@@ -558,10 +558,12 @@ let parseur (* on evaluated models: no expr, no def *)
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
        let is = List.rev rev_is in
-       assert (List.length is >= Ndtree.ndim v_tree);
-       (match Ndtree.lookup v_tree is with
-       | Some v -> parseur_value v input
-       | None -> Myseq.empty)
+       if List.length is >= Ndtree.ndim v_tree
+       then
+         match Ndtree.lookup v_tree is with
+         | Some v -> parseur_value v input
+         | None -> Myseq.empty
+       else Myseq.empty (* TODO: accepting vtrees ? *)
   in
   fun m ?(is = []) input ->
   parse (List.rev is) m input
