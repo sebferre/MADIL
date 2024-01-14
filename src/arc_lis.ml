@@ -128,7 +128,6 @@ object
              (!max_refinements, [], []) in
       let refinements =
         refinements
-        |> List.rev (* to preserve ordering from sequence *) 
         |> List.sort (* sorting by decreasing support, then increasing DL *)
              (fun (compr1,s1) (compr2,s2) ->
                (*let sup1, sup2 =
@@ -136,8 +135,8 @@ object
                  | Build -> s2.refinement_support, s1.refinement_support
                  | Prune -> s1.refinement_support, s2.refinement_support in*)
                Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
-                 (compr2, (*sup1,*) s1.norm_dl)
-                 (compr1, (*sup2,*) s2.norm_dl)) in
+                 (compr2, (*sup1,*) s1.norm_dl, s1.refinement)
+                 (compr1, (*sup2,*) s2.norm_dl, s2.refinement)) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask

@@ -128,8 +128,9 @@ let learn
         with Not_found -> () ) (* no continuation *)
       else
         let lstate1 =
-          List.stable_sort
-            (fun state1 state2 -> Stdlib.compare state1.lmd state2.lmd)
+          List.sort
+            (fun state1 state2 ->
+              Stdlib.compare (state1.lmd, state1.r) (state2.lmd, state2.r))
             lstate1 in
         match lstate1 with
         | [] -> assert false
@@ -200,8 +201,9 @@ let learn
         (Common.prof "Learning.task_prunings" (fun () ->
              task_prunings state.m state.drsi)) in
     let lstate1 =
-      List.stable_sort
-        (fun state1 state2 -> Stdlib.compare state1.lmd state2.lmd)
+      List.sort
+        (fun state1 state2 ->
+          Stdlib.compare (state1.lmd, state1.r) (state2.lmd, state2.r))
         lstate1 in
     match lstate1 with
     | [] -> ()
