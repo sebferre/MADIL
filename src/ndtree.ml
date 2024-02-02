@@ -174,6 +174,39 @@ let index (t : 'a t) (is : int option list) : 'a t option =
     Some t
   with Not_found -> None
 
+let slice (t : 'a t) (slices : (int * int option) list) : 'a t option =
+  (* slice = (start, stop),negative indices supported *)
+  let start_stop_of_slice len (start, stop_opt) =
+    let start = if start >= 0 then start else len + start in  
+    let stop = match stop_opt with Some stop -> stop | None -> len in
+    let stop = if stop >= 0 then stop else len + stop in
+    if not (start <= len && stop <= len && start <= stop) then raise Not_found;
+    start, stop in
+  let get_array_slice v slice =
+    if slice = (0, None) then v (* full slice *)
+    else
+      let len = Array.length v in
+      let start, stop = start_stop_of_slice len slice in
+      Array.sub v start (stop - start) in
+  let rec aux_tree tree slices =
+    match tree, slices with
+    | _, [] -> tree
+    | Scalar _, _ -> tree (* some form of broadcasting *)
+    | Vector1 v, slice::_ ->
+       let v_slice = get_array_slice v slice in
+       Vector1 v_slice
+    | Vector v, slice::slices1 ->
+       let v_slice = get_array_slice v slice in
+       Vector (Array.map (fun tree1 -> aux_tree tree1 slices1) v_slice)
+  in
+  try
+    let ndim = t.ndim in
+    let tree = aux_tree t.tree slices in
+    let t = {ndim; tree} in
+    assert (is_well_formed t);
+    Some t
+  with Not_found -> None
+
 let head_opt (t : 'a t) : 'a t option = (* t[0] *)
   match t.tree with
   | Scalar _ -> None

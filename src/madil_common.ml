@@ -16,13 +16,29 @@ type 'a double = 'a * 'a
 type 'a triple = 'a * 'a * 'a
   
 (* list *)
-  
+
+let rec list_remove x l =
+  match l with
+  | [] -> []
+  | y::xs ->
+     if y = x
+     then xs
+     else y::list_remove x xs
+               
 let rec list_update (f : 'a -> 'a) (i : int) : 'a list -> 'a list = function
   | [] -> raise Not_found
   | x::l ->
      if i = 0
      then f x :: l
      else x :: list_update f (i-1) l
+
+let rec list_replace_assoc (k : 'a) (v : 'b) (l : ('a * 'b) list) : ('a * 'b) list =
+  match l with
+  | [] -> []
+  | (x,y)::xs ->
+     if x = k
+     then (k,v)::xs
+     else (x,y)::list_replace_assoc k v xs
 
 let rec list_partition_map (f : 'a -> ('b,'c) Result.t) (selected : 'a list) (others : 'c list) : 'b list * 'c list =
   match selected with
@@ -210,6 +226,17 @@ let xp_tuple3 ?(delims = "(",")") ?(sep = ", ") (xp1 : 'a1 html_xp) (xp2 : 'a2 h
   xp2 ~html print x2;
   print#string sep;
   xp3 ~html print x3;
+  print#string right
+
+let xp_tuple ?(delims = "(",")") ?(sep = ", ") (xps : unit html_xp array) : unit html_xp =
+  fun ~html print () ->
+  let left, right = delims in
+  print#string left;
+  Array.iteri
+    (fun i xpi ->
+      if i > 0 then print#string sep;
+      xpi ~html print ())
+    xps;
   print#string right
 
 let xp_array ?(delims = "[","]") ?(sep = ", ") (xp : 'a html_xp) : 'a array html_xp =

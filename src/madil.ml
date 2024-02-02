@@ -257,12 +257,12 @@ module Make (Domain : DOMAIN) =
 
     (* model-based generation and parsing *)
       
-    let generator : model -> generator =
+    let generator : ?xis:((var * int) list) -> model -> generator =
       Model.generator
         ~generator_pat
         ~value_of_seq
 
-    let parseur : model -> ?is:(int list) -> parseur =
+    let parseur : ?xis:((var * int) list) -> model -> parseur =
       Model.parseur
         ~parseur_value
         ~parseur_pat
@@ -278,7 +278,7 @@ module Make (Domain : DOMAIN) =
         ~encoding_expr_value
         ~dl_of_encoding
 
-    let (dl_model, reset_dl_model) : (nb_env_vars:int -> model -> dl) * (unit -> unit) =
+    let (dl_model, reset_dl_model) : (nb_env_vars:int -> ?ndim:int -> model -> dl) * (unit -> unit) =
       let nb_expr_ast, reset_nb_expr_ast =
         Expr.nb_expr_ast
           ~funcs:asd#funcs in

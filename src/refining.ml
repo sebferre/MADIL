@@ -176,10 +176,10 @@ let make_alt_if_allowed_and_needed
   else (* alt not allowed *)
     Myseq.empty
 
-let make_cons m1' m varseq1' =
+let make_cons xl m1' m varseq1' =
   let x0, varseq' = new_var varseq1' in
   let x1, varseq' = new_var varseq' in
-  let m' = Model.make_cons
+  let m' = Model.make_cons xl
              (Model.make_def x0 m1')
              (Model.make_def x1 m) in
   m', varseq'
@@ -208,11 +208,11 @@ let refinements
       ~(asd : ('typ,'constr,'func) Model.asd)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
-      ~(dl_model : nb_env_vars:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
+      ~(dl_model : nb_env_vars:int -> ?ndim:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
       ~(eval : 'model -> ('var,'typ,'value) Expr.bindings -> 'model result)
       ~(input_of_value : 'typ -> 'value -> 'input)
-      ~(parse_bests : 'model -> ?is:(int list) -> ('input,'value,'dconstr) Model.parse_bests)
+      ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'value,'dconstr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
@@ -220,25 +220,26 @@ let refinements
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
 
-  let parse_best m is input =
-    match parse_bests m ~is input with
+  let parse_best m xis input =
+    match parse_bests m ~xis input with
     | Result.Ok ((d',dl')::_) -> Result.Ok d'
     | _ -> Result.Error Not_found
   in
   fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
   let aux_gen (type r)
-        ctx m selected_reads (* ctx is reverse path *)
+        ctx rev_xls m selected_reads (* ctx is reverse path *)
         (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
         (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
     let p = List.rev ctx in (* local path *)
-    let dl_m = dl_model ~nb_env_vars m in
+    let ndim = List.length rev_xls in
+    let dl_m = dl_model ~nb_env_vars ~ndim m in
     let r_best_reads = inter_union_reads read_refs selected_reads in
     let* r, (varseq', best_reads) = Mymap.to_seq r_best_reads in
     let supp, nb = best_reads_stats best_reads in
     let alt = (supp < nb) in
     let* m_new, varseq', best_reads = postprocessing r varseq' ~supp ~nb ~alt best_reads in
-    let dl_m_new = dl_model ~nb_env_vars m_new in
+    let dl_m_new = dl_model ~nb_env_vars ~ndim m_new in
     let dl_new =
       dl_M -. dl_m +. dl_m_new
       +. alpha *. Mdl.sum best_reads
@@ -260,22 +261,22 @@ let refinements
     let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
     Myseq.return (p, m_new, varseq', supp, dl_new)
   in
-  let rec aux ctx m selected_reads =
+  let rec aux ctx rev_xls m selected_reads =
   if selected_reads = [] then Myseq.empty
   else
     match m with
     | Model.Def (x,m1) ->
        let ctx = [Model.Alias (x,ctx)] in
-       aux ctx m1 selected_reads
+       aux ctx rev_xls m1 selected_reads
     | Model.Pat (t,c,args) ->
        Myseq.interleave
-         (aux_expr ctx m selected_reads
-          :: aux_pat ctx m t c args selected_reads
+         (aux_expr ctx rev_xls m selected_reads
+          :: aux_pat ctx rev_xls m t c args selected_reads
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
                    let ctxi = Model.Field (c,i)::ctx in
-                   aux ctxi mi
+                   aux ctxi rev_xls mi
                      (map_reads
                         (function
                          | Data.D (_, DPat (dc, args)) ->
@@ -287,13 +288,13 @@ let refinements
     | Model.Fail -> assert false
     | Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave
-         [ aux_expr ctx m selected_reads;
+         [ aux_expr ctx rev_xls m selected_reads;
            
            (match c with
             | Undet _ ->
                Myseq.concat
-                 [ aux_alt_cond_undet ctx m xc c m1 m2 selected_reads;
-                   aux_alt_prune ctx m m1 m2 selected_reads ]
+                 [ aux_alt_cond_undet ctx rev_xls m xc c m1 m2 selected_reads;
+                   aux_alt_prune ctx rev_xls m m1 m2 selected_reads ]
             | True | False -> assert false
             | BoolExpr _ -> Myseq.empty);
            
@@ -307,7 +308,7 @@ let refinements
                     else None
                  | _ -> assert false)
                 selected_reads in
-            aux ctx1 m1 sel1);
+            aux ctx1 rev_xls m1 sel1);
                         
            (let ctx2 = Model.Branch false :: ctx in
             let sel2 =
@@ -319,44 +320,52 @@ let refinements
                     else None
                  | _ -> assert false)
                 selected_reads in
-            aux ctx2 m2 sel2) ]
-    | Model.Loop (rlen,m1) -> (* TODO: add exprs *)
-       aux ctx m1
+            aux ctx2 rev_xls m2 sel2) ]
+    | Model.Loop (xl,rlen,m1) -> (* TODO: add exprs *)
+       aux ctx (xl::rev_xls) m1
          (bind_reads
             (function
              | Data.D (_, DSeq (_,_,ds1)) -> ds1
              | _ -> assert false)
             selected_reads)
     | Model.Nil t -> Myseq.empty
-    | Model.Cons (m0,m1) ->
+    | Model.Cons (xl,m0,m1) ->
+       let indices, slices =
+         List.split
+           (List.rev_map
+              (fun yl ->
+                if yl = xl
+                then Some 0, (1,None)
+                else None, (0,None))
+              rev_xls) in
        Myseq.interleave
-         [ aux_expr ctx m selected_reads;
+         [ aux_expr ctx rev_xls m selected_reads;
            
            (let ctx0 = Model.Head :: ctx in
             let sel0 =
               map_reads_ndtree
                 (fun data ->
-                  match Ndtree.head_opt data with
+                  match Ndtree.index data indices (* head_opt data *) with
                   | Some data0 -> data0
                   | None -> assert false)
                 selected_reads in
-            aux ctx0 m0 sel0);
+            aux ctx0 (list_remove xl rev_xls) m0 sel0);
 
            (let ctx1 = Model.Tail :: ctx in
             let sel1 =
               map_reads_ndtree
                 (fun data ->
-                  match Ndtree.tail_opt data with
+                  match Ndtree.slice data slices (* tail_opt data *) with
                   | Some data1 -> data1
                   | None -> assert false)
                 selected_reads in
-            aux ctx1 m1 sel1);
+            aux ctx1 rev_xls m1 sel1);
 
            (* pruning Cons *)
            (if Model.is_index_invariant m1
             then
               let m1 = Model.undef m1 in
-              aux_gen ctx m selected_reads
+              aux_gen ctx rev_xls m selected_reads
                 (fun (read, data : _ read) ->
                   [m1, varseq0, data])
                 (* not m0 because it raises ndim errors because scalar becomes vector *)
@@ -365,7 +374,7 @@ let refinements
             else Myseq.empty) ]
     | Model.Expr (k, Expr.Const (t,v)) ->
        (* only for pruning, TODO optimize *)
-       aux_gen ctx m selected_reads
+       aux_gen ctx rev_xls m selected_reads
          (fun (read, data : _ read) ->
            refinements_value t v varseq0
            |> List.map (fun (m',varseq') -> (m',varseq',data)))
@@ -373,16 +382,16 @@ let refinements
            Myseq.return (m', varseq', best_reads))
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
-  and aux_expr ctx m selected_reads =
+  and aux_expr ctx rev_xls m selected_reads =
     let t = Model.typ m in
     match asd#expr_opt t with
     | false, [] -> Myseq.empty (* no expression here *)
     | const_ok, ts1 ->
        let allowed = asd#alt_opt t in
        let m_is_index_invariant = Model.is_index_invariant m in
-       aux_gen ctx m selected_reads
+       aux_gen ctx rev_xls m selected_reads
          (fun (read, data : _ read) ->
-           let rec aux refs depth ndim v_tree d_tree vd_trees =
+           let rec aux refs xls_down ndim v_tree d_tree xvd_trees =
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
              let s_expr = (* index expressions evaluating to v_tree *)
                let* t1 = Myseq.from_list ts1 in
@@ -398,11 +407,11 @@ let refinements
              let refs =
                Myseq.fold_left
                  (fun refs e ->
-                   let rec aux_cons refs is_const me varseq d_tree' vd_trees =
-                     (* adding Cons around e, and replacing head by d_tree', depth times *)
-                     match vd_trees with
+                   let rec aux_cons refs is_const me varseq d_tree' xvd_trees =
+                     (* adding Cons around e, and replacing head by d_tree', |xvd_trees| times *)
+                     match xvd_trees with
                      | [] -> (me,varseq,d_tree')::refs
-                     | (v_tree1, d_tree1)::vd_trees1 ->
+                     | (xl, v_tree1, d_tree1)::xvd_trees1 ->
                         let is_const1 = is_const && Ndtree.is_constant v_tree1 <> None in
                         let me1, varseq1, d_tree1' =
                           if is_const1
@@ -410,36 +419,36 @@ let refinements
                             let d_tree1' = Ndtree.map Data.make_dexpr v_tree1 in
                             me, varseq, d_tree1'
                           else
-                            let me1, varseq1 = make_cons me m varseq in
+                            let me1, varseq1 = make_cons xl me m varseq in
                             let d_tree1' = Ndtree.replace_head d_tree1 d_tree' in
                             me1, varseq1, d_tree1' in
-                        aux_cons refs is_const1 me1 varseq1 d_tree1' vd_trees1
+                        aux_cons refs is_const1 me1 varseq1 d_tree1' xvd_trees1
                    in
                    let is_const = (ndim = 0) in (* only applicable on scalar exprs *)
                    let me = Model.make_expr t e in
                    let d_tree' = (* values in v_tree/d_tree are explained by expr *)
                      Ndtree.map Data.make_dexpr v_tree in
-                   aux_cons refs is_const me varseq0 d_tree' vd_trees)
+                   aux_cons refs is_const me varseq0 d_tree' xvd_trees)
                  refs s_expr in
              if ndim >= 1 && m_is_index_invariant (* not m_is_nil_or_cons *)
              then
-               match Ndtree.head_opt v_tree, Ndtree.head_opt d_tree with
-               | Some v_tree_0, Some d_tree_0 ->
-                  aux refs (depth+1) (ndim-1) v_tree_0 d_tree_0 ((v_tree,d_tree)::vd_trees)
+               match xls_down, Ndtree.head_opt v_tree, Ndtree.head_opt d_tree with
+               | xl::xls_down1, Some v_tree_0, Some d_tree_0 ->
+                  aux refs xls_down1 (ndim-1) v_tree_0 d_tree_0 ((xl,v_tree,d_tree)::xvd_trees)
                | _ ->
                   (Model.make_nil t, varseq0, d_tree) :: refs (* empty ndtree *)
              else refs
            in
            let v_tree = Ndtree.map Data.value data in
-           aux [] 0 (Ndtree.ndim v_tree) v_tree data [])
+           aux [] (List.rev rev_xls) (Ndtree.ndim v_tree) v_tree data [])
          (fun m_new varseq' ~supp ~nb ~alt best_reads ->
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
              m_new m varseq' best_reads)
-  and aux_pat ctx m t c args selected_reads =
+  and aux_pat ctx rev_xls m t c args selected_reads =
     let allowed = asd#alt_opt t in
     let ok_cons = Model.is_index_invariant m in
-    aux_gen ctx m selected_reads
+    aux_gen ctx rev_xls m selected_reads
       (fun (read, data : _ read) ->
         let input_tree =
           Ndtree.map
@@ -453,25 +462,27 @@ let refinements
                 (fun refs (m',varseq') ->
                   let ref_cons = (* considering the need to nest m' into Cons *)
                     let| m'_eval = eval m' read.bindings in
-                    let rec aux_cons data input_tree = (* itering through heads of heads *)
+                    let rec aux_cons xls data input_tree = (* itering through heads of heads *)
                       let data'_res =
                         Ndtree.mapi_result
-                          (fun is input -> parse_best m'_eval is input)
+                          (fun is input ->
+                            let xis = try List.combine xls is with _ -> assert false in
+                            parse_best m'_eval xis input)
                           input_tree in
                       match data'_res with
                       | Result.Ok data' ->
                          Result.Ok (m',varseq',data') (* could add what follows as an alternative *)
                       | _ -> (* does not match full sequence, look at head *)
-                         match ok_cons, Ndtree.head_opt data, Ndtree.head_opt input_tree with
-                         | true, Some data1, Some input_tree1 ->
-                            let| m1', varseq1', data1' = aux_cons data1 input_tree1 in
+                         match ok_cons, xls, Ndtree.head_opt data, Ndtree.head_opt input_tree with
+                         | true, xl::xls1, Some data1, Some input_tree1 ->
+                            let| m1', varseq1', data1' = aux_cons xls1 data1 input_tree1 in
                             assert (Ndtree.ndim data1' = Ndtree.ndim data1);
-                            let m', varseq' = make_cons m' m varseq' in
+                            let m', varseq' = make_cons xl m' m varseq' in
                             let data' = Ndtree.replace_head data data1' in
                             Result.Ok (m',varseq',data')
                          | _ -> Result.Error Not_found
                     in
-                    aux_cons data input_tree in
+                    aux_cons (List.rev rev_xls) data input_tree in
                   match ref_cons with (* adding it to refs *)
                   | Result.Ok ref_cons -> ref_cons::refs
                   | Result.Error _ -> refs)
@@ -482,8 +493,8 @@ let refinements
         make_alt_if_allowed_and_needed
           ~allowed ~supp ~nb
           m_new m varseq' best_reads)
-  and aux_alt_prune ctx m m1 m2 selected_reads =
-    aux_gen ctx m selected_reads
+  and aux_alt_prune ctx rev_xls m m1 m2 selected_reads =
+    aux_gen ctx rev_xls m selected_reads
       (fun (read, data : _ read) ->
         if Ndtree.for_all_defined
              (function
@@ -520,8 +531,8 @@ let refinements
         if supp = nb
         then Myseq.return (m', varseq', best_reads)
         else Myseq.empty)
-  and aux_alt_cond_undet ctx m xc c m1 m2 selected_reads =
-    aux_gen ctx m selected_reads
+  and aux_alt_cond_undet ctx rev_xls m xc c m1 m2 selected_reads =
+    aux_gen ctx rev_xls m selected_reads
       (fun (read, data : _ read) ->
         let vc_tree =
           Ndtree.map
@@ -599,7 +610,7 @@ let refinements
         (example_reads, false))
       reads in
   let* p, r, varseq', supp, dl' =
-    aux Model.ctx0 m0 selected_reads
+    aux Model.ctx0 [] m0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
            dl_compare dl1 dl2)
     |> Myseq.slice ~limit:max_refinements in
