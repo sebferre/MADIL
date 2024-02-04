@@ -19,6 +19,7 @@ type ('typ,'value,'var,'constr,'func) model =
   | Cons of 'var * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
   | Expr of 'typ * ('typ,'value,'var,'func) Expr.expr (* not in evaluated model *)
   | Value of 'typ * 'value Ndtree.t (* only in evaluated model *)
+  | Derived of 'typ (* derived value, in general from sibling pattern args, like an implicit expression *)
 
 type ('var,'constr) path = ('var,'constr) path_step list
 and ('var,'constr) path_step =
@@ -42,6 +43,7 @@ let make_loop (xl : 'var) (rlen : Range.t) (m1 : ('typ,'value,'var,'constr,'func
 let make_nil t = Nil (t)
 let make_cons xl m0 m1 = Cons (xl,m0,m1)
 let make_expr t e = Expr (t,e)
+let make_derived t = Derived t
 
 let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
   function
@@ -58,6 +60,7 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Cons (xl,m0,m1) -> typ m0
   | Expr (t,e) -> t
   | Value _ -> assert false
+  | Derived t -> t
 
 let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = function
   | Def (x,m1) -> seq_length m1
@@ -80,6 +83,7 @@ let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = functio
      (match Ndtree.length v_tree with
       | Some n -> Range.make_exact n
       | None -> Range.make_open 0) (* broadcasting scalar *)
+  | Derived t -> Range.make_open 0
 
 let rec is_index_invariant : ('typ,'value,'var,'constr,'func) model -> bool = function
   | Def (x,m1) -> is_index_invariant m1
@@ -91,6 +95,7 @@ let rec is_index_invariant : ('typ,'value,'var,'constr,'func) model -> bool = fu
   | Cons _ -> false
   | Expr _ -> false (* in case it evaluates to a non-scalar ndtree *)
   | Value _ -> assert false
+  | Derived _ -> false (* in case it evaluates to a non-scalar ndtree *)
     
 (* printing *)
   
@@ -177,6 +182,8 @@ let xp_model
          (fun () ->
            Expr.xp_expr ~xp_value ~xp_var ~xp_func ~html print e)
     | Value _ -> assert false
+    | Derived _t ->
+       print#string " (derived)"
   and aux_cond ~html print = function
     | Undet prob ->
        aux_prob ~html print prob
@@ -254,7 +261,7 @@ let xp_path
 class virtual ['typ,'constr,'func] asd =
   object (self)
     method virtual is_default_constr : 'constr -> bool
-    method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * ('typ * int) array) list (* the int is the ndim of the field *)
+    method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * ('typ * int) array) list (* omit derived arguments; the int is the ndim of the field *)
     method virtual funcs : 'typ -> ('func * 'typ array) list (* None when expressions not allowed for this type *)
     method virtual expr_opt : 'typ -> bool * 'typ list (* OK to produce constant values, and list of compatible types  *)
     method virtual alt_opt : 'typ -> bool
@@ -287,6 +294,7 @@ let binding_vars
        acc
     | Expr (t,e) -> acc
     | Value _ -> assert false
+    | Derived t -> acc
   in
   aux m0 Mymap.empty
   
@@ -373,6 +381,7 @@ let get_bindings  (* QUICK *)
        acc
     | Expr _ -> acc
     | Value _ -> assert false
+    | Derived _ -> acc
   in
   aux [] m0 (Ndtree.scalar (Some d0)) Expr.bindings0
 
@@ -419,6 +428,8 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
        let| v_tree = eval_expr e bindings in
        Result.Ok (Value (t,v_tree))
     | Value _ -> assert false
+    | Derived t ->
+       Result.Ok (Derived t) (* local evaluation, depends on parsing/generation *)
   and aux_cond = function
     | Undet prob -> Result.Ok (Undet prob)
     | True | False -> assert false
@@ -518,6 +529,9 @@ let generator (* on evaluated models: no expr, no def *)
        (match Ndtree.lookup v_tree is with
         | Some v -> (fun info -> Myseq.return (D (v, DExpr)))
         | None -> (fun info -> Myseq.empty))
+    | Derived t ->
+       (fun info ->
+         failwith "Derived arguments must not be generated but computed") (* must be computed, not generated *)
   in
   fun ?(xis = []) m ->
   gen (List.rev xis) m
@@ -586,6 +600,8 @@ let parseur (* on evaluated models: no expr, no def *)
          | Some v -> parseur_value v input
          | None -> Myseq.empty
        else Myseq.empty (* TODO: accepting vtrees ? *)
+    | Derived t ->
+       failwith "Derived arguments must not be parsed but computed" 
   in
   fun ?(xis = []) m input ->
   parse (List.rev xis) m input
@@ -647,6 +663,7 @@ let size_model_ast (* for DL computing, QUICK *)
     | Cons (xl,m0,m1) -> size_cons + aux m0 + aux m1
     | Expr (t,e) -> Expr.size_expr_ast e
     | Value _ -> assert false
+    | Derived t -> 0 (* implicit, no information there *)
   and aux_cond = function
     | Undet _ -> 0
     | True | False -> assert false
@@ -742,6 +759,7 @@ let dl_model_params
        +. aux ndim m1
     | Expr (t,e) -> dl_expr_params e
     | Value _ -> assert false
+    | Derived t -> 0.
   and aux_cond = function
     | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
     | True | False -> assert false

@@ -382,6 +382,7 @@ let refinements
            Myseq.return (m', varseq', best_reads))
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
+    | Model.Derived t -> Myseq.empty
   and aux_expr ctx rev_xls m selected_reads =
     let t = Model.typ m in
     match asd#expr_opt t with
