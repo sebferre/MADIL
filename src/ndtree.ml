@@ -256,6 +256,12 @@ let tail_opt  (t : 'a t) : 'a t option = (* t[1:] *)
        Some t'
      else None
 
+let reverse (t : 'a t) : 'a t =
+  match t.tree with
+  | Scalar _ -> t
+  | Vector1 vx -> { t with tree = Vector1 (array_reverse vx) }
+  | Vector v -> { t with tree = Vector (array_reverse v) }
+
                   
 let fold ~(scalar: 'a option -> 'b) ~(vector: 'b array -> 'b) (t : 'a t) : 'b =
   let rec aux = function

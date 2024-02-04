@@ -58,7 +58,11 @@ let list_list_map (f : 'a -> 'b) (reads : 'a list list) : 'b list list  =
 (* array *)
 
 let array_float_sum : float array -> float = Array.fold_left (+.) 0.
-  
+
+let array_reverse (ar : 'a array) : 'a array =
+  let n = Array.length ar in
+  Array.init n (fun i -> ar.(n-i-1))
+                                           
 (* result *)
         
 type 'a result = ('a,exn) Result.t
