@@ -6,19 +6,29 @@ let rec task_of_json
       ~(value_of_json : Yojson.Safe.t -> 'value)
         : Yojson.Safe.t -> 'value task =
   let rec aux = function
-    | `Assoc ["train", `List trains; "test", `List tests]
-      | `Assoc ["test", `List tests; "train", `List trains] ->
+    | `Assoc fields ->
+       let trains =
+         match List.assoc_opt "train" fields with
+         | Some (`List trains) -> trains
+         | _ -> invalid_arg "Invalid JSON task: missing train field" in
+       let tests =
+         match List.assoc_opt "test" fields with
+         | Some (`List tests) -> tests
+         | _ -> [] in
        { train = List.map aux_pair trains;
          test = List.map aux_pair tests }
-    | `Assoc ["train", `List trains] ->
-       { train = List.map aux_pair trains;
-         test = [] }
     | _ -> invalid_arg "Invalid JSON task"
   and aux_pair = function
-    | `Assoc ["input", input; "output", output]
-      | `Assoc ["output", output; "input", input] ->
-       { input = value_of_json input;
-         output = value_of_json output }
+    | `Assoc fields ->
+       let input =
+         match List.assoc_opt "input" fields with
+         | Some i -> value_of_json i
+         | None -> invalid_arg "Invalid JSON pair: missing input" in
+       let output =
+         match List.assoc_opt "output" fields with
+         | Some o -> value_of_json o
+         | None -> invalid_arg "Invalid JSON pair: missing output" in
+       { input; output }
     | _ -> invalid_arg "Invalid JSON pair"
   in
   aux
