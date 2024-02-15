@@ -62,7 +62,11 @@ let array_float_sum : float array -> float = Array.fold_left (+.) 0.
 let array_reverse (ar : 'a array) : 'a array =
   let n = Array.length ar in
   Array.init n (fun i -> ar.(n-i-1))
-                                           
+
+(* option *)
+
+let ( let@ ) = Option.bind
+
 (* result *)
         
 type 'a result = ('a,exn) Result.t

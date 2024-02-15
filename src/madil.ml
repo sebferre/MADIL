@@ -187,6 +187,7 @@ module type DOMAIN =
     val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
     val parseur_pat : typ -> constr -> parseur array -> parseur
+    val parseur_end : input -> input Myseq.t
 
     (* description lengths *)
       
@@ -266,6 +267,7 @@ module Make (Domain : DOMAIN) =
       Model.parseur
         ~parseur_value
         ~parseur_pat
+        ~parseur_end
         ~value_of_seq
 
     (* description lengths *)

@@ -543,6 +543,7 @@ type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'inp
 let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_value : 'value -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
+      ~(parseur_end : 'input -> 'input Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
     : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse rev_xis m input =
@@ -555,10 +556,12 @@ let parseur (* on evaluated models: no expr, no def *)
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
          let* d1, input = parse rev_xis m1 input in
-         Myseq.return (D (value d1, DAlt (prob,true,d1)), input) in
+         let d = D (value d1, DAlt (prob,true,d1)) in
+         Myseq.return (d, input) in
        let seq2 prob =
          let* d2, input = parse rev_xis m2 input in
-         Myseq.return (D (value d2, DAlt (prob,false,d2)), input) in
+         let d = D (value d2, DAlt (prob,false,d2)) in
+         Myseq.return (d, input) in
        (match c with
         | Undet prob ->
            if prob >= 0.5 (* TODO: weight interleave according to prob *)
@@ -572,12 +575,17 @@ let parseur (* on evaluated models: no expr, no def *)
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
          Myseq.return (parse ((xl,i)::rev_xis) m1) in
-       let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in (* TODO: use seq_len_m1 to bound |ld1| *)
+       let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in
+       let* input = parseur_end input in (* checking valid end *)
+       (* TODO: use seq_len_m1 to bound |ld1| *)
+       (* TODO: use a variant of Myseq.star_dependent_fait to prevent stop anywhere *)
        let ds1 = Array.of_list ld1 in
        let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
        if Range.mem n seq_len_m1
-       then Myseq.return (D (v, DSeq (n, seq_len_m1, ds1)), input)
+       then
+         let d = D (v, DSeq (n, seq_len_m1, ds1)) in
+         Myseq.return (d, input)
        else Myseq.empty (* could not parse the expected number of elements *)
     | Nil (t) -> Myseq.empty
     | Cons (xl,m0,m1) ->
