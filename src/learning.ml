@@ -109,7 +109,7 @@ let learn
                if state1.lmd < state.lmd
                then Some state1
                else None)
-          (Common.prof "Learing.task_refinements" (fun () ->
+          (Common.prof "Learning.task_refinements" (fun () ->
                task_refinements state.m state.prs state.drsi state.drso)) in
       if lstate1 = [] (* no compressive refinement *)
       then (

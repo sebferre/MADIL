@@ -82,13 +82,16 @@ let inter_union_reads
   (* given a function extracting refinements (submodels) from each read,
      return a set of such refinements, each mapped to the dl-shortest reads supporting it, along with new data *)
   let process_example reads unselected_reads =
+    Common.prof "Refining.inter_union_reads/process_example" (fun () ->
     assert (reads <> []);
     let read0, data0 = List.hd reads in
     let alt_read = {unselected_reads; matching = false; read = read0; data = data0; new_data = data0} in
     let refs =
       List.fold_left
         (fun refs (read,data) ->
-          let refs_read = get_rs (read,data) in
+          let refs_read =
+            Common.prof "Refining.inter_union_reads/process_example/get_rs" (fun () ->
+            get_rs (read,data)) in
           List.fold_left (* union(refs, refs_read) *)
             (fun refs (r,varseq',new_data) ->
               if Mymap.mem r refs
@@ -96,8 +99,9 @@ let inter_union_reads
               else Mymap.add r (varseq', {unselected_reads; matching = true; read; data; new_data}) refs)
             refs refs_read)
         Mymap.empty reads in
-    alt_read, refs
+    alt_read, refs)
   in
+  Common.prof "Refining.inter_union_reads" (fun () ->
   match List.rev reads with (* rev to have best_reads in right order at the end *)
   | [] -> assert false
   | (example0_reads, example0_unselected_reads) :: other_reads ->
@@ -109,6 +113,7 @@ let inter_union_reads
          (fun (alt_reads,refs) (exampleI_reads, exampleI_unselected_reads) ->
            let alt_readI, refsI = process_example exampleI_reads exampleI_unselected_reads in
            let refs =
+             Common.prof "Refining.inter_union_reads/merge" (fun () ->
              Mymap.merge (* intersection(refs, refsI) *)
                (fun r varseq_best_reads_opt varseq_best_readI_opt ->
                  match varseq_best_reads_opt, varseq_best_readI_opt with
@@ -119,11 +124,11 @@ let inter_union_reads
                  | None, Some (varseqI, best_readI) ->
                     Some (varseqI, best_readI :: alt_reads)
                  | _ -> None)
-               refs refsI in
+               refs refsI) in
            let alt_reads = alt_readI :: alt_reads in
            alt_reads, refs)
          (alt_reads, refs) other_reads in
-     refs
+     refs)
 
 let extend_partial_best_reads
       (selected_reads : ((('typ,'value,'dconstr,'var,'func) read as 'read) list * bool) list)
@@ -204,6 +209,7 @@ type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
 let refinements
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
+      ~(max_expr_refinements_per_read : int)
       ~(max_refinements : int)
       ~(asd : ('typ,'constr,'func) Model.asd)
       ~(typ_bool : 'typ)
@@ -226,11 +232,13 @@ let refinements
     | _ -> Result.Error Not_found
   in
   fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
+  Myseq.prof "Refining.refinements" (
   let aux_gen (type r)
         ctx rev_xls m selected_reads (* ctx is reverse path *)
         (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
         (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
       : ('path * 'model * 'varseq * int * dl) Myseq.t =
+    Myseq.prof "Refining.refinements/aux_gen" (
     let p = List.rev ctx in (* local path *)
     let ndim = List.length rev_xls in
     let dl_m = dl_model ~nb_env_vars ~ndim m in
@@ -259,9 +267,10 @@ let refinements
                         read.dl -. dl_d +. dl_d_new
                       else 0.) (* no change in this case *) in
     let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
-    Myseq.return (p, m_new, varseq', supp, dl_new)
+    Myseq.return (p, m_new, varseq', supp, dl_new))
   in
   let rec aux ctx rev_xls m selected_reads =
+  Myseq.prof "Refining.refinements/aux" (
   if selected_reads = [] then Myseq.empty
   else
     match m with
@@ -382,8 +391,8 @@ let refinements
            Myseq.return (m', varseq', best_reads))
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
-    | Model.Derived t -> Myseq.empty
-  and aux_expr ctx rev_xls m selected_reads =
+    | Model.Derived t -> Myseq.empty)
+  and aux_expr ctx rev_xls m selected_reads = (* QUICK *)
     let t = Model.typ m in
     match asd#expr_opt t with
     | false, [] -> Myseq.empty (* no expression here *)
@@ -406,7 +415,9 @@ let refinements
                  | None -> s_expr
                else s_expr in
              let refs =
-               Myseq.fold_left
+               s_expr
+               |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
+               |> Myseq.fold_left
                  (fun refs e ->
                    let rec aux_cons refs is_const me varseq d_tree' xvd_trees =
                      (* adding Cons around e, and replacing head by d_tree', |xvd_trees| times *)
@@ -430,7 +441,7 @@ let refinements
                    let d_tree' = (* values in v_tree/d_tree are explained by expr *)
                      Ndtree.map Data.make_dexpr v_tree in
                    aux_cons refs is_const me varseq0 d_tree' xvd_trees)
-                 refs s_expr in
+                 refs in
              if ndim >= 1 && m_is_index_invariant (* not m_is_nil_or_cons *)
              then
                match xls_down, Ndtree.head_opt v_tree, Ndtree.head_opt d_tree with
@@ -616,7 +627,7 @@ let refinements
            dl_compare dl1 dl2)
     |> Myseq.slice ~limit:max_refinements in
   let m' = Model.refine p r m0 in
-  Myseq.return (p, r, supp, dl', m', varseq')
+  Myseq.return (p, r, supp, dl', m', varseq'))
 
   
 let task_refinements
