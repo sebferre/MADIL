@@ -82,7 +82,7 @@ module type TYPES =
     type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
-      [ `Success of (pairs_reads * reads * reads * dl triple triple * dl)
+      [ `Success of (pairs_reads * reads * reads * Task_model.dl_split * dl)
       | `Failure
       | `Timeout
       | `Error of exn ]
@@ -143,7 +143,7 @@ module Defined_types (T : BASIC_TYPES) =
     type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
-      [ `Success of (pairs_reads * reads * reads * dl triple triple * dl)
+      [ `Success of (pairs_reads * reads * reads * Task_model.dl_split * dl)
       | `Failure
       | `Timeout
       | `Error of exn ]

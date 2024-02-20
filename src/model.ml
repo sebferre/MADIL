@@ -809,7 +809,8 @@ type ('typ,'value,'dconstr,'var,'func) read =
     bindings : ('var,'typ,'value) Expr.bindings;
     mutable lazy_index : ('typ,'value,'var,'func) Expr.Index.t option; (* not using Lazy.t because breaks comparisons and hash *)
     data : ('value,'dconstr) data;
-    dl : dl }
+    dl_rank : dl;
+    dl : dl } (* including rank *)
 
 let force_index
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)
@@ -884,10 +885,10 @@ let read
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
   let dl_rank = dl_parse_rank rank in
   let dl =
-    if dl_assuming_contents_known
+    if dl_assuming_contents_known (* TODO: rather use above dl_rank *)
     then dl_rank
     else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
-  Myseq.return { env; bindings; lazy_index=None; data; dl })
+  Myseq.return { env; bindings; lazy_index=None; data; dl_rank; dl })
 
 
 (* writing *)

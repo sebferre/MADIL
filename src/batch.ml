@@ -20,12 +20,11 @@ let pause = ref 0. (* TODO: not used in code *)
 (* === printing and checking functions === *)
 
 let print_dl_md psr = (* model+data DL *)
-  let (lmi,lmo,lm), (ldi,ldo,ld), (lmdi, lmdo, lmd) =
-    Task_model.dl_model_data ~alpha:(!alpha) psr in
-  Printf.printf "DL input  with Mi: L = %.1f + %.1f = %.1f\n" lmi ldi lmdi;
-  Printf.printf "DL output with Mo: L = %.1f + %.1f = %.1f\n" lmo ldo lmdo;
-  Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" lm ld lmd;
-  ldo
+  let l : Task_model.dl_split = Task_model.dl_model_data ~alpha:(!alpha) psr in
+  Printf.printf "DL input  with Mi: L = %.1f + %.1f = %.1f\n" l.m.i l.d.i l.md.i;
+  Printf.printf "DL output with Mo: L = %.1f + %.1f = %.1f\n" l.m.o l.d.o l.md.o;
+  Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" l.m.io l.d.io l.md.io;
+  l.r.i +. l.d.o
 
 let print_dl_task_model ~env name task model =
   read_pairs
@@ -219,7 +218,7 @@ let print_learned_model
      print_endline "\n# Learned model (predictive, after pruning):";
      pp_task_model learned_task_model;
      print_newline ();
-     let ldo = print_dl_md res.result_pruning.pairs_reads in
+     let lrido = print_dl_md res.result_pruning.pairs_reads in
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
@@ -233,7 +232,7 @@ let print_learned_model
      print_endline "\n# Performance measures on task";
      let ms =
        [ "runtime-learning", `Seconds, runtime;
-         "bits-train-error", `Bits, ldo;
+         "bits-train-error", `Bits, lrido;
 	 "acc-train-micro", `Tasks, micro_train;
 	 "acc-train-macro", `Tasks, macro_train;
          "acc-train-mrr", `MRR, mrr_train;

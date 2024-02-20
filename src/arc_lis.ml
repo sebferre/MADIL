@@ -26,7 +26,7 @@ type learning_stage = Build | Prune
 type arc_state =
   { name : string; (* task name *)
     task : task; (* task *)
-    norm_dl_model_data : pairs_reads -> dl triple triple;
+    norm_dl_model_data : pairs_reads -> Task_model.dl_split;
     stage : learning_stage;
     refinement : refinement; (* previous refinement *)
     refinement_support : int;
@@ -36,8 +36,8 @@ type arc_state =
     prs : pairs_reads; (* pair reads *)
     dsri : reads; (* input reads *)
     dsro : reads; (* output reads *)
-    dls : Mdl.bits triple triple; (* DL components *)
-    norm_dls : Mdl.bits triple triple; (* normalized DL components *)
+    dls : Task_model.dl_split; (* DL components *)
+    norm_dls : Task_model.dl_split; (* normalized DL components *)
     norm_dl : Mdl.bits; (* global normalized DL *)
     mutable suggestions : arc_suggestion list;
   }
@@ -57,7 +57,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
   let| prs = read_pairs ~pruning:(stage = Prune) ~env model task.train in
   let dsri, dsro = Task_model.split_pairs_read prs in
   let dls = Task_model.dl_model_data ~alpha:(!alpha) prs in
-  let (_, _, (_,_,norm_dl) as norm_dls) = norm_dl_model_data prs in
+  let norm_dls : Task_model.dl_split = norm_dl_model_data prs in
   Result.Ok
     { name; task;
       norm_dl_model_data;
@@ -68,7 +68,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       prs; dsri; dsro;
       dls;
       norm_dls;
-      norm_dl;
+      norm_dl=norm_dls.md.io;
       suggestions = [] }
   with exn ->
     print_endline "FAILURE to compute new state for some refinement";
@@ -113,10 +113,10 @@ object
                     let compressive =
                       state.norm_dl < focus.norm_dl
                       && (if focus.stage = Prune && state.stage = Prune
-                          then (* in pruning stage, L(D|M) must not increase *)
-                            let _, (_, _, ld0), _ = focus.dls in
-                            let _, (_, _, ld), _ = state.dls in
-                            ld <= ld0
+                          then (* in pruning stage, L(input rank + output data|M) must not increase *)
+                            let lrido0 = focus.dls.r.i +. focus.dls.d.o in
+                            let lrido = state.dls.r.i +. state.dls.d.o in
+                            lrido <= lrido0
                           else true) in
                     (if compressive then quota_compressive - 1 else quota_compressive),
                     (compressive,state)::refinements,
@@ -210,7 +210,7 @@ let html_dl dl =
   Printf.sprintf "%.3f" dl
    
 let xml_of_focus focus =
-  let (mi,mo,m), (di,do_,d), (mdi,mdo,md) = focus.dls in
+  let l = focus.dls in
   [Syntax.Block
      [[Syntax.Kwd (Printf.sprintf "Task %s [%s]"
                      focus.name
@@ -218,7 +218,7 @@ let xml_of_focus focus =
                       | Build -> "building stage"
                       | Prune -> "pruning stage"))];
       [Syntax.Kwd (Printf.sprintf "DL = %f" focus.norm_dl)];
-      [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi + %.3fdo) = %.3fi + %.3fo" md m d mi mo di do_ mdi mdo)];
+      [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi / %.3fri + %.3fdo / %.3fro) = %.3fi + %.3fo" l.md.io l.m.io l.d.io l.m.i l.m.o l.d.i l.r.i l.d.o l.r.o l.md.i l.md.o)];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.input_model)];
       [Syntax.Kwd " ⬇ "];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.output_model)]]]

@@ -115,41 +115,57 @@ let split_pairs_read
   
 (* pair encoding *)
 
+type dl_io =
+  { i : dl; (* input *)
+    o : dl; (* output *)
+    io : dl; (* input+output *)
+  }
+type dl_split =
+  { m : dl_io; (* model *)
+    r : dl_io; (* rank *)
+    d : dl_io; (* data, including rank *)
+    md : dl_io; (* model+data *)
+  }
+
 let dl_model_data
       ~(alpha : float)
-      (psr : ('typ,'value,'dconstr,'var,'func) pairs_reads) : dl triple triple = (* QUICK *)
+      (psr : ('typ,'value,'dconstr,'var,'func) pairs_reads) : dl_split = (* QUICK *)
   let lmi = psr.dl_mi in
   let lmo = psr.dl_mo in
-  let ldi, ldo =
+  let lri, lro, ldi, ldo =
     List.fold_left
-      (fun (ldi,ldo) ->
+      (fun (lri, lro, ldi,ldo) ->
         function
-        | (ri,ro,dl)::_ -> (ldi +. ri.dl, ldo +. ro.dl)
+        | (ri,ro,dl)::_ -> (lri +. ri.dl_rank, lro +. ro.dl_rank,
+                            ldi +. ri.dl, ldo +. ro.dl)
         | _ -> assert false)
-      (0.,0.) psr.reads in
+      (0.,0.,0.,0.) psr.reads in
+  let lri, lro = alpha *. lri, alpha *. lro in
   let ldi, ldo = alpha *. ldi, alpha *. ldo in
   let lmdi = lmi +. ldi in
   let lmdo = lmo +. ldo in
-  (lmi, lmo, lmi +. lmo),
-  (ldi, ldo, ldi +. ldo),
-  (lmdi, lmdo, lmdi +. lmdo)
+  { m = {i=lmi; o=lmo; io=lmi +. lmo};
+    r = {i=lri; o=lro; io=lri +. lro};
+    d = {i=ldi; o=ldo; io=ldi +. ldo};
+    md = {i=lmdi; o=lmdo; io=lmdi +. lmdo} }
 
 let make_norm_dl_model_data
       ~(alpha : float)
-      () : ('typ,'value,'dconstr,'var,'func) pairs_reads -> dl triple triple =
+      () : ('typ,'value,'dconstr,'var,'func) pairs_reads -> dl_split =
   let lmdi0 = ref (-1.) in
   let lmdo0 = ref (-1.) in
   fun psr ->
-  let (lmi,lmo,lm), (ldi,ldo,ld), (lmdi,lmdo,lmd) =
-    dl_model_data ~alpha psr in
+  let l = dl_model_data ~alpha psr in
   let () = (* setting initial DLs *)
     if !lmdi0 < 0.
-    then ( lmdi0 := lmdi; lmdo0 := lmdo ) in
-  let nlmi, nldi, nlmdi = lmi /. !lmdi0, ldi /. !lmdi0, lmdi /. !lmdi0 in
-  let nlmo, nldo, nlmdo = lmo /. !lmdo0, ldo /. !lmdo0, lmdo /. !lmdo0 in
-  (nlmi, nlmo, nlmi +. nlmo),
-  (nldi, nldo, nldi +. nldo),
-  (nlmdi, nlmdo, nlmdi +. nlmdo)
+    then ( lmdi0 := l.md.i; lmdo0 := l.md.o ) in
+  let nlmi, nlri, nldi, nlmdi =
+    l.m.i /. !lmdi0, l.r.i /. !lmdi0, l.d.i /. !lmdi0, l.md.i /. !lmdi0 in
+  let nlmo, nlro, nldo, nlmdo = l.m.o /. !lmdo0, l.r.o /. !lmdo0, l.d.o /. !lmdo0, l.md.o /. !lmdo0 in
+  { m = {i=nlmi; o=nlmo; io=nlmi +. nlmo};
+    r = {i=nlri; o=nlro; io=nlri +. nlro};
+    d = {i=nldi; o=nldo; io=nldi +. nldo};
+    md = {i=nlmdi; o=nlmdo; io=nlmdi +. nlmdo} }
 
 
 (* applying a task model to an input *)

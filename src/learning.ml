@@ -19,8 +19,8 @@ type ('typ,'value,'dconstr,'var,'constr,'func) state =
     prs : ('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads; (* pairs reads *)
     drsi : ('typ,'value,'dconstr,'var,'func) Task_model.reads; (* input reads *)
     drso : ('typ,'value,'dconstr,'var,'func) Task_model.reads; (* output reads *)
-    dl_triples : dl triple triple; (* all DLs *)
-    ldo : dl; (* output data normalized DL *)
+    dl_split : dl_split; (* all DLs *)
+    lrido : dl; (* input rank + output data normalized DL *)
     ld : dl; (* data normalized DL *)
     lmd : dl; (* whole normalized DL *)
   }
@@ -49,7 +49,7 @@ let learn
           ('refinement * 'task_model) Myseq.t)
       ~(log_reading :
           'refinement -> 'task_model ->
-          status:[ `Success of ('pairs_reads * 'reads * 'reads * dl triple triple * dl)
+          status:[ `Success of ('pairs_reads * 'reads * 'reads * dl_split * dl)
                  | `Failure
                  | `Timeout
                  | `Error of exn] -> unit)
@@ -68,13 +68,13 @@ let learn
       let state_opt =
         Result.to_option
           (let| prs = read_pairs ~pruning ~env m pairs in
-           let dl_triples = norm_dl_model_data prs in
-           let (_lmi,_lmo,_lm), (_ldi,ldo,ld), (_lmdi,_lmdo,lmd) = dl_triples in
+           let l = norm_dl_model_data prs in
            let drsi, drso = split_pairs_read prs in
-           Result.Ok {r; m; prs; drsi; drso; dl_triples; ldo; ld; lmd}) in
+           Result.Ok {r; m; prs; drsi; drso; dl_split=l;
+                      lrido=l.r.i+.l.d.o; ld=l.d.io; lmd=l.md.io}) in
       let status =
         match state_opt with
-        | Some state -> `Success (state.prs, state.drsi, state.drso, state.dl_triples, state.lmd)
+        | Some state -> `Success (state.prs, state.drsi, state.drso, state.dl_split, state.lmd)
         | None -> `Failure in
       log_reading r m ~status;
       state_opt
@@ -97,7 +97,7 @@ let learn
   (* refining phase *)
   let rec loop_refine jumps state delta conts =
     log_refining state.r state.m state.prs state.lmd;
-    if state.ldo = 0. (* end of search *)
+    if state.lrido = 0. (* end of search *)
     then state_ref := state
     else
       let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
