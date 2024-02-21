@@ -38,7 +38,8 @@ type arc_state =
     dsro : reads; (* output reads *)
     dls : Task_model.dl_split; (* DL components *)
     norm_dls : Task_model.dl_split; (* normalized DL components *)
-    norm_dl : Mdl.bits; (* global normalized DL *)
+    norm_lmd : Mdl.bits; (* global normalized DL, with ldi=lri in pruning mode *)
+    norm_lrido : Mdl.bits; (* input rank + output data *)
     mutable suggestions : arc_suggestion list;
   }
 and arc_suggestion =
@@ -54,7 +55,7 @@ type arc_extent = arc_state
 
 let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (refinement : refinement) (env : data) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
   try
-  let| prs = read_pairs ~pruning:(stage = Prune) ~env model task.train in
+  let| prs = read_pairs ~env model task.train in
   let dsri, dsro = Task_model.split_pairs_read prs in
   let dls = Task_model.dl_model_data ~alpha:(!alpha) prs in
   let norm_dls : Task_model.dl_split = norm_dl_model_data prs in
@@ -68,7 +69,11 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       prs; dsri; dsro;
       dls;
       norm_dls;
-      norm_dl=norm_dls.md.io;
+      norm_lmd=
+        (match stage with
+         | Build -> norm_dls.md.io
+         | Prune -> norm_dls.m.io +. norm_dls.r.i +. norm_dls.d.o);
+      norm_lrido = norm_dls.r.i +. norm_dls.d.o;
       suggestions = [] }
   with exn ->
     print_endline "FAILURE to compute new state for some refinement";
@@ -111,12 +116,10 @@ object
                  match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage r focus.env m focus.info_o with
                  | Result.Ok state ->
                     let compressive =
-                      state.norm_dl < focus.norm_dl
+                      state.norm_lmd < focus.norm_lmd
                       && (if focus.stage = Prune && state.stage = Prune
                           then (* in pruning stage, L(input rank + output data|M) must not increase *)
-                            let lrido0 = focus.dls.r.i +. focus.dls.d.o in
-                            let lrido = state.dls.r.i +. state.dls.d.o in
-                            lrido <= lrido0
+                            state.norm_lrido <= focus.norm_lrido
                           else true) in
                     (if compressive then quota_compressive - 1 else quota_compressive),
                     (compressive,state)::refinements,
@@ -135,8 +138,8 @@ object
                  | Build -> s2.refinement_support, s1.refinement_support
                  | Prune -> s1.refinement_support, s2.refinement_support in*)
                Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
-                 (compr2, (*sup1,*) s1.norm_dl, s1.refinement)
-                 (compr1, (*sup2,*) s2.norm_dl, s2.refinement)) in
+                 (compr2, (*sup1,*) s1.norm_lmd, s1.refinement)
+                 (compr1, (*sup2,*) s2.norm_lmd, s2.refinement)) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask
@@ -217,7 +220,7 @@ let xml_of_focus focus =
                      (match focus.stage with
                       | Build -> "building stage"
                       | Prune -> "pruning stage"))];
-      [Syntax.Kwd (Printf.sprintf "DL = %f" focus.norm_dl)];
+      [Syntax.Kwd (Printf.sprintf "DL = %f" focus.norm_lmd)];
       [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi / %.3fri + %.3fdo / %.3fro) = %.3fi + %.3fo" l.md.io l.m.io l.d.io l.m.i l.m.o l.d.i l.r.i l.d.o l.r.o l.md.i l.md.o)];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.input_model)];
       [Syntax.Kwd " ⬇ "];
@@ -245,11 +248,11 @@ let html_of_suggestion ~input_dico = function
      "reset current task"
   | ChangeStage s ->
      Jsutils.escapeHTML
-       (Printf.sprintf "(%f) switch to %s stage " s.norm_dl
+       (Printf.sprintf "(%f) switch to %s stage " s.norm_lmd
           (match s.stage with Build -> "building" | Prune -> "pruning"))
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
-       (Printf.sprintf "(%f)  " s.norm_dl
+       (Printf.sprintf "(%f)  " s.norm_lmd
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
   | FailedRefinement (r,err) ->
      Html.span ~classe:"failed-refinement"

@@ -871,7 +871,6 @@ let read
       ~(eval : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'constr,'func) model result)
       ~(parse_bests : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('input,'value,'dconstr) parse_bests)
 
-      ~(dl_assuming_contents_known : bool)
       ~(env : ('value,'dconstr) data)
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m0 : ('typ,'value,'var,'constr,'func) model)
@@ -884,10 +883,7 @@ let read
   let* best_parses = Myseq.from_result (parse_bests m input) in
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
   let dl_rank = dl_parse_rank rank in
-  let dl =
-    if dl_assuming_contents_known (* TODO: rather use above dl_rank *)
-    then dl_rank
-    else dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
+  let dl = dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
   Myseq.return { env; bindings; lazy_index=None; data; dl_rank; dl })
 
 

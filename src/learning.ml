@@ -20,9 +20,8 @@ type ('typ,'value,'dconstr,'var,'constr,'func) state =
     drsi : ('typ,'value,'dconstr,'var,'func) Task_model.reads; (* input reads *)
     drso : ('typ,'value,'dconstr,'var,'func) Task_model.reads; (* output reads *)
     dl_split : dl_split; (* all DLs *)
+    lmd : dl; (* whole normalized DL, with ldi=lri in pruning mode *)
     lrido : dl; (* input rank + output data normalized DL *)
-    ld : dl; (* data normalized DL *)
-    lmd : dl; (* whole normalized DL *)
   }
 
 let print_jumps jumps =
@@ -36,7 +35,7 @@ let print_jumps jumps =
 let learn
       ~(alpha : float)
       ~(read_pairs :
-          pruning:bool -> env:'data ->
+          env:'data ->
           (('t,'value,'var,'constr,'func) Task_model.task_model as 'task_model) ->
           'value Task.pair list ->
           (('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
@@ -67,11 +66,12 @@ let learn
     try
       let state_opt =
         Result.to_option
-          (let| prs = read_pairs ~pruning ~env m pairs in
+          (let| prs = read_pairs ~env m pairs in
            let l = norm_dl_model_data prs in
            let drsi, drso = split_pairs_read prs in
            Result.Ok {r; m; prs; drsi; drso; dl_split=l;
-                      lrido=l.r.i+.l.d.o; ld=l.d.io; lmd=l.md.io}) in
+                      lmd = (if pruning then l.m.io +. l.r.i +. l.d.o else l.md.io);
+                      lrido = l.r.i +. l.d.o }) in
       let status =
         match state_opt with
         | Some state -> `Success (state.prs, state.drsi, state.drso, state.dl_split, state.lmd)
@@ -195,7 +195,7 @@ let learn
           match data_of_model ~pruning:true r1 m1 with
           | None -> None (* failure to parse with model m1 *)
           | Some state1 ->
-             if state1.lmd < state.lmd && state1.ld <= state.ld (* must not degrade parse ranks *)
+             if state1.lmd < state.lmd && state1.lrido <= state.lrido (* must not degrade parse ranks and output data *)
              then Some state1
              else None)
         (Common.prof "Learning.task_prunings" (fun () ->

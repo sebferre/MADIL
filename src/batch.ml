@@ -28,7 +28,6 @@ let print_dl_md psr = (* model+data DL *)
 
 let print_dl_task_model ~env name task model =
   read_pairs
-    ~pruning:false
     ~env
     model task.Task.train
   |> Result.fold
@@ -100,7 +99,6 @@ let score_learned_model
                let input_reads, _ =
                  Myseq.take (!max_nb_reads)
                    (read
-                      ~dl_assuming_contents_known:false
                       ~env ~bindings:Expr.bindings0
                       m.Task_model.input_model input) in
                if input_reads = []

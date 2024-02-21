@@ -48,13 +48,11 @@ type ('typ,'value,'dconstr,'var,'func) pairs_reads =
 let read_pairs
       ~(max_nb_reads : int)
       ~(dl_task_model : (('typ,'value,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
-      ~(read : dl_assuming_contents_known:bool ->
-               env:(('value,'dconstr) data as 'data) ->
+      ~(read : env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
       
-      ~(pruning : bool)
       ~(env : 'data)
       (m : 'task_model)
       (pairs : 'value Task.pair list)
@@ -69,7 +67,6 @@ let read_pairs
              myseq_bind_sample_fair
                ~size1:max_nb_reads ~size2:max_nb_reads
                (read
-                  ~dl_assuming_contents_known:pruning
                   ~env
                   ~bindings:Expr.bindings0
                   m.input_model input)
@@ -77,7 +74,6 @@ let read_pairs
                  let bindings = get_bindings m.input_model ri.data in
                  let* ro =
                    read
-                     ~dl_assuming_contents_known:false
                      ~env:ri.data
                      ~bindings
                      m.output_model output in
@@ -173,8 +169,7 @@ let make_norm_dl_model_data
 let apply
       ~(max_nb_reads : int)
       ~(max_nb_writes : int)
-      ~(read : dl_assuming_contents_known:bool ->
-               env:(('value,'dconstr) data as 'data) ->
+      ~(read : env:(('value,'dconstr) data as 'data) ->
                bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value ->
                ('typ,'value,'dconstr,'var,'func) read Myseq.t)
@@ -189,7 +184,6 @@ let apply
     myseq_bind_sample_fair
       ~size1:max_nb_reads ~size2:max_nb_writes
       (read
-         ~dl_assuming_contents_known:true
          ~env ~bindings:Expr.bindings0
          m.input_model v_i)
       (fun read_i ->
