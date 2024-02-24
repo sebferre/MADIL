@@ -416,9 +416,11 @@ let refinements
                else s_expr in
              let refs =
                s_expr
+               |> Myseq.map (fun e -> (Expr.size_expr_ast e, e))
+               |> Myseq.sort Stdlib.compare
                |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
                |> Myseq.fold_left
-                 (fun refs e ->
+                 (fun refs (_,e) ->
                    let rec aux_cons refs is_const me varseq d_tree' xvd_trees =
                      (* adding Cons around e, and replacing head by d_tree', |xvd_trees| times *)
                      match xvd_trees with
