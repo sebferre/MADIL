@@ -857,6 +857,7 @@ let parse_bests
         parses
         |> Myseq.slice ~offset:0 ~limit:max_nb_parse
         |> Myseq.to_list) in
+  (*        |> Myseq.to_list_timeout ~timeout:1) in *) (* TODO: find a way to bound search for parses, can explode, but 1s is too much and too rigid *)
   if l_parses = []
   then Result.Error Parse_failure
   else

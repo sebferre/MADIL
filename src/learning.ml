@@ -183,10 +183,6 @@ let learn
       timed_out = timed_out_refine;
       memed_out = memed_out_refine } in
   (* pruning phase *)
-  let () =
-    match data_of_model ~pruning:true RInit state_refine.m with
-    | Some state0prune -> state_ref := state0prune
-    | None -> assert false in
   let rec loop_prune state =
     log_refining state.r state.m state.prs state.lmd;
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
@@ -218,6 +214,10 @@ let learn
         (fun () ->
           Common.do_timeout timeout_prune
             (fun () ->
+              let () =
+                match data_of_model ~pruning:true RInit state_refine.m with
+                | Some state0prune -> state_ref := state0prune
+                | None -> assert false in
               loop_prune !state_ref)) in
     !state_ref, (res_opt = Some None), (res_opt = None) in
   let result_pruning =

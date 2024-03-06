@@ -226,10 +226,10 @@ let refinements
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
 
-  let parse_best m xis input =
+  let parse_best m xis input = Common.prof "Refining.refinements/parse_best" (fun () ->
     match parse_bests m ~xis input with
     | Result.Ok ((d',dl')::_) -> Result.Ok d'
-    | _ -> Result.Error Not_found
+    | _ -> Result.Error Not_found)
   in
   fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
   Myseq.prof "Refining.refinements" (
