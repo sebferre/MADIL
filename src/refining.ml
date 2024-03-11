@@ -210,6 +210,7 @@ let refinements
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
       ~(max_expr_refinements_per_read : int)
+      ~(max_expr_refinements_per_var : int)
       ~(max_refinements : int)
       ~(asd : ('typ,'constr,'func) Model.asd)
       ~(typ_bool : 'typ)
@@ -459,6 +460,7 @@ let refinements
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
              m_new m varseq' best_reads)
+       |> Myseq.slice ~limit:max_expr_refinements_per_var
   and aux_pat ctx rev_xls m t c args selected_reads =
     let allowed = asd#alt_opt t in
     let ok_cons = Model.is_index_invariant m in

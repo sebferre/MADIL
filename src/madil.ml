@@ -166,6 +166,7 @@ module type DOMAIN =
     val max_nb_writes : int ref
     val alpha : float ref
     val max_expr_refinements_per_read : int ref
+    val max_expr_refinements_per_var : int ref
     val max_refinements : int ref
     val jump_width : int ref
 
@@ -348,6 +349,7 @@ module Make (Domain : DOMAIN) =
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
+        ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
         ~max_refinements:(!max_refinements)
 
     let prunings =
@@ -367,6 +369,7 @@ module Make (Domain : DOMAIN) =
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
+        ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
         ~max_refinements:(!max_refinements)
 
     (* task models *)
