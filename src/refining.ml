@@ -460,6 +460,7 @@ let refinements
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
              m_new m varseq' best_reads)
+       |> Myseq.sort (fun (_,_,_,supp1,dl1) (_,_,_,supp2,dl2) -> Stdlib.compare (supp2,dl1) (supp1,dl2))
        |> Myseq.slice ~limit:max_expr_refinements_per_var
   and aux_pat ctx rev_xls m t c args selected_reads =
     let allowed = asd#alt_opt t in
