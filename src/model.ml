@@ -62,22 +62,24 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Value _ -> assert false
   | Derived t -> t
 
-let rec seq_length : ('typ,'value,'var,'constr,'func) model -> Range.t = function
-  | Def (x,m1) -> seq_length m1
+let rec seq_length (xl : 'var) : ('typ,'value,'var,'constr,'func) model -> Range.t = function
+  | Def (x,m1) -> seq_length xl m1
   | Pat (t,c,args) ->
      if args = [||]
      then Range.make_open 0 (* broadcasting scalar *)
      else
        Array.to_list args
-       |> List.map seq_length
+       |> List.map (seq_length xl)
        |> Range.inter_list
   | Fail -> Range.make_open 0
   | Alt (xc,c,m1,m2) ->
-     Range.union (seq_length m1) (seq_length m2)
-  | Loop (xl,rlen,m1) -> seq_length m1
+     Range.union (seq_length xl m1) (seq_length xl m2)
+  | Loop (xl1,rlen,m1) -> seq_length xl m1
   | Nil _ -> Range.make_exact 0
-  | Cons (xl,m0,m1) ->
-     Range.add (Range.make_exact 1) (seq_length m1)
+  | Cons (xl1,m0,m1) ->
+     if xl1 = xl
+     then Range.add (Range.make_exact 1) (seq_length xl m1)
+     else Range.union (seq_length xl m0) (seq_length xl m1)
   | Expr _ -> Range.make_open 0
   | Value (t,v_tree) ->
      (match Ndtree.length v_tree with
@@ -485,7 +487,7 @@ let generator (* on evaluated models: no expr, no def *)
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
     | Loop (xl,rlen,m1) ->
-       let seq_len_m1 = Range.inter rlen (seq_length m1) in
+       let seq_len_m1 = Range.inter rlen (seq_length xl m1) in
        let gen_nil = Myseq.return [] in
        let rec gen_seq_m1 i info =
          if i < Range.lower seq_len_m1 then
@@ -571,7 +573,7 @@ let parseur (* on evaluated models: no expr, no def *)
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
     | Loop (xl,rlen,m1) ->
-       let seq_len_m1 = Range.inter rlen (seq_length m1) in
+       let seq_len_m1 = Range.inter rlen (seq_length xl m1) in
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
          Myseq.return (parse ((xl,i)::rev_xis) m1) in
