@@ -157,7 +157,7 @@ let index (t : 'a t) (is : int option list) : 'a t option =
     | Vector v, (Some i)::is1 ->
        let n = Array.length v in
        if i >= 0 && i < n then aux_tree res_ndim v.(i) is1
-       else if i < 0 && i > -n then aux_tree res_ndim v.(n+i) is1
+       else if i < 0 && i >= -n then aux_tree res_ndim v.(n+i) is1
        else raise Not_found
     | Vector [||], None::is1 ->
        if res_ndim = 1
