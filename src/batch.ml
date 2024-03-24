@@ -36,7 +36,7 @@ let print_dl_task_model ~env name task model =
 
 (* === monitoring learning === *)
 
-type measures = (string * [`Tasks|`Bits|`MRR|`Seconds] * float) list
+type measures = (string * [`Tasks|`Bits|`MRR|`Seconds|`Steps|`Jumps|`ModelElts] * float) list
 
 let print_measures count ms =
   List.iter
@@ -45,7 +45,10 @@ let print_measures count ms =
      | `Tasks -> Printf.printf "%s = %.2f tasks (%.2f%%)\n" a v (100. *. v /. float count)
      | `Bits -> Printf.printf "%s = %.1f bits (%.1f bits/task)\n" a v (v /. float count)
      | `MRR -> Printf.printf "%s = %.2f\n" a (v /. float count)
-     | `Seconds -> Printf.printf "%s = %.1f sec (%.1f sec/task)\n" a v (v /. float count))
+     | `Seconds -> Printf.printf "%s = %.1f sec (%.1f sec/task)\n" a v (v /. float count)
+     | `Steps -> Printf.printf "%s = %.0f steps (%.1f steps/task)\n" a v (v /. float count)
+     | `Jumps -> Printf.printf "%s = %.0f jumps (%.1f jumps/task)\n" a v (v /. float count)
+     | `ModelElts -> Printf.printf "%s = %.0f model elts (%.1f elts/task)\n" a v (v /. float count))
     ms;
   print_newline ()
 
@@ -196,6 +199,10 @@ let print_learned_model
       Printexc.print_backtrace stdout;
       let ms =
         [ "runtime-learning", `Seconds, runtime;
+          "nb-steps", `Steps, 0.;
+          "nb-steps-sol", `Steps, 0.;
+          "nb-jumps", `Jumps, 0.;
+          "model-size", `ModelElts, 0.;
           "bits-train-error", `Bits, 0.; (* dummy value *)
 	  "acc-train-micro", `Tasks, 0.;
 	  "acc-train-macro", `Tasks, 0.;
@@ -230,6 +237,10 @@ let print_learned_model
      print_endline "\n# Performance measures on task";
      let ms =
        [ "runtime-learning", `Seconds, runtime;
+         "nb-steps", `Steps, float res.result_pruning.nsteps;
+         "nb-steps-sol", `Steps, float res.result_pruning.nsteps_sol;
+         "nb-jumps", `Jumps, float res.result_pruning.njumps;
+         "model-size", `ModelElts, float (size_task_model learned_task_model);
          "bits-train-error", `Bits, lrido;
 	 "acc-train-micro", `Tasks, micro_train;
 	 "acc-train-macro", `Tasks, macro_train;

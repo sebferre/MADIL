@@ -35,6 +35,12 @@ let xp_task_model
   print#string "\n ⬇ \n";
   xp_model ~html print m.output_model
 
+let size_task_model_ast
+      ~(asd : ('typ,'constr,'func) asd)
+      (m : ('typ,'value,'var,'constr,'func) task_model) : int =
+  Model.size_model_ast ~asd m.input_model
+  + Model.size_model_ast ~asd m.output_model
+
 (* pair reading and encoding *)
   
 type ('typ,'value,'dconstr,'var,'func) pairs_reads =

@@ -379,7 +379,10 @@ module Make (Domain : DOMAIN) =
     let make_task_model =
       Task_model.make
         ~binding_vars
-      
+
+    let size_task_model (m : task_model) : int =
+      Task_model.size_task_model_ast ~asd m
+    
     let dl_task_model (m : task_model) : dl * dl =
       dl_model ~nb_env_vars:0
         m.input_model,
