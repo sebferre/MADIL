@@ -334,6 +334,7 @@ module Make (Domain : DOMAIN) =
 
     let refinements =
       Refining.refinements
+        ~pruning:false
         ~xp_model
         ~asd
         ~typ_bool
@@ -354,6 +355,7 @@ module Make (Domain : DOMAIN) =
 
     let prunings =
       Refining.refinements
+        ~pruning:true
         ~xp_model
         ~asd
         ~typ_bool

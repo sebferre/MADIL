@@ -207,6 +207,7 @@ type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
   (* result: a sequence of path-wise refinements with support and estimate DL *)
 
 let refinements
+      ~(pruning : bool)
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
       ~(max_expr_refinements_per_read : int)
@@ -302,9 +303,9 @@ let refinements
            
            (match c with
             | Undet _ ->
-               Myseq.concat
-                 [ aux_alt_cond_undet ctx rev_xls m xc c m1 m2 selected_reads;
-                   aux_alt_prune ctx rev_xls m m1 m2 selected_reads ]
+               if pruning
+               then aux_alt_prune ctx rev_xls m m1 m2 selected_reads
+               else aux_alt_cond_undet ctx rev_xls m xc c m1 m2 selected_reads
             | True | False -> assert false
             | BoolExpr _ -> Myseq.empty);
            
@@ -372,7 +373,7 @@ let refinements
             aux ctx1 rev_xls m1 sel1);
 
            (* pruning Cons *)
-           (if Model.is_index_invariant m1
+           (if pruning && Model.is_index_invariant m1
             then
               let m1 = Model.undef m1 in
               aux_gen ctx rev_xls m selected_reads
@@ -383,17 +384,21 @@ let refinements
                   Myseq.return (m', varseq', best_reads))
             else Myseq.empty) ]
     | Model.Expr (k, Expr.Const (t,v)) ->
-       (* only for pruning, TODO optimize *)
-       aux_gen ctx rev_xls m selected_reads
-         (fun (read, data : _ read) ->
-           refinements_value t v varseq0
-           |> List.map (fun (m',varseq') -> (m',varseq',data)))
-         (fun m' varseq' ~supp ~nb ~alt best_reads ->
-           Myseq.return (m', varseq', best_reads))
+       if pruning (* pruning constants *)
+       then
+         aux_gen ctx rev_xls m selected_reads
+           (fun (read, data : _ read) ->
+             refinements_value t v varseq0
+             |> List.map (fun (m',varseq') -> (m',varseq',data)))
+           (fun m' varseq' ~supp ~nb ~alt best_reads ->
+             Myseq.return (m', varseq', best_reads))
+       else Myseq.empty
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
     | Model.Derived t -> Myseq.empty)
   and aux_expr ctx rev_xls m selected_reads = (* QUICK *)
+    if pruning then Myseq.empty
+    else
     let t = Model.typ m in
     match asd#expr_opt t with
     | false, [] -> Myseq.empty (* no expression here *)
@@ -634,7 +639,7 @@ let refinements
   let m' = Model.refine p r m0 in
   Myseq.return (p, r, supp, dl', m', varseq'))
 
-  
+
 let task_refinements
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
       ~(input_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
