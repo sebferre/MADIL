@@ -14,7 +14,9 @@ and ('typ,'value,'dconstr,'var,'constr,'func) results_phase =
     memed_out: bool;
     nsteps : int;
     nsteps_sol : int;
-    njumps : int }
+    njumps : int;
+    njumps_sol : int;
+  }
 
 type ('typ,'value,'dconstr,'var,'constr,'func) state =
   { r : ('typ,'value,'var,'constr,'func) Task_model.refinement; (* last refinement *)
@@ -96,18 +98,18 @@ let learn
     match data_of_model ~pruning:false r0 m0 with
     | Some state0 -> state0
     | None -> failwith "Learning.learn: invalid initial task model" in
-  let nsteps_ref = ref 0 in
-  let nsteps_sol_ref = ref 0 in
-  let jumps_ref = ref [] in
+  let nsteps_ref = ref 0 in (* total nb steps *)
+  let nsteps_sol_ref = ref 0 in (* nb steps for solution path *)
+  let njumps_ref = ref 0 in (* total nb jumps *)
+  let jumps_sol_ref = ref [] in (* jumps for solution path *)
   let state_ref = ref state0 in
   (* refining phase *)
-  let rec loop_refine nsteps nsteps_sol jumps state delta conts =
+  let rec loop_refine nsteps_sol jumps_sol state delta conts =
     log_refining state.r state.m state.prs state.lmd;
     if state.lrido = 0. (* end of search *)
     then (
-      nsteps_ref := nsteps;
       nsteps_sol_ref := nsteps_sol;
-      jumps_ref := jumps;
+      jumps_sol_ref := jumps_sol;
       state_ref := state )
     else
       let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
@@ -124,21 +126,21 @@ let learn
       if lstate1 = [] (* no compressive refinement *)
       then (
         if state.lmd < (!state_ref).lmd then (
-          nsteps_ref := nsteps;
           nsteps_sol_ref := nsteps_sol;
-          jumps_ref := jumps;
+          jumps_sol_ref := jumps_sol;
           state_ref := state ); (* recording current state as best state *)
         try (* jumping to most promising continuation *)
           let delta1, ostate1 = Bintree.min_elt conts in
           let nsteps_sol1 = ostate1#nsteps_sol in
-          let jumps1 = ostate1#jumps in
+          let jumps_sol1 = ostate1#jumps_sol in
           let state1 = ostate1#state in
           let conts = Bintree.remove_min_elt conts in
+          incr njumps_ref;
           let () = (* showing JUMP *)
             print_string "JUMP TO";
-            print_jumps jumps1;
+            print_jumps jumps_sol1;
             print_newline () in
-          loop_refine nsteps nsteps_sol1 jumps1 state1 delta1 conts
+          loop_refine nsteps_sol1 jumps_sol1 state1 delta1 conts
         with Not_found -> () ) (* no continuation *)
       else
         let lstate1 =
@@ -150,7 +152,8 @@ let learn
         | [] -> assert false
         | state1::others ->
            let lmd1 = state1.lmd in
-           let jumps1 = 0::jumps in
+           let nsteps_sol1 = 1 + nsteps_sol in
+           let jumps_sol1 = 0::jumps_sol in
            let nb_alts, conts =
              List.fold_left
                (fun (rank,res) state2 ->
@@ -165,43 +168,44 @@ let learn
                  then
                    let lmd2 = state2.lmd in
                    let nsteps_sol2 = nsteps_sol + 1 in
-                   let jumps2 = rank :: jumps in
+                   let jumps_sol2 = rank :: jumps_sol in
                    let delta2 = delta +. (lmd2 -. lmd1) in
                    let ostate2 =
                      object
                        method nsteps_sol = nsteps_sol2
-                       method jumps = jumps2
+                       method jumps_sol = jumps_sol2
                        method state = state2
                      end in (* object to hide some mysterious functional value inside *)
                    rank+1, Bintree.add (delta2, ostate2) res
                  else rank, res)
                (1,conts) others in
+           incr nsteps_ref;
            let () = (* showing point of choice *)
              if nb_alts > 1 then (
                print_string "CHOICE AT";
-               print_jumps jumps;
+               print_jumps jumps_sol;
                print_newline ()
              ) in
-           loop_refine (nsteps+1) (nsteps_sol+1) jumps1 state1 delta conts
+           loop_refine nsteps_sol1 jumps_sol1 state1 delta conts
   in
-  let nsteps_refine, nsteps_sol_refine, njumps_refine, state_refine, timed_out_refine, memed_out_refine =
+  let state_refine, timed_out_refine, memed_out_refine =
     print_endline "REFINING PHASE";
     let res_opt =
       Common.do_memout memout (* Mbytes *)
         (fun () ->
-          Common.do_timeout timeout_refine
+          Common.do_timeout_gc (float timeout_refine)
             (fun () ->
-              loop_refine 0 0 [] state0 0. Bintree.empty)) in
-    let njumps = List.fold_left (+) 0 !jumps_ref in
-    !nsteps_ref, !nsteps_sol_ref, njumps, !state_ref, (res_opt = Some None), (res_opt = None) in
+              loop_refine 0 [] state0 0. Bintree.empty)) in
+    !state_ref, (res_opt = Some None), (res_opt = None) in
   let result_refining =
     { task_model = state_refine.m;
       pairs_reads = state_refine.prs;
       timed_out = timed_out_refine;
       memed_out = memed_out_refine;
-      nsteps = nsteps_refine;
-      nsteps_sol = nsteps_sol_refine;
-      njumps = njumps_refine;
+      nsteps = (!nsteps_ref);
+      nsteps_sol = (!nsteps_sol_ref);
+      njumps = (!njumps_ref);
+      njumps_sol = (List.fold_left (+) 0 !jumps_sol_ref);
     } in
   (* pruning phase *)
   let rec loop_prune state =
@@ -230,27 +234,28 @@ let learn
        state_ref := state1; (* recording current state as best state *)           
        loop_prune state1
   in
-  let nsteps_prune, nsteps_sol_prune, state_prune, timed_out_prune, memed_out_prune =
+  let state_prune, timed_out_prune, memed_out_prune =
     print_endline "PRUNING PHASE";
     let res_opt =
       Common.do_memout memout (* Mbytes *)
         (fun () ->
-          Common.do_timeout timeout_prune
+          Common.do_timeout_gc (float timeout_prune)
             (fun () ->
               let () =
                 match data_of_model ~pruning:true RInit state_refine.m with
                 | Some state0prune -> state_ref := state0prune
                 | None -> assert false in
               loop_prune !state_ref)) in
-    !nsteps_ref, !nsteps_sol_ref, !state_ref, (res_opt = Some None), (res_opt = None) in
+    !state_ref, (res_opt = Some None), (res_opt = None) in
   let result_pruning =
     { task_model = state_prune.m;
       pairs_reads = state_prune.prs;
       timed_out = timed_out_prune;
       memed_out = memed_out_prune;
-      nsteps = nsteps_prune;
-      nsteps_sol = nsteps_sol_prune;
-      njumps = njumps_refine; (* no jumps during pruning *)
+      nsteps = (!nsteps_ref);
+      nsteps_sol = (!nsteps_sol_ref);
+      njumps = (!njumps_ref);
+      njumps_sol = (List.fold_left (+) 0 !jumps_sol_ref);
     } in
   (* finalization *)
   { result_refining;

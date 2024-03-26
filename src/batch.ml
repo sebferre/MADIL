@@ -38,7 +38,16 @@ let print_dl_task_model ~env name task model =
 
 type measures = (string * [`Tasks|`Bits|`MRR|`Seconds|`Steps|`Jumps|`ModelElts] * float) list
 
-let print_measures count ms =
+let print_measures name count ms =
+  (* printing CSV line *)
+  if name <> "" then (
+    print_string "CSV,";
+    print_string name;
+    List.iter
+      (fun (a,t,v) -> print_char ','; print_float v)
+      ms);
+  print_newline ();
+  (* printing readable measures *)
   List.iter
     (fun (a,t,v) ->
      match t with
@@ -55,7 +64,7 @@ let print_measures count ms =
 let apply_model ~env m v_i info_o =
   try
     let res_opt =
-      Common.do_timeout !timeout_predict (fun () ->
+      Common.do_timeout_gc (float !timeout_predict) (fun () ->
           apply ~env m v_i info_o) in
     match res_opt with
     | Some res -> res
@@ -200,8 +209,9 @@ let print_learned_model
       let ms =
         [ "runtime-learning", `Seconds, runtime;
           "nb-steps", `Steps, 0.;
-          "nb-steps-sol", `Steps, 0.;
           "nb-jumps", `Jumps, 0.;
+          "nb-steps-sol", `Steps, 0.;
+          "nb-jumps-sol", `Jumps, 0.;
           "model-size", `ModelElts, 0.;
           "bits-train-error", `Bits, 0.; (* dummy value *)
 	  "acc-train-micro", `Tasks, 0.;
@@ -238,8 +248,9 @@ let print_learned_model
      let ms =
        [ "runtime-learning", `Seconds, runtime;
          "nb-steps", `Steps, float res.result_pruning.nsteps;
-         "nb-steps-sol", `Steps, float res.result_pruning.nsteps_sol;
          "nb-jumps", `Jumps, float res.result_pruning.njumps;
+         "nb-steps-sol", `Steps, float res.result_pruning.nsteps_sol;
+         "nb-jumps-sol", `Jumps, float res.result_pruning.njumps_sol;
          "model-size", `ModelElts, float (size_task_model learned_task_model);
          "bits-train-error", `Bits, lrido;
 	 "acc-train-micro", `Tasks, micro_train;
@@ -249,7 +260,7 @@ let print_learned_model
 	 "acc-test-macro", `Tasks, macro_test;
          "acc-test-mrr", `MRR, mrr_test;
        ] in
-     print_measures 1 ms;
+     print_measures name 1 ms;
      ms)
 
 
@@ -283,7 +294,7 @@ let process_task
 
 let summarize_tasks count sum_ms =
   Printf.printf "\n## performance measures averaged over %d tasks\n" count;
-  print_measures count sum_ms;
+  print_measures "" count sum_ms;
   flush stdout
   
 let main () : unit =
@@ -337,6 +348,7 @@ let main () : unit =
   let count = ref 0 in
   let sum_ms = ref [] in
   let _ =
+    print_endline "CSV,task,runtime-learning,nb-steps,nb-jumps,nb-steps-sol,nb-jumps-sol,model-size,bits-train-error,acc-train-micro,acc-train-macro,acc-train-mrr,acc-test-micro,acc-test-macro,acc-test-mrr";
     List.fold_left
       (fun rank name ->
         if rank <= !start_rank then (
