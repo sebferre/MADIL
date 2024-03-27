@@ -9,7 +9,7 @@ module Make (Domain : Madil.DOMAIN) =
 
 let training = ref true (* should be set to false on evaluation set *)
 let start_rank = ref max_int
-let memout = ref 5000
+let memout = ref 10000
 let timeout_refine = ref 60
 let timeout_prune = ref 10
 let timeout_predict = ref 10
@@ -327,6 +327,7 @@ let main () : unit =
 			        n_id <= String.length name && String.sub name 0 n_id = id))), "Use the tasks specified by their prefix (comma-separated)";
      "-r", Set_int start_rank, "Start processing with this task rank (only useful for error recovery)";
      "-eval", Unit (fun () -> training := false), "Evaluation mode to avoid disclosing task contents";
+     "-memout", Set_int memout, "Max allocated memory in MB (default: 5000MB)";
      "-timeout_refine", Set_int timeout_refine, "Learning/refining timeout per task (default: 60s)";
      "-timeout_prune", Set_int timeout_prune, "Learning/pruning timeout per task (default: 10s)";
      "-timeout_predict", Set_int timeout_predict, "Prediction timeout per test case (default: 10s)";
@@ -335,10 +336,11 @@ let main () : unit =
      "-v", Set_int verbose, "Verbose level (default=1)";
     ]
     (fun str -> ())
-    "test [-dir PATH] [-all|-sample N|-tasks ID,ID,...] [-r N] [-eval] [-timeout_refine N] [-timeout_prune] [-viz [-pause T]] [-v N]";
+    "test [-dir PATH] [-all|-sample N|-tasks ID,ID,...] [-r N] [-eval] [-memout N] [-timeout_refine N] [-timeout_prune] [-viz [-pause T]] [-v N]";
   
   print_endline "## options";
   Printf.printf "mode = %s\n" (if !training then "training" else "evaluation");
+  Printf.printf "memout = %d\n" !memout;
   Printf.printf "timeout_refine = %d\n" !timeout_refine;
   Printf.printf "timeout_prune = %d\n" !timeout_prune;
   Printf.printf "timeout_predict = %d\n" !timeout_predict;
