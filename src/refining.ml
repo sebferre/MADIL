@@ -406,7 +406,7 @@ let refinements
        let allowed = asd#alt_opt t in
        let m_is_index_invariant = Model.is_index_invariant m in
        aux_gen ctx rev_xls m selected_reads
-         (fun (read, data : _ read) ->
+         (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
            let rec aux refs xls_down ndim v_tree d_tree xvd_trees =
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
              let s_expr = (* index expressions evaluating to v_tree *)
@@ -423,6 +423,7 @@ let refinements
              let refs =
                s_expr
                |> Myseq.map (fun e -> (Expr.size_expr_ast e, e))
+               (* TODO: avoid to have to sort everything before slicing *)
                |> Myseq.sort Stdlib.compare
                |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
                |> Myseq.fold_left
@@ -460,7 +461,7 @@ let refinements
              else refs
            in
            let v_tree = Ndtree.map Data.value data in
-           aux [] (List.rev rev_xls) (Ndtree.ndim v_tree) v_tree data [])
+           aux [] (List.rev rev_xls) (Ndtree.ndim v_tree) v_tree data []))
          (fun m_new varseq' ~supp ~nb ~alt best_reads ->
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
@@ -471,7 +472,7 @@ let refinements
     let allowed = asd#alt_opt t in
     let ok_cons = Model.is_index_invariant m in
     aux_gen ctx rev_xls m selected_reads
-      (fun (read, data : _ read) ->
+      (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_pat/get_rs" (fun () ->
         let input_tree =
           Ndtree.map
             (fun d -> input_of_value t (Data.value d))
@@ -508,7 +509,7 @@ let refinements
                   match ref_cons with (* adding it to refs *)
                   | Result.Ok ref_cons -> ref_cons::refs
                   | Result.Error _ -> refs)
-                [])
+                []))
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         let* m_new, best_reads =
           postprocessing t c args m' ~supp ~nb ~alt best_reads in

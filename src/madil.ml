@@ -189,7 +189,7 @@ module type DOMAIN =
     val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
     val parseur_pat : typ -> constr -> parseur array -> parseur
-    val parseur_end : input -> input Myseq.t
+    val parseur_end : depth:int -> input -> input Myseq.t
 
     (* description lengths *)
       

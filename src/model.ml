@@ -62,29 +62,42 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Value _ -> assert false
   | Derived t -> t
 
-let rec seq_length (xl : 'var) : ('typ,'value,'var,'constr,'func) model -> Range.t = function
-  | Def (x,m1) -> seq_length xl m1
+let rec seq_length rev_xis (xl : 'var) : ('typ,'value,'var,'constr,'func) model -> Range.t = function
+  | Def (x,m1) -> seq_length rev_xis xl m1
   | Pat (t,c,args) ->
      if args = [||]
      then Range.make_open 0 (* broadcasting scalar *)
      else
        Array.to_list args
-       |> List.map (seq_length xl)
+       |> List.map (seq_length rev_xis xl)
        |> Range.inter_list
   | Fail -> Range.make_open 0
   | Alt (xc,c,m1,m2) ->
-     Range.union (seq_length xl m1) (seq_length xl m2)
-  | Loop (xl1,rlen,m1) -> seq_length xl m1
+     Range.union (seq_length rev_xis xl m1) (seq_length rev_xis xl m2)
+  | Loop (xl1,rlen,m1) -> seq_length rev_xis xl m1
   | Nil _ -> Range.make_exact 0
   | Cons (xl1,m0,m1) ->
      if xl1 = xl
-     then Range.add (Range.make_exact 1) (seq_length xl m1)
-     else Range.union (seq_length xl m0) (seq_length xl m1)
+     then Range.add
+            (Range.make_exact 1)
+            (seq_length rev_xis xl m1)
+     else Range.union
+            (let rev_xis0 = List.remove_assoc xl1 rev_xis in 
+              seq_length rev_xis0 xl m0)
+            (let rev_xis1 =
+               match List.assoc_opt xl1 rev_xis with
+               | Some i -> list_replace_assoc xl1 (i - 1) rev_xis
+               | None -> rev_xis in 
+             seq_length rev_xis1 xl m1)
   | Expr _ -> Range.make_open 0
   | Value (t,v_tree) ->
-     (match Ndtree.length v_tree with
-      | Some n -> Range.make_exact n
-      | None -> Range.make_open 0) (* broadcasting scalar *)
+     let idx = List.rev_map (fun (x,i) -> Some i) rev_xis in
+     (match Ndtree.index v_tree idx with
+      | Some v1_tree ->
+         (match Ndtree.length v1_tree with
+          | Some n -> Range.make_exact n
+          | None -> Range.make_open 0) (* broadcasting scalar *)
+      | None -> Range.make_open 0) (* dummy, should be the empty range *)
   | Derived t -> Range.make_open 0
 
 let rec is_index_invariant : ('typ,'value,'var,'constr,'func) model -> bool = function
@@ -487,7 +500,7 @@ let generator (* on evaluated models: no expr, no def *)
          let v = value d12 in
          Myseq.return (D (v, DAlt (prob, b, d12))))
     | Loop (xl,rlen,m1) ->
-       let seq_len_m1 = Range.inter rlen (seq_length xl m1) in
+       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
        let gen_nil = Myseq.return [] in
        let rec gen_seq_m1 i info =
          if i < Range.lower seq_len_m1 then
@@ -545,7 +558,7 @@ type ('input,'value,'dconstr) parseur = 'input -> (('value,'dconstr) data * 'inp
 let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_value : 'value -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
-      ~(parseur_end : 'input -> 'input Myseq.t)
+      ~(parseur_end : depth:int -> 'input -> 'input Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
     : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> (('input,'value,'dconstr) parseur as 'parse) =
   let rec parse rev_xis m input =
@@ -573,18 +586,19 @@ let parseur (* on evaluated models: no expr, no def *)
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
     | Loop (xl,rlen,m1) ->
-       let seq_len_m1 = Range.inter rlen (seq_length xl m1) in
+       let depth = 1 + List.length rev_xis in
+       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
          Myseq.return (parse ((xl,i)::rev_xis) m1) in
-       let* ld1, input = Myseq.star_dependent_fair seq_parse_m1 input in
-       let* input = parseur_end input in (* checking valid end *)
+       let* ld1, input = Myseq.star_dependent_max (* _fair : BUGGY *) seq_parse_m1 input in
+       let* input = parseur_end ~depth input in (* checking valid end *)
        (* TODO: use seq_len_m1 to bound |ld1| *)
-       (* TODO: use a variant of Myseq.star_dependent_fait to prevent stop anywhere *)
+       (* TODO: Myseq.star_dependent_max prevents stop anywhere *)
        let ds1 = Array.of_list ld1 in
        let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       if Range.mem n seq_len_m1
+       if Range.mem n seq_len_m1 (* not clear why this could be false *)
        then
          let d = D (v, DSeq (n, seq_len_m1, ds1)) in
          Myseq.return (d, input)
@@ -595,12 +609,6 @@ let parseur (* on evaluated models: no expr, no def *)
         | None -> Myseq.empty
         | Some 0 -> parse (List.remove_assoc xl rev_xis) m0 input
         | Some i -> parse (list_replace_assoc xl (i-1) rev_xis) m1 input)
-(*              
-       let xis = List.rev rev_xis in
-       (match xis with (* choosing model according to first index *)
-       | (xl,0)::xis0 -> parse (List.rev xis0) m0 input
-       | (xl,i)::xis1 -> parse (List.rev ((xl,i-1)::xis1)) m1 input
-       | [] -> Myseq.empty) *)
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
        let is = List.rev_map snd rev_xis in
