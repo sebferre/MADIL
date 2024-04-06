@@ -363,7 +363,8 @@ let main () : unit =
           process_task
             name task
             count sum_ms;
-          reset_memoization ()
+          reset_memoization ();
+          Gc.compact () (* to avoid MEMOUT *)
         );
        rank-1)
       nb_tasks !names in
