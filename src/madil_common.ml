@@ -296,6 +296,28 @@ let rec sum_conv (lf : (int -> float) list) (n : int) : float =
          else res)
        0 n 0.
 
+let distribute (n : int) (lf : (int -> 'a Myseq.t) array) : 'a array Myseq.t =
+  (* distributes [n] over functions in [lf] *)
+  let rec aux k lf n =
+    match lf with
+    | [] ->
+       if n = 0
+       then Myseq.return []
+       else Myseq.empty
+    | [f1] ->
+       let* x1 = f1 n in
+       Myseq.return [x1]
+    | f1::lf' ->
+       let* n1 = Myseq.range 1 (n-k+1) in (* leave at least cost 1 for each other elt *)
+       let n' = n - n1 in
+       let* x1 = f1 n1 in
+       let* lx' = aux (k-1) lf' n' in
+       Myseq.return (x1::lx')
+  in
+  let k = Array.length lf in
+  let* lx = aux k (Array.to_list lf) n in
+  Myseq.return (Array.of_list lx)
+
 (* mdl *)
                    
 type dl = Mdl.bits
