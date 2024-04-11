@@ -234,6 +234,59 @@ module Exprset_new : EXPRSET =
            Myseq.return (Fun (t_arg,e) *) (* needs to decompose t as (t_arg -> es1.typ) *) 
         ]
 
+    let to_seq (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
+      (* enumerate expressions in increasing ast size *)
+      let distribute (lf : (int -> 'expr Myseq.t) array) (n : int) : 'expr array Myseq.t =
+        (* distributes [n] over functions in [lf] *)
+        (* TODO: memoize recursive calls? *)
+        let rec aux k lf n =
+          match lf with
+          | [] ->
+             if n = 0
+             then Myseq.return []
+             else Myseq.empty
+          | [f1] ->
+             let* e1 = f1 n in
+             Myseq.return [e1]
+          | f1::lf' ->
+             let* n1 = Myseq.range 1 (n-k+1) in (* leave at least cost 1 for each other arg *)
+             let n' = n - n1 in
+             let* e1 = f1 n1 in
+             let* le' = aux (k-1) lf' n' in
+             Myseq.return (e1::le')
+        in
+        let k = Array.length lf in
+        let* le = aux k (Array.to_list lf) n in
+        Myseq.return (Array.of_list le)
+      in
+      let rec aux es n =
+        assert (n >= 0);
+        if n = 0 then
+           Myseq.empty (* no expression has size 0 *)
+        else if n = 1 then
+          let t = es.typ in
+          Myseq.concat
+            [ (let* v = Myseq.from_bintree es.consts in
+               Myseq.return (Const (t,v)));
+
+              (let* x = Myseq.from_bintree es.refs in
+               Myseq.return (Ref (t,x)));
+              
+              (if es.args then Myseq.return (Arg t)
+               else Myseq.empty) ]
+        else
+          let t = es.typ in
+          Myseq.interleave
+            (List.map
+               (fun (f, es_args_set) ->
+                 let* es_args = Myseq.from_bintree es_args_set in
+                 let* args = distribute (Array.map aux es_args) (n-1) in (* cost 1 for the function *)
+                 Myseq.return (Apply (t,f,args)))
+               (Mymap.bindings es.applies))
+      in
+      let* n = Myseq.range 1 9 (* TODO param *) in
+      aux es n
+
     let xp
           ~(xp_value : 'value html_xp)
           ~(xp_var : 'var html_xp)

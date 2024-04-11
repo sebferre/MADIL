@@ -410,10 +410,14 @@ let refinements
            let rec aux refs xls_down ndim v_tree d_tree xvd_trees =
              (* considering successively v_tree, v_tree[0], v_tree[0,0]... *)
              let s_expr = (* index expressions evaluating to v_tree *)
-               let* t1 = Myseq.from_list ts1 in
-               Expr.Exprset.to_seq
-                 (Expr.Index.lookup (t1, v_tree)
-                    (Model.force_index ~make_index read)) in
+               Myseq.interleave
+                 (List.map
+                    (fun t1 ->
+                      (*let* t1 = Myseq.from_list ts1 in *)
+                      Expr.Exprset.to_seq
+                        (Expr.Index.lookup (t1, v_tree)
+                           (Model.force_index ~make_index read)))
+                    ts1) in
              let s_expr = (* is v_tree a constant ndtree? *)
                if const_ok then
                  match Ndtree.is_constant v_tree with
@@ -422,12 +426,12 @@ let refinements
                else s_expr in
              let refs =
                s_expr
-               |> Myseq.map (fun e -> (Expr.size_expr_ast e, e))
+               (*|> Myseq.map (fun e -> (Expr.size_expr_ast e, e))
                (* TODO: avoid to have to sort everything before slicing *)
-               |> Myseq.sort Stdlib.compare
+               |> Myseq.sort Stdlib.compare *)
                |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
                |> Myseq.fold_left
-                 (fun refs (_,e) ->
+                 (fun refs e ->
                    let rec aux_cons refs is_const me varseq d_tree' xvd_trees =
                      (* adding Cons around e, and replacing head by d_tree', |xvd_trees| times *)
                      match xvd_trees with

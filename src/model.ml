@@ -643,7 +643,7 @@ let dl_data
        let enc12 = aux d12 in
        encoding_alt dl_choice enc12
     | DSeq (dn,range,ds1) ->
-       let dl_length = Range.dl dn range in
+       let dl_length = Range.dl dn range in (* TODO: replace by pattern args for lengths *)
        let encs = Array.map aux ds1 in
        encoding_seq dl_length encs
     | DExpr -> encoding_expr_value v
