@@ -164,6 +164,7 @@ let score_learned_model
                (0,1,"FAILURE",[]) gdi_gdo_s
 	  | Result.Error exn ->
              print_endline (Printexc.to_string exn);
+             (*Printexc.print_backtrace stdout;*)
              0, 0, "ERROR", [] in
         let tt = match train_test with `TRAIN _ -> "TRAIN" | `TEST -> "TEST" in
         let str_rank =

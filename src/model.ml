@@ -458,49 +458,61 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
   
 (* model-based generation *)
 
-type ('info,'value,'dconstr) generator = 'info -> ('value,'dconstr) data Myseq.t
+type ('info,'value,'dconstr) generator = 'info -> (('value,'dconstr) data * 'info) Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
-      ~(generator_pat: 'typ -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
+      ~(generator_value : 'value -> 'gen)
+      ~(generator_pat : 'typ -> 'constr -> (('info,'value,'dconstr) generator as 'gen) array -> 'gen)
+      ~(generator_end : depth:int -> 'info -> 'info Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
     : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> 'gen =
-  let rec gen rev_xis = function
+  let rec gen rev_xis m info =
+    match m with
     | Def (x,m1) -> assert false
     | Pat (t,c,args) ->
        let gen_args = Array.map (gen rev_xis) args in
-       generator_pat t c gen_args
-    | Fail ->
-       (fun info -> Myseq.empty)
+       generator_pat t c gen_args info
+    | Fail -> Myseq.empty
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
-         let gen_m1 = gen rev_xis m1 in
-         (fun info ->
-           let* d1 = gen_m1 info in
-           Myseq.return (prob, true, d1)) in
+         let* d1, info = gen rev_xis m1 info in
+         let d = D (value d1, DAlt (prob,true,d1)) in
+         Myseq.return (d, info) in
        let gen_b_d2 prob =
-         let gen_m2 = gen rev_xis m2 in
-         (fun info ->
-           let* d2 = gen_m2 info in
-           Myseq.return (prob, false, d2)) in
-       let gen_b_d12 =
-         match c with
-         | Undet prob ->
-            if prob >= 0.5 (* TODO: weight interleave according to prob *)
-            then (fun info ->
-              Myseq.interleave [gen_b_d1 prob info;
-                                gen_b_d2 (1. -. prob) info])
-            else (fun info ->
-              Myseq.interleave [gen_b_d2 (1. -. prob) info;
-                                gen_b_d1 prob info])
-         | True -> gen_b_d1 1.
-         | False -> gen_b_d2 1.
-         | BoolExpr _ -> assert false in
-       (fun info ->
-         let* prob, b, d12 = gen_b_d12 info in
-         let v = value d12 in
-         Myseq.return (D (v, DAlt (prob, b, d12))))
+         let* d2, info = gen rev_xis m2 info in
+         let d = D (value d2, DAlt (prob,false,d2)) in
+         Myseq.return (d, info) in
+       (match c with
+        | Undet prob ->
+           if prob >= 0.5 (* TODO: weight interleave according to prob *)
+           then Myseq.interleave [gen_b_d1 prob;
+                                  gen_b_d2 (1. -. prob)]
+           else Myseq.interleave [gen_b_d2 (1. -. prob);
+                                  gen_b_d1 prob]
+       | True -> gen_b_d1 1.
+       | False -> gen_b_d2 1.
+       | BoolExpr _ -> assert false)
     | Loop (xl,rlen,m1) ->
+       let depth = 1 + List.length rev_xis in
        let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
+       let seq_gen_m1 =
+         let* i = Myseq.counter 0 in
+         if i <= 3 (* TEST *)
+         then Myseq.return (gen ((xl,i)::rev_xis) m1)
+         else Myseq.return (fun info -> Myseq.empty) in
+       let* ld1, info = Myseq.star_dependent_max (* _fair : BUGGY *) seq_gen_m1 info in
+       let* info = generator_end ~depth info in (* checking valid end *)
+       (* TODO: use seq_len_m1 to bound |ld1| *)
+       (* TODO: Myseq.star_dependent_max prevents stop anywhere *)
+       let ds1 = Array.of_list ld1 in
+       let n = Array.length ds1 in
+       let v = value_of_seq (Array.map Data.value ds1) in
+       if Range.mem n seq_len_m1 (* not clear why this could be false *)
+       then
+         let d = D (v, DSeq (n, seq_len_m1, ds1)) in
+         Myseq.return (d, info)
+       else Myseq.empty (* could not parse the expected number of elements *)
+(*       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
        let gen_nil = Myseq.return [] in
        let rec gen_seq_m1 i info =
          if i < Range.lower seq_len_m1 then
@@ -521,35 +533,28 @@ let generator (* on evaluated models: no expr, no def *)
          let n = Array.length ds1 in
          let v = value_of_seq (Array.map Data.value ds1) in
          assert (Range.mem n seq_len_m1);
-         Myseq.return (D (v, DSeq (n, seq_len_m1, ds1))))
-    | Nil (t) ->
-       (fun info ->
-         Myseq.empty)
+         Myseq.return (D (v, DSeq (n, seq_len_m1, ds1)))) *)
+    | Nil (t) -> Myseq.empty
     | Cons (xl,m0,m1) ->
-       (*let xis = List.rev rev_xis in*)
-       let gen_m = (* choosing model according to first index *)
-         match List.assoc_opt xl rev_xis with
-         | None -> (fun info -> Myseq.empty)
-         | Some 0 -> gen (List.remove_assoc xl rev_xis) m0
-         | Some i -> gen (list_replace_assoc xl (i-1) rev_xis) m1 in
-(*         match xis with
-         | (xl,0)::xis0 -> gen (List.rev xis0) m0
-         | (xl,i)::xis1 -> gen (List.rev ((xl,i-1)::xis1)) m1
-         | [] -> (fun info -> Myseq.empty) in *)
-       (fun info ->
-         gen_m info)
+       (* choosing model according to first index *)
+       (match List.assoc_opt xl rev_xis with
+        | None -> Myseq.empty
+        | Some 0 -> gen (List.remove_assoc xl rev_xis) m0 info
+        | Some i -> gen (list_replace_assoc xl (i-1) rev_xis) m1 info)
     | Expr (t,e) -> assert false
     | Value (t,v_tree) ->
        let is = List.rev_map snd rev_xis in
-       (match Ndtree.lookup v_tree is with
-        | Some v -> (fun info -> Myseq.return (D (v, DExpr)))
-        | None -> (fun info -> Myseq.empty))
+       if List.length is >= Ndtree.ndim v_tree
+       then
+         match Ndtree.lookup v_tree is with
+         | Some v -> generator_value v info (* Myseq.return (D (v, DExpr), info) *)
+         | None -> Myseq.empty
+       else Myseq.empty (* TODO: accepting vtrees ? *)
     | Derived t ->
-       (fun info ->
-         failwith "Derived arguments must not be generated but computed") (* must be computed, not generated *)
+       failwith "Derived arguments must not be generated but computed" (* must be computed, not generated *)
   in
-  fun ?(xis = []) m ->
-  gen (List.rev xis) m
+  fun ?(xis = []) m info ->
+  gen (List.rev xis) m info
                                         
 (* model-based parsing *)
 
@@ -643,7 +648,7 @@ let dl_data
        let enc12 = aux d12 in
        encoding_alt dl_choice enc12
     | DSeq (dn,range,ds1) ->
-       let dl_length = Range.dl dn range in (* TODO: replace by pattern args for lengths *)
+       let dl_length = 0. (* Range.dl dn range *) in (* TODO: replace by pattern args for lengths *)
        let encs = Array.map aux ds1 in
        encoding_seq dl_length encs
     | DExpr -> encoding_expr_value v
@@ -913,7 +918,7 @@ let write
     : (('value,'dconstr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
   let* m = Myseq.from_result (eval m0 bindings) in
-  let* data = generator m info in
+  let* data, _ = generator m info in
   let dl = dl_data data in (* encoding of what is not specified by the evaluated model *)
   Myseq.return (data, dl))
 

@@ -184,7 +184,9 @@ module type DOMAIN =
 
     (* model-based generation and parsing *)
 
+    val generator_value : value -> generator
     val generator_pat : typ -> constr -> generator array -> generator
+    val generator_end : depth:int -> generator_info -> generator_info Myseq.t
 
     val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
@@ -262,7 +264,9 @@ module Make (Domain : DOMAIN) =
       
     let generator : ?xis:((var * int) list) -> model -> generator =
       Model.generator
+        ~generator_value
         ~generator_pat
+        ~generator_end
         ~value_of_seq
 
     let parseur : ?xis:((var * int) list) -> model -> parseur =
