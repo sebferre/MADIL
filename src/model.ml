@@ -14,7 +14,7 @@ type ('typ,'value,'var,'constr,'func) model =
   | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Fail (* like an empty alternative - only in evaluated model *)
   | Alt of 'var (* condition var *) * ('typ,'value,'var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
-  | Loop of 'var * Range.t (* seq length, given by parent pattern *) * ('typ,'value,'var,'constr,'func) model
+  | Loop of 'var * ('typ,'value,'var,'constr,'func) model
   | Nil of 'typ
   | Cons of 'var * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
   | Expr of 'typ * ('typ,'value,'var,'func) Expr.expr (* not in evaluated model *)
@@ -38,8 +38,8 @@ let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) mod
   Pat (t,c,args)
 let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Alt (xc,cond,m1,m2)
-let make_loop (xl : 'var) (rlen : Range.t) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
-  Loop (xl,rlen,m1)
+let make_loop (xl : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
+  Loop (xl,m1)
 let make_nil t = Nil (t)
 let make_cons xl m0 m1 = Cons (xl,m0,m1)
 let make_expr t e = Expr (t,e)
@@ -55,7 +55,7 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Pat (t,c,args) -> t
   | Fail -> assert false
   | Alt (xc,c,m1,m2) -> typ m1
-  | Loop (xl,rlen,m1) -> typ m1
+  | Loop (xl,m1) -> typ m1
   | Nil t -> t
   | Cons (xl,m0,m1) -> typ m0
   | Expr (t,e) -> t
@@ -74,7 +74,7 @@ let rec seq_length rev_xis (xl : 'var) : ('typ,'value,'var,'constr,'func) model 
   | Fail -> Range.make_open 0
   | Alt (xc,c,m1,m2) ->
      Range.union (seq_length rev_xis xl m1) (seq_length rev_xis xl m2)
-  | Loop (xl1,rlen,m1) -> seq_length rev_xis xl m1
+  | Loop (xl1,m1) -> seq_length rev_xis xl m1
   | Nil _ -> Range.make_exact 0
   | Cons (xl1,m0,m1) ->
      if xl1 = xl
@@ -105,7 +105,7 @@ let rec is_index_invariant : ('typ,'value,'var,'constr,'func) model -> bool = fu
   | Pat (t,c,args) -> Array.for_all is_index_invariant args
   | Fail -> assert false
   | Alt (xc,c,m1,m2) -> is_index_invariant m1 && is_index_invariant m2
-  | Loop (xl,rlen,m1) -> is_index_invariant m1
+  | Loop (xl,m1) -> is_index_invariant m1
   | Nil _ -> false
   | Cons _ -> false
   | Expr _ -> false (* in case it evaluates to a non-scalar ndtree *)
@@ -170,7 +170,7 @@ let xp_model
                print#string " ";
                aux ~html ~prio_ctx:2 print m2))
       
-    | Loop (xl,rlen,m1) ->
+    | Loop (xl,m1) ->
        print#string "for "; xp_var ~html print xl; print#string ":";
        xp_html_elt "div" ~classe:"model-block" ~html print
          (fun () -> aux ~prio_ctx:2 ~html print m1)
@@ -301,7 +301,7 @@ let binding_vars
        let acc = aux m1 acc in
        let acc = aux m2 acc in
        Mymap.add xc typ_bool acc
-    | Loop (xl,rlen,m1) -> aux m1 acc (* xl is a local var *)
+    | Loop (xl,m1) -> aux m1 acc (* xl is a local var *)
     | Nil (t) -> acc
     | Cons (xl,m0,m1) ->
        let acc = aux m0 acc in
@@ -362,7 +362,7 @@ let get_bindings  (* QUICK *)
          | D (_v, DAlt (_prob,b,d12)) -> value_of_bool b
          | _ -> assert false in
        Mymap.add xc (typ_bool, vc_tree) acc
-    | Loop (xl,rlen,m1) ->
+    | Loop (xl,m1) ->
        let d1_tree =
          let<* d = d_tree in
          match d with
@@ -430,9 +430,9 @@ let eval (* from model to evaluated model: resolving expr, ignoring def *)
           | True, Fail, _
           | False, _, Fail -> Result.Error EmptyAlt
         | _ -> Result.Ok (Alt (xc,c',m1',m2')))
-    | Loop (xl,rlen,m1) ->
+    | Loop (xl,m1) ->
        let| m1' = aux m1 in
-       Result.Ok (Loop (xl,rlen,m1'))
+       Result.Ok (Loop (xl,m1'))
     | Nil (t) ->
        Result.Ok (Nil t)
     | Cons (xl,m0,m1) ->
@@ -492,9 +492,8 @@ let generator (* on evaluated models: no expr, no def *)
        | True -> gen_b_d1 1.
        | False -> gen_b_d2 1.
        | BoolExpr _ -> assert false)
-    | Loop (xl,rlen,m1) ->
+    | Loop (xl,m1) ->
        let depth = 1 + List.length rev_xis in
-       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
        let seq_gen_m1 =
          let* i = Myseq.counter 0 in
          if i <= 3 (* TEST *)
@@ -502,38 +501,11 @@ let generator (* on evaluated models: no expr, no def *)
          else Myseq.return (fun info -> Myseq.empty) in
        let* ld1, info = Myseq.star_dependent_max (* _fair : BUGGY *) seq_gen_m1 info in
        let* info = generator_end ~depth info in (* checking valid end *)
-       (* TODO: use seq_len_m1 to bound |ld1| *)
-       (* TODO: Myseq.star_dependent_max prevents stop anywhere *)
+       (* Myseq.star_dependent_max prevents stop anywhere *)
        let ds1 = Array.of_list ld1 in
-       let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       if Range.mem n seq_len_m1 (* not clear why this could be false *)
-       then
-         let d = D (v, DSeq ds1) in
-         Myseq.return (d, info)
-       else Myseq.empty (* could not parse the expected number of elements *)
-(*       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
-       let gen_nil = Myseq.return [] in
-       let rec gen_seq_m1 i info =
-         if i < Range.lower seq_len_m1 then
-           gen_cons i info
-         else if i < (match Range.upper seq_len_m1 with
-                      | None -> 9
-                      | Some b -> min 9 b) then
-           Myseq.if_not_empty_else (gen_cons i info) gen_nil
-         else
-           gen_nil
-       and gen_cons i info =
-         let* di = gen ((xl,i)::rev_xis) m1 info in
-         let* ld = gen_seq_m1 (i+1) info in
-         Myseq.return (di::ld) in
-       (fun info ->
-         let* ld1 = gen_seq_m1 0 info in
-         let ds1 = Array.of_list ld1 in
-         let n = Array.length ds1 in
-         let v = value_of_seq (Array.map Data.value ds1) in
-         assert (Range.mem n seq_len_m1);
-         Myseq.return (D (v, DSeq (n, seq_len_m1, ds1)))) *)
+       let d = D (v, DSeq ds1) in
+       Myseq.return (d, info)
     | Nil (t) -> Myseq.empty
     | Cons (xl,m0,m1) ->
        (* choosing model according to first index *)
@@ -590,24 +562,18 @@ let parseur (* on evaluated models: no expr, no def *)
         | True -> seq1 1.
         | False -> seq2 1.
         | BoolExpr _ -> assert false)
-    | Loop (xl,rlen,m1) ->
+    | Loop (xl,m1) ->
        let depth = 1 + List.length rev_xis in
-       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
          Myseq.return (parse ((xl,i)::rev_xis) m1) in
        let* ld1, input = Myseq.star_dependent_max (* _fair : BUGGY *) seq_parse_m1 input in
        let* input = parseur_end ~depth input in (* checking valid end *)
-       (* TODO: use seq_len_m1 to bound |ld1| *)
-       (* TODO: Myseq.star_dependent_max prevents stop anywhere *)
+       (* Myseq.star_dependent_max prevents stop anywhere *)
        let ds1 = Array.of_list ld1 in
-       let n = Array.length ds1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       if Range.mem n seq_len_m1 (* not clear why this could be false *)
-       then
-         let d = D (v, DSeq ds1) in
-         Myseq.return (d, input)
-       else Myseq.empty (* could not parse the expected number of elements *)
+       let d = D (v, DSeq ds1) in
+       Myseq.return (d, input)
     | Nil (t) -> Myseq.empty
     | Cons (xl,m0,m1) ->
        (match List.assoc_opt xl rev_xis with
@@ -680,7 +646,7 @@ let size_model_ast (* for DL computing, QUICK *)
          args
     | Fail -> assert false
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Loop (xl,rlen,m1) -> size_loop + aux m1
+    | Loop (xl,m1) -> size_loop + aux m1
     | Nil t -> size_nil
     | Cons (xl,m0,m1) -> size_cons + aux m0 + aux m1
     | Expr (t,e) -> Expr.size_expr_ast e
@@ -772,7 +738,7 @@ let dl_model_params
     | Fail -> assert false
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux ndim m1 +. aux ndim m2
-    | Loop (xl,rlen,m1) -> aux (ndim+1) m1 (* rlen encoded by parent pattern *)
+    | Loop (xl,m1) -> aux (ndim+1) m1 (* rlen encoded by parent pattern *)
     | Nil t -> 0.
     | Cons (xl,m0,m1) ->
        assert (ndim > 0);
@@ -943,9 +909,9 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | Branch false :: p1, Alt (xc,c,m1,m2) ->
        let new_m2 = aux p1 r m2 in
        Alt (xc,c,m1,new_m2)
-    | _, Loop (xl,rlen,m1) ->
+    | _, Loop (xl,m1) ->
        let new_m1 = aux p r m1 in
-       Loop (xl,rlen,new_m1)
+       Loop (xl,new_m1)
     | Head :: p1, Cons (xl,m0,m1) ->
        let new_m0 = aux p1 r m0 in
        Cons (xl,new_m0,m1)

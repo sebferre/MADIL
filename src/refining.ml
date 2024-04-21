@@ -332,7 +332,7 @@ let refinements
                  | _ -> assert false)
                 selected_reads in
             aux ctx2 rev_xls m2 sel2) ]
-    | Model.Loop (xl,rlen,m1) -> (* TODO: add exprs *)
+    | Model.Loop (xl,m1) -> (* TODO: add exprs *)
        aux ctx (xl::rev_xls) m1
          (bind_reads
             (function
