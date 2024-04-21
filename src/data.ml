@@ -6,7 +6,7 @@ type ('value,'dconstr) data = (* data according to model, must be self-contained
 and ('value,'dconstr) data_model =
   | DPat of 'dconstr * ('value,'dconstr) data array
   | DAlt of float (* prob *) * bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
-  | DSeq of int * Range.t * ('value,'dconstr) data array (* inv: <int> = Array.length <data array> *)
+  | DSeq of ('value,'dconstr) data array
   | DExpr (* computed value *)
 
 (* TODO: consider adding DNil as nil data, for use as nil env *)
@@ -17,9 +17,8 @@ let value (d : ('value,'dconstr) data) : 'value =
 
 let make_dpat (value : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data array) : ('value,'dconstr) data =
   D (value, DPat (dc, args))
-let make_dseq (value : 'value) (range : Range.t) (ds : ('value,'dconstr) data array) : ('value,'dconstr) data =
-  let n = Array.length ds in
-  D (value, DSeq (n,range,ds))
+let make_dseq (value : 'value) (ds : ('value,'dconstr) data array) : ('value,'dconstr) data =
+  D (value, DSeq ds)
 let make_dexpr (value : 'value) : ('value,'dconstr) data =
   D (value, DExpr)
           
@@ -41,8 +40,8 @@ let xp_data
            if html then print#string "<div class=\"data-alt\">";
            aux ~prio_ctx:2 ~html print d12;
            if html then print#string "</div>")
-    | D (_v, DSeq (n,_range,items)) ->
-       xp_array ~delims:("〈#" ^ string_of_int n ^ ": ", "〉")
+    | D (_v, DSeq items) ->
+       xp_array ~delims:("〈#" ^ string_of_int (Array.length items) ^ ": ", "〉")
          (aux ~prio_ctx:2)
          ~html print items
     | D (v, DExpr) ->

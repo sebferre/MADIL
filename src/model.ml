@@ -366,7 +366,7 @@ let get_bindings  (* QUICK *)
        let d1_tree =
          let<* d = d_tree in
          match d with
-         | Some (D (_v, DSeq (dn,_,ds1))) ->
+         | Some (D (_v, DSeq ds1)) ->
             Ndtree.pack1 (Array.map (fun d1 -> Some d1) ds1)
          | None ->
             Ndtree.pack1 [|None|]
@@ -509,7 +509,7 @@ let generator (* on evaluated models: no expr, no def *)
        let v = value_of_seq (Array.map Data.value ds1) in
        if Range.mem n seq_len_m1 (* not clear why this could be false *)
        then
-         let d = D (v, DSeq (n, seq_len_m1, ds1)) in
+         let d = D (v, DSeq ds1) in
          Myseq.return (d, info)
        else Myseq.empty (* could not parse the expected number of elements *)
 (*       let seq_len_m1 = Range.inter rlen (seq_length rev_xis xl m1) in
@@ -605,7 +605,7 @@ let parseur (* on evaluated models: no expr, no def *)
        let v = value_of_seq (Array.map Data.value ds1) in
        if Range.mem n seq_len_m1 (* not clear why this could be false *)
        then
-         let d = D (v, DSeq (n, seq_len_m1, ds1)) in
+         let d = D (v, DSeq ds1) in
          Myseq.return (d, input)
        else Myseq.empty (* could not parse the expected number of elements *)
     | Nil (t) -> Myseq.empty
@@ -634,7 +634,7 @@ let parseur (* on evaluated models: no expr, no def *)
 let dl_data
       ~(encoding_dpat : 'dconstr -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
-      ~(encoding_seq : dl (* DL of seq length *) -> 'encoding array -> 'encoding)
+      ~(encoding_seq : 'encoding array -> 'encoding)
       ~(encoding_expr_value : 'value -> 'encoding) (* DL = 0 *)
       ~(dl_of_encoding : 'encoding -> dl)
     : (('value,'dconstr) data as 'data) -> dl = (* QUICK *)
@@ -647,10 +647,9 @@ let dl_data
        let dl_choice = Mdl.Code.usage prob in
        let enc12 = aux d12 in
        encoding_alt dl_choice enc12
-    | DSeq (dn,range,ds1) ->
-       let dl_length = 0. (* Range.dl dn range *) in (* TODO: replace by pattern args for lengths *)
+    | DSeq ds1 ->
        let encs = Array.map aux ds1 in
-       encoding_seq dl_length encs
+       encoding_seq encs
     | DExpr -> encoding_expr_value v
   in
   fun d ->

@@ -197,7 +197,7 @@ module type DOMAIN =
       
     val encoding_dpat : dconstr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
-    val encoding_seq : dl (* seq len *) -> encoding array -> encoding
+    val encoding_seq : encoding array -> encoding
     val encoding_expr_value : value -> encoding
     val dl_of_encoding : encoding -> dl
 

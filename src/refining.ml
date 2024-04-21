@@ -336,7 +336,7 @@ let refinements
        aux ctx (xl::rev_xls) m1
          (bind_reads
             (function
-             | Data.D (_, DSeq (_,_,ds1)) -> ds1
+             | Data.D (_, DSeq ds1) -> ds1
              | _ -> assert false)
             selected_reads)
     | Model.Nil t -> Myseq.empty
