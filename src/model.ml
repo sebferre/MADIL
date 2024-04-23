@@ -496,9 +496,7 @@ let generator (* on evaluated models: no expr, no def *)
        let depth = 1 + List.length rev_xis in
        let seq_gen_m1 =
          let* i = Myseq.counter 0 in
-         if i <= 3 (* TEST *)
-         then Myseq.return (gen ((xl,i)::rev_xis) m1)
-         else Myseq.return (fun info -> Myseq.empty) in
+         Myseq.return (gen ((xl,i)::rev_xis) m1) in
        let* ld1, info = Myseq.star_dependent_max (* _fair : BUGGY *) seq_gen_m1 info in
        let* info = generator_end ~depth info in (* checking valid end *)
        (* Myseq.star_dependent_max prevents stop anywhere *)
