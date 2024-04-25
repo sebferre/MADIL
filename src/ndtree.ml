@@ -262,7 +262,120 @@ let reverse (t : 'a t) : 'a t =
   | Vector1 vx -> { t with tree = Vector1 (array_reverse vx) }
   | Vector v -> { t with tree = Vector (array_reverse v) }
 
-                  
+let transpose (t : 'a t) : 'a t option = (* None if cols have different lengths *)
+  (* exchanging the first two dims *)
+  match t.tree with
+  | Scalar _ -> assert false
+  | Vector1 _ -> assert false (* requires at least two dims *)
+  | Vector v ->
+     let n0 = Array.length v in
+     if n0 = 0 then Some t (* empty ndtree *)
+     else
+       (match v.(0) with
+        | Scalar _ -> assert false
+        | Vector1 v1 ->
+           let n1 = Array.length v1 in
+           let v2 =
+             Array.map
+               (function
+                | Vector1 v1 -> v1
+                | _ -> assert false)
+               v in
+           if Array.for_all (fun v1 -> Array.length v1 = n1) v2 (* proper matrix *)
+           then
+             let new_v =
+               Array.init n1
+                 (fun j ->
+                   let new_v1 =
+                     Array.init n0
+                       (fun i -> v2.(i).(j)) in
+                   Vector1 new_v1) in
+             Some { t with tree = Vector new_v }
+           else None
+        | Vector v1 ->
+           let n1 = Array.length v1 in
+           let v2 =
+             Array.map
+               (function
+                | Vector v1 -> v1
+                | _ -> assert false)
+               v in
+           if Array.for_all (fun v1 -> Array.length v1 = n1) v2 (* proper matrix *)
+           then
+             let new_v =
+               Array.init n1
+                 (fun j ->
+                   let new_v1 =
+                     Array.init n0
+                       (fun i -> v2.(i).(j)) in
+                   Vector new_v1) in
+             Some { t with tree = Vector new_v }
+           else None)
+
+let flatten_by_rows ?(snake = false) (t : 'a t) : 'a t option =
+  match t.tree with
+  | Scalar _ | Vector1 _ -> assert false (* needs at least 2 dims *)
+  | Vector v ->
+     let n0 = Array.length v in
+     if n0 = 0 then Some { t with ndim = t.ndim-1 } (* empty ndtree *)
+     else
+       (match v.(0) with
+        | Scalar _ -> assert false
+        | Vector1 v1 ->
+           let new_v =
+             Array.concat
+               (Array.to_list
+                  (Array.mapi
+                     (fun j -> function
+                       | Vector1 v1 ->
+                          if snake && j mod 2 <> 0
+                          then array_reverse v1
+                          else v1
+                      | _ -> assert false)
+                     v)) in
+           Some { ndim = t.ndim-1; tree = Vector1 new_v }
+        | Vector v1 ->
+           let new_v =
+             Array.concat
+               (Array.to_list
+                  (Array.mapi
+                     (fun j -> function
+                       | Vector v1 ->
+                          if snake && j mod 2 <> 0
+                          then array_reverse v1
+                          else v1
+                       | _ -> assert false)
+                     v)) in
+           Some { ndim = t.ndim-1; tree = Vector new_v })
+
+let flatten_by_cols ?(snake = false) (t : 'a t) : 'a t option =
+  let@ t' = transpose t in
+  flatten_by_rows ~snake t'
+
+(*let _ = (* UNIT TEST of functions transpose and flatten *)
+  let t : int t =
+    { ndim = 2;
+      tree = Vector (Array.init 3 (fun i -> Vector1 (Array.init 2 (fun j -> Some (2*i+j))))) } in
+  let t : int t =
+    { ndim = 3;
+      tree = Vector (Array.init 3 (fun i -> Vector (Array.init 2 (fun j -> Vector1 (Array.init 1 (fun k -> Some (2*i+j))))))) } in
+  let pp_t =
+    function
+    | Some t -> pp (xp ~xp_elt:(fun ~html print i -> print#int i)) t; print_newline ()
+    | None -> print_endline "NONE" in
+  pp_t (Some t);
+  print_endline "transpose";
+  pp_t (transpose t);
+  print_endline "flatten_by_rows";
+  pp_t (flatten_by_rows t);
+  print_endline "flatten_by_rows_like_snake";
+  pp_t (flatten_by_rows ~snake:true t);
+  print_endline "flatten_by_cols";
+  pp_t (flatten_by_cols t);
+  print_endline "flatten_by_cols_like_snake";
+  pp_t (flatten_by_cols ~snake:true t)*)
+  
+
 let fold ~(scalar: 'a option -> 'b) ~(vector: 'b array -> 'b) (t : 'a t) : 'b =
   let rec aux = function
     | Scalar x_opt -> scalar x_opt
