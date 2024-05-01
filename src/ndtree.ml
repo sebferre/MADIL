@@ -262,6 +262,12 @@ let reverse (t : 'a t) : 'a t =
   | Vector1 vx -> { t with tree = Vector1 (array_reverse vx) }
   | Vector v -> { t with tree = Vector (array_reverse v) }
 
+let rotate ~(shift : int) (t : 'a t) : 'a t = (* rotating on first dim *)
+  match t.tree with
+  | Scalar _ -> assert false
+  | Vector1 v1 -> { t with tree = Vector1 (array_rotate v1 shift) }
+  | Vector v -> { t with tree = Vector (array_rotate v shift) }
+
 let transpose (t : 'a t) : 'a t option = (* None if cols have different lengths *)
   (* exchanging the first two dims *)
   match t.tree with

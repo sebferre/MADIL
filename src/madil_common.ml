@@ -63,6 +63,10 @@ let array_reverse (ar : 'a array) : 'a array =
   let n = Array.length ar in
   Array.init n (fun i -> ar.(n-i-1))
 
+let array_rotate (ar : 'a array) (shift : int) : 'a array =
+  let n = Array.length ar in
+  Array.init n (fun i -> ar.((i + n * (abs shift) - shift) mod n)) (* + n*shift to ensure positive value before applying modulo *)
+
 (* option *)
 
 let ( let@ ) = Option.bind
