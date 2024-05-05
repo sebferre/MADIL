@@ -383,17 +383,12 @@ let get_bindings  (* QUICK *)
                 then Some 0, (1,None)
                 else None, (0,None))
               rev_xls) in
-       let d0_tree =
-         match Ndtree.index d_tree indices (* head_opt d_tree *) with
-         | Some d0_tree -> d0_tree
-         | None -> assert false in (* pb in parsing *)
-       let acc = aux (list_remove xl rev_xls) m0 d0_tree acc in
-       let d1_tree =
-         match Ndtree.slice d_tree slices (* tail_opt d_tree *) with
-         | Some d1_tree -> d1_tree
-         | None -> assert false in
-       let acc = aux rev_xls m1 d1_tree acc in
-       acc
+       (match Ndtree.index d_tree indices, Ndtree.slice d_tree slices with
+        | Some d0_tree, Some d1_tree ->
+           let acc = aux (list_remove xl rev_xls) m0 d0_tree acc in
+           let acc = aux rev_xls m1 d1_tree acc in
+           acc
+        | _ -> acc) (* for cases where sequences end before this Cons pattern *)
     | Expr _ -> acc
     | Value _ -> assert false
     | Derived _ -> acc

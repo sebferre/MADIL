@@ -6,32 +6,43 @@ open Ndtree.Operators
 
 type ('typ,'value,'dconstr,'var,'func) read = ('typ,'value,'dconstr,'var,'func) Model.read * ('value,'dconstr) Data.data Ndtree.t
    
-let map_reads (f : 'data -> 'data) (reads : ('read list * bool) list) : ('read list * bool) list  =
+let map_reads_ndtree (f_ndtree : 'data Ndtree.t -> 'data Ndtree.t) (reads : ('read list * bool) list) : ('read list * bool) list  =
   List.map
     (fun (example_reads, unselected_reads) ->
       List.map
         (fun (read,data) ->
-          let data' = Ndtree.map f data in
+          let data' = f_ndtree data in
           (read, data'))
         example_reads,
       unselected_reads)
     reads
+  
+let map_reads (f : 'data -> 'data) (reads : ('read list * bool) list) : ('read list * bool) list  =
+  map_reads_ndtree (Ndtree.map f) reads
 
-let filter_map_reads (f : 'data -> 'data option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
-  (* returns: the result of applying [f] on [selected_reads] when [f] is defined *)
+let filter_map_reads_ndtree (f_ndtree : 'data Ndtree.t -> 'data Ndtree.t option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
   List.filter_map
     (fun (example_reads, unselected_reads) ->
       let defined_example_reads, undefined_reads =
         List.partition_map
           (fun (read,data) ->
-            let data' = Ndtree.map_filter f data in
-            if Ndtree.for_all (fun d -> d = None) data' (* TODO: this is not so elegant *)
-            then Either.Right () (* this case might be avoided *)
-            else Either.Left (read, data'))
+            match f_ndtree data with
+            | None -> Either.Right ()
+            | Some data' -> Either.Left (read, data'))
           example_reads in
       if defined_example_reads = []
       then None
       else Some (defined_example_reads, unselected_reads || undefined_reads <> []))
+    selected_reads
+
+let filter_map_reads (f : 'data -> 'data option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
+  (* returns: the result of applying [f] on [selected_reads] when [f] is defined *)
+  filter_map_reads_ndtree
+    (fun data ->
+      let data' = Ndtree.map_filter f data in
+      if Ndtree.for_all (fun d -> d = None) data' (* TODO: this is not so elegant *)
+      then None
+      else Some data')
     selected_reads
 
 let bind_reads (f : 'data -> 'data array) (reads : (('read * 'data Ndtree.t) list * bool) list) : (('read * 'data Ndtree.t) list * bool) list  =
@@ -49,17 +60,6 @@ let bind_reads (f : 'data -> 'data array) (reads : (('read * 'data Ndtree.t) lis
       unselected_reads)
     reads
 
-let map_reads_ndtree (f_ndtree : 'data Ndtree.t -> 'data Ndtree.t) (reads : ('read list * bool) list) : ('read list * bool) list  =
-  List.map
-    (fun (example_reads, unselected_reads) ->
-      List.map
-        (fun (read,data) ->
-          let data' = f_ndtree data in
-          (read, data'))
-        example_reads,
-      unselected_reads)
-    reads
-  
 type ('typ,'value,'dconstr,'var,'func) best_read = (* should be named best_read *)
   { unselected_reads : bool; (* flag for out-of-branch alt reads *)
     matching : bool; (* matching flag *)
@@ -354,21 +354,15 @@ let refinements
            
            (let ctx0 = Model.Head :: ctx in
             let sel0 =
-              map_reads_ndtree
-                (fun data ->
-                  match Ndtree.index data indices (* head_opt data *) with
-                  | Some data0 -> data0
-                  | None -> assert false)
+              filter_map_reads_ndtree
+                (fun data -> Ndtree.index data indices)
                 selected_reads in
             aux ctx0 (list_remove xl rev_xls) m0 sel0);
 
            (let ctx1 = Model.Tail :: ctx in
             let sel1 =
-              map_reads_ndtree
-                (fun data ->
-                  match Ndtree.slice data slices (* tail_opt data *) with
-                  | Some data1 -> data1
-                  | None -> assert false)
+              filter_map_reads_ndtree
+                (fun data -> Ndtree.slice data slices)
                 selected_reads in
             aux ctx1 rev_xls m1 sel1);
 
