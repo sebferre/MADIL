@@ -210,6 +210,7 @@ let refinements
       ~(pruning : bool)
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
+      ~(max_expr_size : int)
       ~(max_expr_refinements_per_read : int)
       ~(max_expr_refinements_per_var : int)
       ~(max_refinements : int)
@@ -407,8 +408,7 @@ let refinements
                Myseq.interleave
                  (List.map
                     (fun t1 ->
-                      (*let* t1 = Myseq.from_list ts1 in *)
-                      Expr.Exprset.to_seq
+                      Expr.Exprset.to_seq ~max_expr_size
                         (Expr.Index.lookup (t1, v_tree)
                            (Model.force_index ~make_index read)))
                     ts1) in
@@ -572,7 +572,7 @@ let refinements
             data in
         Myseq.fold_left
           (fun rs e -> (e, varseq0, new_data) :: rs)
-          [] (Expr.Exprset.to_seq es))
+          [] (Expr.Exprset.to_seq ~max_expr_size es))
       (fun e varseq' ~supp ~nb ~alt best_reads ->
         if supp = nb
         then

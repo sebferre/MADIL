@@ -165,6 +165,7 @@ module type DOMAIN =
     val max_nb_reads : int ref
     val max_nb_writes : int ref
     val alpha : float ref
+    val max_expr_size : int ref
     val max_expr_refinements_per_read : int ref
     val max_expr_refinements_per_var : int ref
     val max_refinements : int ref
@@ -353,6 +354,7 @@ module Make (Domain : DOMAIN) =
         ~refinements_pat
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
+        ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
         ~max_refinements:(!max_refinements)
@@ -374,6 +376,7 @@ module Make (Domain : DOMAIN) =
         ~refinements_pat:prunings_pat
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
+        ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
         ~max_refinements:(!max_refinements)

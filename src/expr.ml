@@ -94,7 +94,7 @@ module type EXPRSET =
   sig
     type ('typ,'value,'var,'func) t
     val xp : xp_value:'value html_xp -> xp_var:'var html_xp -> xp_func:'func html_xp -> ('typ,'value,'var,'func) t html_xp
-    val to_seq : ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) expr Myseq.t
+    val to_seq : max_expr_size:int -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) expr Myseq.t
     val mem : ('typ,'value,'var,'func) expr -> ('typ,'value,'var,'func) t -> bool
     val empty : 'typ -> ('typ,'value,'var,'func) t
     val value : 'typ -> 'value -> ('typ,'value,'var,'func) t
@@ -259,9 +259,9 @@ module Exprset_new : EXPRSET =
                Myseq.return (Apply (t,f,args)))
              (Mymap.bindings es.applies))
     
-    let to_seq (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
+    let to_seq ~(max_expr_size : int) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
       (* enumerate expressions in increasing ast size *)
-      let* n = Myseq.range 1 9 (* TODO param *) in
+      let* n = Myseq.range 1 max_expr_size in
       to_seq_for_size es n
 
     let xp
