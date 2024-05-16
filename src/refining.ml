@@ -225,7 +225,7 @@ let refinements
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
-      ~(postprocessing : 'typ -> 'constr -> 'model array -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
+      ~(postprocessing : 'typ -> 'model -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
 
@@ -420,9 +420,6 @@ let refinements
                else s_expr in
              let refs =
                s_expr
-               (*|> Myseq.map (fun e -> (Expr.size_expr_ast e, e))
-               (* TODO: avoid to have to sort everything before slicing *)
-               |> Myseq.sort Stdlib.compare *)
                |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
                |> Myseq.fold_left
                  (fun refs e ->
@@ -460,7 +457,9 @@ let refinements
            in
            let v_tree = Ndtree.map Data.value data in
            aux [] (List.rev rev_xls) (Ndtree.ndim v_tree) v_tree data []))
-         (fun m_new varseq' ~supp ~nb ~alt best_reads ->
+         (fun m' varseq' ~supp ~nb ~alt best_reads ->
+           let* m_new, best_reads =
+             postprocessing t m m' ~supp ~nb ~alt best_reads in
            make_alt_if_allowed_and_needed
              ~allowed ~supp ~nb
              m_new m varseq' best_reads)
@@ -510,7 +509,7 @@ let refinements
                 []))
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         let* m_new, best_reads =
-          postprocessing t c args m' ~supp ~nb ~alt best_reads in
+          postprocessing t m m' ~supp ~nb ~alt best_reads in
         make_alt_if_allowed_and_needed
           ~allowed ~supp ~nb
           m_new m varseq' best_reads)
