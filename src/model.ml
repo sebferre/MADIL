@@ -43,6 +43,7 @@ let make_loop (xl : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,
 let make_nil t = Nil (t)
 let make_cons xl m0 m1 = Cons (xl,m0,m1)
 let make_expr t e = Expr (t,e)
+let make_expr_const t v = Expr (t, Expr.Const (t, v))
 let make_derived t = Derived t
 
 let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
