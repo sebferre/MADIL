@@ -224,7 +224,7 @@ let refinements
       ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'value,'dconstr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
-      ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'data -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
+      ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'model -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
@@ -387,7 +387,14 @@ let refinements
              |> List.map (fun (m',varseq') -> (m',varseq',data)))
            (fun m' varseq' ~supp ~nb ~alt best_reads ->
              Myseq.return (m', varseq', best_reads))
-       else Myseq.empty
+       else (*Myseq.empty*)
+         (* generalizing constant into variable expression *)
+         aux_expr ctx rev_xls m selected_reads
+         |> Myseq.filter
+              (fun (p,m',varseq',supp,dl') ->
+                match m' with
+                | Model.Expr (_, Expr.Const _) -> false
+                | _ -> true)
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Value _ -> assert false
     | Model.Derived t -> Myseq.empty)
@@ -470,14 +477,18 @@ let refinements
     let ok_cons = Model.is_index_invariant m in
     aux_gen ctx rev_xls m selected_reads
       (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_pat/get_rs" (fun () ->
+        let v_tree =
+          Ndtree.map
+            (fun d -> Data.value d)
+            data in
         let input_tree =
           Ndtree.map
-            (fun d -> input_of_value t (Data.value d))
-            data in
-        match Ndtree.choose data with (* TODO: should be at index [0,...,0] *)
+            (fun v -> input_of_value t v)
+            v_tree in
+        match Ndtree.choose v_tree with (* TODO: should be at index [0,...,0] *)
         | None -> []
-        | Some d -> (* computing refinements on a sample data *)
-           refinements_pat ~env_vars t c args varseq0 d
+        | Some v -> (* computing refinements on a sample data *)
+           refinements_pat ~env_vars t c args varseq0 v
            |> List.fold_left
                 (fun refs (m',varseq') ->
                   let ref_cons = (* considering the need to nest m' into Cons *)

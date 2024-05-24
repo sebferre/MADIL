@@ -213,11 +213,11 @@ module type DOMAIN =
 
     (* refining *)
 
-    val refinements_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> data -> (model * varseq) list
+    val refinements_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
     val refinements_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     val prunings_value : typ -> value -> varseq -> (model * varseq) list
-    val prunings_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> data -> (model * varseq) list
+    val prunings_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
     val prunings_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
