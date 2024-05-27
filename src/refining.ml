@@ -219,9 +219,8 @@ let refinements
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> ?ndim:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
-      ~(eval : 'model -> ('var,'typ,'value) Expr.bindings -> 'model result)
       ~(input_of_value : 'typ -> 'value -> 'input)
-      ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'value,'dconstr) Model.parse_bests)
+      ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'var,'typ,'value,'dconstr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
@@ -229,8 +228,8 @@ let refinements
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
 
-  let parse_best m xis input = Common.prof "Refining.refinements/parse_best" (fun () ->
-    match parse_bests m ~xis input with
+  let parse_best m xis bindings input = Common.prof "Refining.refinements/parse_best" (fun () ->
+    match parse_bests m ~xis bindings input with
     | Result.Ok ((d',dl')::_) -> Result.Ok d'
     | _ -> Result.Error Not_found)
   in
@@ -297,7 +296,6 @@ let refinements
                          | _ -> assert false)
                         selected_reads))
                  args))
-    | Model.Fail -> assert false
     | Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave
          [ aux_expr ctx rev_xls m selected_reads;
@@ -307,7 +305,6 @@ let refinements
                if pruning
                then aux_alt_prune ctx rev_xls m m1 m2 selected_reads
                else aux_alt_cond_undet ctx rev_xls m xc c m1 m2 selected_reads
-            | True | False -> assert false
             | BoolExpr _ -> Myseq.empty);
            
            (let ctx1 = Model.Branch true :: ctx in
@@ -396,7 +393,6 @@ let refinements
                 | Model.Expr (_, Expr.Const _) -> false
                 | _ -> true)
     | Model.Expr (k,e) -> Myseq.empty
-    | Model.Value _ -> assert false
     | Model.Derived t -> Myseq.empty)
   and aux_expr ctx rev_xls m selected_reads = (* QUICK *)
     if pruning then Myseq.empty
@@ -492,13 +488,12 @@ let refinements
            |> List.fold_left
                 (fun refs (m',varseq') ->
                   let ref_cons = (* considering the need to nest m' into Cons *)
-                    let| m'_eval = eval m' read.bindings in
                     let rec aux_cons xls data input_tree = (* itering through heads of heads *)
                       let data'_res =
                         Ndtree.mapi_result
                           (fun is input ->
                             let xis = try List.combine xls is with _ -> assert false in
-                            parse_best m'_eval xis input)
+                            parse_best m' xis read.bindings input)
                           input_tree in
                       match data'_res with
                       | Result.Ok data' ->

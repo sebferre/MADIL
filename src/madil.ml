@@ -73,8 +73,8 @@ module type TYPES =
     type reads = (typ,value,dconstr,var,func) Task_model.reads
     type pairs_reads = (typ,value,dconstr,var,func) Task_model.pairs_reads
 
-    type generator = (generator_info,value,dconstr) Model.generator
-    type parseur = (input,value,dconstr) Model.parseur
+    type generator = (generator_info,var,typ,value,dconstr) Model.generator
+    type parseur = (input,var,typ,value,dconstr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
     val xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp
@@ -134,8 +134,8 @@ module Defined_types (T : BASIC_TYPES) =
     type reads = (typ,value,dconstr,var,func) Task_model.reads
     type pairs_reads = (typ,value,dconstr,var,func) Task_model.pairs_reads
                      
-    type generator = (generator_info,value,dconstr) Model.generator
-    type parseur = (input,value,dconstr) Model.parseur
+    type generator = (generator_info,var,typ,value,dconstr) Model.generator
+    type parseur = (input,var,typ,value,dconstr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
     let xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp = Expr.Index.xp ~xp_typ ~xp_value ~xp_var ~xp_func
@@ -255,16 +255,12 @@ module Make (Domain : DOMAIN) =
         ~eval_func
         ~eval_arg
       
-    let eval : model -> bindings -> model result =
-      Model.eval
-        ~asd
-        ~eval_expr
-        ~bool_of_value
-
     (* model-based generation and parsing *)
       
     let generator : ?xis:((var * int) list) -> model -> generator =
       Model.generator
+        ~eval_expr
+        ~bool_of_value
         ~generator_value
         ~generator_pat
         ~generator_end
@@ -272,6 +268,8 @@ module Make (Domain : DOMAIN) =
 
     let parseur : ?xis:((var * int) list) -> model -> parseur =
       Model.parseur
+        ~eval_expr
+        ~bool_of_value
         ~parseur_value
         ~parseur_pat
         ~parseur_end
@@ -326,12 +324,10 @@ module Make (Domain : DOMAIN) =
     let read =
       Model.read
         ~input_of_value
-        ~eval
         ~parse_bests
 
     let write =
       Model.write
-        ~eval
         ~generator
         ~dl_data
 
@@ -346,7 +342,6 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~eval
         ~input_of_value
         ~parse_bests
         ~make_index
@@ -368,7 +363,6 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~eval
         ~input_of_value
         ~parse_bests
         ~make_index
