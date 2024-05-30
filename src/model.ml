@@ -9,6 +9,7 @@ type ('typ,'value,'var,'func) cond_model =
  
 type ('typ,'value,'var,'constr,'func) model =
   | Def of 'var * ('typ,'value,'var,'constr,'func) model (* a var is an id for the value at this sub-model *)
+  | Any of 'typ
   | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Alt of 'var (* condition var *) * ('typ,'value,'var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
   | Loop of 'var * ('typ,'value,'var,'constr,'func) model
@@ -30,6 +31,8 @@ let ctx0 : ('var,'constr) path = [] (* a context is a reverse path *)
 
 let make_def (x : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Def (x,m1)
+let make_any (t : 't) : ('typ,'value,'var,'constr,'func) model =
+  Any t
 let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) model array) : ('typ,'value,'var,'constr,'func) model =
   Pat (t,c,args)
 let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
@@ -49,6 +52,7 @@ let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,
                     
 let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Def (x,m1) -> typ m1
+  | Any t -> t
   | Pat (t,c,args) -> t
   | Alt (xc,c,m1,m2) -> typ m1
   | Loop (xl,m1) -> typ m1
@@ -98,6 +102,7 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
 
 let rec is_index_invariant : ('typ,'value,'var,'constr,'func) model -> bool = function
   | Def (x,m1) -> is_index_invariant m1
+  | Any t -> true
   | Pat (t,c,args) -> Array.for_all is_index_invariant args
   | Alt (xc,c,m1,m2) -> is_index_invariant m1 && is_index_invariant m2
   | Loop (xl,m1) -> is_index_invariant m1
@@ -111,6 +116,7 @@ let rec is_index_invariant : ('typ,'value,'var,'constr,'func) model -> bool = fu
 let xp_model
       ~(xp_value : 'value html_xp)
       ~(xp_var : 'var html_xp)
+      ~(xp_any : 'typ -> unit html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
       ~(xp_func : 'func html_xp)
     : ('typ,'value,'var,'constr,'func) model html_xp =
@@ -121,6 +127,10 @@ let xp_model
          (fun () ->
            xp_var ~html print x; print#string ":";
            aux ~prio_ctx ~html print m1)
+    | Any t ->
+       xp_html_elt "span" ~classe:"model-any" ~html print
+         (fun () ->
+           xp_any t ~html print ())
     | Pat (_t,c,args) ->
        let xp_args =
          Array.map
@@ -284,6 +294,7 @@ let binding_vars
        let t = typ m1 in
        let acc = aux m1 acc in
        Mymap.add x t acc
+    | Any t -> acc
     | Pat (t,c,args) ->
        Array.fold_right aux args acc
     | Alt (xc,cond,m1,m2) ->
@@ -316,6 +327,7 @@ let get_bindings  (* QUICK *)
          let< d = d_tree in
          Data.value d in
        Mymap.add x (t1,v_tree) acc
+    | Any t -> acc
     | Pat (t,c,args) ->
        let n = Array.length args in
        let ref_acc = ref acc in (* missing Array.fold_right2 *)
@@ -390,6 +402,7 @@ let generator (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
       ~(bool_of_value : 'value -> bool result)
       ~(generator_value : 'value -> 'gen)
+      ~(generator_any : 'typ -> 'gen)
       ~(generator_pat : 'typ -> 'constr -> (('info,'var,'typ,'value,'dconstr) generator as 'gen) array -> 'gen)
       ~(generator_end : depth:int -> 'info -> 'info Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
@@ -398,6 +411,8 @@ let generator (* on evaluated models: no expr, no def *)
     match m with
     | Def (x,m1) ->
        gen rev_xis m1 bindings info
+    | Any t ->
+       generator_any t bindings info
     | Pat (t,c,args) ->
        let gen_args = Array.map (gen rev_xis) args in
        generator_pat t c gen_args bindings info
@@ -468,6 +483,7 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
       ~(bool_of_value : 'value -> bool result)
       ~(parseur_value : 'value -> 'parse)
+      ~(parseur_any : 'typ -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
       ~(parseur_end : depth:int -> 'input -> 'input Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
@@ -476,6 +492,8 @@ let parseur (* on evaluated models: no expr, no def *)
     match m with
     | Def (x,m1) ->
        parse rev_xis m1 bindings input
+    | Any t ->
+       parseur_any t bindings input
     | Pat (t,c,args) ->
        let parse_args = Array.map (parse rev_xis) args in
        parseur_pat t c parse_args bindings input
@@ -538,6 +556,7 @@ let parseur (* on evaluated models: no expr, no def *)
 (* model-based encoding of data *)
 
 let dl_data
+      ~(encoding_dany : 'value -> 'encoding)
       ~(encoding_dpat : 'dconstr -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : 'encoding array -> 'encoding)
@@ -546,6 +565,7 @@ let dl_data
     : (('value,'dconstr) data as 'data) -> dl = (* QUICK *)
   let rec aux (D (v, dm)) =
     match dm with
+    | DAny v_r -> encoding_dany v_r
     | DPat (dc, dargs) ->
        let encs = Array.map aux dargs in
        encoding_dpat dc encs
@@ -568,6 +588,7 @@ let dl_parse_rank (rank : int) : dl =
   
 (* model encoding *)
 
+let size_any = 1
 let size_alt = 3
 let size_loop = 2
 let size_nil = 1
@@ -579,6 +600,7 @@ let size_model_ast (* for DL computing, QUICK *)
     (m : ('typ,'value,'var,'constr,'func) model) : int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
+    | Any t -> size_any
     | Pat (t,c,args) ->
        Array.fold_left
          (fun res arg -> res + aux arg)
@@ -612,6 +634,10 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
          List.fold_left (* not sure this is best to sum over all ts1 if they share a lot *)
            (fun nb t1 -> nb +. nb_expr_ast t1 size)
            nb ts1 in
+       let nb = (* counting possible Any *)
+         if size = size_any
+         then nb +. 1.
+         else nb in
        let nb = (* counting possible alternatives *)
          if size >= size_alt && asd#alt_opt t
          then nb +. sum_conv [aux_cond; aux t; aux t] (size - size_alt)
@@ -667,6 +693,7 @@ let dl_model_params
     Expr.dl_expr_params ~dl_value ~dl_var ~dl_func_params in
   let rec aux ndim = function
     | Def (x,m1) -> aux ndim m1 (* variable names do not matter, only variable choice in expr matters *)
+    | Any t -> 0.
     | Pat (t,c,args) ->
        let dl_args_params =
          Array.map (aux ndim) args

@@ -223,6 +223,7 @@ let refinements
       ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'var,'typ,'value,'dconstr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
+      ~(refinements_any : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'model -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
@@ -279,10 +280,14 @@ let refinements
     | Model.Def (x,m1) ->
        let ctx = [Model.Alias (x,ctx)] in
        aux ctx rev_xls m1 selected_reads
+    | Model.Any t ->
+       Myseq.interleave
+         [aux_expr ctx rev_xls m selected_reads;
+          aux_any_pat ctx rev_xls m t (refinements_any ~env_vars t varseq0) selected_reads]
     | Model.Pat (t,c,args) ->
        Myseq.interleave
          (aux_expr ctx rev_xls m selected_reads
-          :: aux_pat ctx rev_xls m t c args selected_reads
+          :: aux_any_pat ctx rev_xls m t (refinements_pat ~env_vars t c args varseq0) selected_reads
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
@@ -468,11 +473,11 @@ let refinements
              m_new m varseq' best_reads)
        |> Myseq.sort (fun (_,_,_,supp1,dl1) (_,_,_,supp2,dl2) -> Stdlib.compare (supp2,dl1) (supp1,dl2))
        |> Myseq.slice ~limit:max_expr_refinements_per_var
-  and aux_pat ctx rev_xls m t c args selected_reads =
+  and aux_any_pat ctx rev_xls m t get_refs selected_reads =
     let allowed = asd#alt_opt t in
     let ok_cons = Model.is_index_invariant m in
     aux_gen ctx rev_xls m selected_reads
-      (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_pat/get_rs" (fun () ->
+      (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_any/get_rs" (fun () ->
         let v_tree =
           Ndtree.map
             (fun d -> Data.value d)
@@ -484,7 +489,7 @@ let refinements
         match Ndtree.choose v_tree with (* TODO: should be at index [0,...,0] *)
         | None -> []
         | Some v -> (* computing refinements on a sample data *)
-           refinements_pat ~env_vars t c args varseq0 v
+           get_refs v (* refinements_any ~env_vars t varseq0 v *)
            |> List.fold_left
                 (fun refs (m',varseq') ->
                   let ref_cons = (* considering the need to nest m' into Cons *)

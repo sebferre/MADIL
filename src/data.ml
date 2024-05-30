@@ -4,6 +4,7 @@ open Madil_common
 type ('value,'dconstr) data = (* data according to model, must be self-contained for encoding *)
   D of 'value * ('value,'dconstr) data_model
 and ('value,'dconstr) data_model =
+  | DAny of 'value (* a form of value often coming with some range constraint for DL computing *)
   | DPat of 'dconstr * ('value,'dconstr) data array
   | DAlt of float (* prob *) * bool * ('value,'dconstr) data (* the bool indicates which branch was chosen *)
   | DSeq of ('value,'dconstr) data array
@@ -15,6 +16,8 @@ let value (d : ('value,'dconstr) data) : 'value =
   match d with
   | D (v, _) -> v
 
+let make_dany (value : 'value) (value_range : 'value) : ('value,'dconstr) data =
+  D (value, DAny value_range)
 let make_dpat (value : 'value) (dc : 'dconstr) (args : ('value,'dconstr) data array) : ('value,'dconstr) data =
   D (value, DPat (dc, args))
 let make_dseq (value : 'value) (ds : ('value,'dconstr) data array) : ('value,'dconstr) data =
@@ -28,6 +31,10 @@ let xp_data
     : ('value,'dconstr) data html_xp =
   let rec aux ~prio_ctx ~html print d =
     match d with
+    | D (_v, DAny v_r) ->
+       xp_html_elt "span" ~classe:"data-any" ~html print
+         (fun () ->
+           xp_value ~html print v_r)
     | D (_v, DPat (dc,args)) ->
        let xp_args =
          Array.map
@@ -37,9 +44,9 @@ let xp_data
     | D (_v, DAlt (_prob,_b,d12)) ->
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
-           if html then print#string "<div class=\"data-alt\">";
-           aux ~prio_ctx:2 ~html print d12;
-           if html then print#string "</div>")
+           xp_html_elt "div" ~classe:"data-alt" ~html print
+             (fun () ->
+               aux ~prio_ctx:2 ~html print d12))
     | D (_v, DSeq items) ->
        xp_array ~delims:("〈#" ^ string_of_int (Array.length items) ^ ": ", "〉")
          (aux ~prio_ctx:2)

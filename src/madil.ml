@@ -21,6 +21,7 @@ module type BASIC_TYPES =
     val xp_var : var html_xp
 
     type constr
+    val xp_any : typ -> unit html_xp
     val xp_pat : constr -> unit html_xp array -> unit html_xp
     val xp_field : (constr * int) html_xp
 
@@ -120,7 +121,7 @@ module Defined_types (T : BASIC_TYPES) =
     let xp_expr : expr html_xp = Expr.xp_expr ~xp_value ~xp_var ~xp_func
 
     type model = (typ,value,var,constr,func) Model.model
-    let xp_model : model html_xp = Model.xp_model ~xp_value ~xp_var ~xp_pat ~xp_func
+    let xp_model : model html_xp = Model.xp_model ~xp_value ~xp_var ~xp_any ~xp_pat ~xp_func
 
     type asd = (typ,constr,func) Model.asd
 
@@ -186,16 +187,19 @@ module type DOMAIN =
     (* model-based generation and parsing *)
 
     val generator_value : value -> generator
+    val generator_any : typ -> generator
     val generator_pat : typ -> constr -> generator array -> generator
     val generator_end : depth:int -> generator_info -> generator_info Myseq.t
 
     val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
+    val parseur_any : typ -> parseur
     val parseur_pat : typ -> constr -> parseur array -> parseur
     val parseur_end : depth:int -> input -> input Myseq.t
 
     (* description lengths *)
-      
+
+    val encoding_dany : value -> encoding
     val encoding_dpat : dconstr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_seq : encoding array -> encoding
@@ -213,10 +217,12 @@ module type DOMAIN =
 
     (* refining *)
 
+    val refinements_any : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
     val refinements_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
     val refinements_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     val prunings_value : typ -> value -> varseq -> (model * varseq) list
+    val prunings_any : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
     val prunings_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
     val prunings_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
@@ -262,6 +268,7 @@ module Make (Domain : DOMAIN) =
         ~eval_expr
         ~bool_of_value
         ~generator_value
+        ~generator_any
         ~generator_pat
         ~generator_end
         ~value_of_seq
@@ -271,6 +278,7 @@ module Make (Domain : DOMAIN) =
         ~eval_expr
         ~bool_of_value
         ~parseur_value
+        ~parseur_any
         ~parseur_pat
         ~parseur_end
         ~value_of_seq
@@ -279,6 +287,7 @@ module Make (Domain : DOMAIN) =
       
     let dl_data : data -> dl =
       Model.dl_data
+        ~encoding_dany
         ~encoding_dpat
         ~encoding_alt
         ~encoding_seq
@@ -346,6 +355,7 @@ module Make (Domain : DOMAIN) =
         ~parse_bests
         ~make_index
         ~refinements_value:(fun t v varseq -> []) (* TODO: is a custom definition useful? *)
+        ~refinements_any
         ~refinements_pat
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
@@ -367,6 +377,7 @@ module Make (Domain : DOMAIN) =
         ~parse_bests
         ~make_index
         ~refinements_value:prunings_value
+        ~refinements_any:prunings_any
         ~refinements_pat:prunings_pat
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
