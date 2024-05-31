@@ -4,7 +4,7 @@ open Ndtree.Operators
 
 (* computing model refinements from parsing data *)
 
-type ('typ,'value,'dconstr,'var,'func) read = ('typ,'value,'dconstr,'var,'func) Model.read * ('value,'dconstr) Data.data Ndtree.t
+type ('typ,'value,'constr,'var,'func) read = ('typ,'value,'constr,'var,'func) Model.read * ('value,'constr) Data.data Ndtree.t
    
 let map_reads_ndtree (f_ndtree : 'data Ndtree.t -> 'data Ndtree.t) (reads : ('read list * bool) list) : ('read list * bool) list  =
   List.map
@@ -60,14 +60,14 @@ let bind_reads (f : 'data -> 'data array) (reads : (('read * 'data Ndtree.t) lis
       unselected_reads)
     reads
 
-type ('typ,'value,'dconstr,'var,'func) best_read = (* should be named best_read *)
+type ('typ,'value,'constr,'var,'func) best_read = (* should be named best_read *)
   { unselected_reads : bool; (* flag for out-of-branch alt reads *)
     matching : bool; (* matching flag *)
-    read : ('typ,'value,'dconstr,'var,'func) Model.read; (* the selected best read, first one when matching=false *)
-    data : ('value,'dconstr) Data.data Ndtree.t;
-    new_data : ('value,'dconstr) Data.data Ndtree.t } (* the new data, the old data when matching=false *)
+    read : ('typ,'value,'constr,'var,'func) Model.read; (* the selected best read, first one when matching=false *)
+    data : ('value,'constr) Data.data Ndtree.t;
+    new_data : ('value,'constr) Data.data Ndtree.t } (* the new data, the old data when matching=false *)
 
-let best_reads_stats (best_reads : ('typ,'value,'dconstr,'var,'func) best_read list) : int * int = (* support, total *)
+let best_reads_stats (best_reads : ('typ,'value,'constr,'var,'func) best_read list) : int * int = (* support, total *)
   List.fold_left
     (fun (supp,nb) best_read ->
       if best_read.matching then supp+1, nb+1 (* positive *)
@@ -76,9 +76,9 @@ let best_reads_stats (best_reads : ('typ,'value,'dconstr,'var,'func) best_read l
     (0,0) best_reads
 
 let inter_union_reads
-      (get_rs : (('typ,'value,'dconstr,'var,'func) read as 'read) -> ('ref * 'var Myseq.t * 'data Ndtree.t) list)
+      (get_rs : (('typ,'value,'constr,'var,'func) read as 'read) -> ('ref * 'var Myseq.t * 'data Ndtree.t) list)
       (reads : ('readdata list * bool) list)
-    : ('ref, 'var Myseq.t * ('typ,'value,'dconstr,'var,'func) best_read list) Mymap.t =
+    : ('ref, 'var Myseq.t * ('typ,'value,'constr,'var,'func) best_read list) Mymap.t =
   (* given a function extracting refinements (submodels) from each read,
      return a set of such refinements, each mapped to the dl-shortest reads supporting it, along with new data *)
   let process_example reads unselected_reads =
@@ -131,8 +131,8 @@ let inter_union_reads
      refs)
 
 let extend_partial_best_reads
-      (selected_reads : ((('typ,'value,'dconstr,'var,'func) read as 'read) list * bool) list)
-      (best_reads : (('typ,'value,'dconstr,'var,'func) best_read as 'best_read) list)
+      (selected_reads : ((('typ,'value,'constr,'var,'func) read as 'read) list * bool) list)
+      (best_reads : (('typ,'value,'constr,'var,'func) best_read as 'best_read) list)
       (check_alt_read : 'read -> ('read * 'data Ndtree.t) option)
     : 'best_read list =
   List.map2
@@ -157,7 +157,7 @@ let make_alt_if_allowed_and_needed
       (m_true : (('typ,'value,'var,'const,'func) Model.model as 'model))
       (m_false : 'model)
       (varseq : 'var Myseq.t)
-      (best_reads : (('typ,'value,'dconstr,'var,'func) best_read as 'best_read) list)
+      (best_reads : (('typ,'value,'constr,'var,'func) best_read as 'best_read) list)
     : ('model * 'var Myseq.t * 'best_read list) Myseq.t =
   if supp = nb then (* no need for alternative *)
     Myseq.return (m_true, varseq, best_reads)
@@ -189,14 +189,14 @@ let make_cons xl m1' m varseq1' =
              (Model.make_def x1 m) in
   m', varseq'
        
-type ('typ,'value,'dconstr,'var,'constr,'func) refiner =
+type ('typ,'value,'var,'constr,'func) refiner =
   nb_env_vars:int ->
   env_vars:('var,'typ) Expr.binding_vars ->
   dl_M:dl -> (* current model DL *)
   (* NOTE: dl_M does not matter for ranking because an invariant of parsing and refinement *)
   (('typ,'value,'var,'constr,'func) Model.model as 'model) ->
   'var Myseq.t -> (* fresh variables viz the model *)
-  ('typ,'value,'dconstr,'var,'func) Model.read list list
+  ('typ,'value,'constr,'var,'func) Model.read list list
   -> (('var,'constr) Model.path (* refinement location *)
       * 'model (* refined submodel *)
       * int (* support *)
@@ -218,16 +218,16 @@ let refinements
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> ?ndim:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
-      ~(dl_data : (('value,'dconstr) Data.data as 'data) -> dl)
+      ~(dl_data : (('value,'constr) Data.data as 'data) -> dl)
       ~(input_of_value : 'typ -> 'value -> 'input)
-      ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'var,'typ,'value,'dconstr) Model.parse_bests)
+      ~(parse_bests : ?xis:(('var * int) list) -> 'model -> ('input,'var,'typ,'value,'constr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_any : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
       ~(postprocessing : 'typ -> 'model -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
-    : ('typ,'value,'dconstr,'var,'constr,'func) refiner =
+    : ('typ,'value,'var,'constr,'func) refiner =
 
   let parse_best m xis bindings input = Common.prof "Refining.refinements/parse_best" (fun () ->
     match parse_bests m ~xis bindings input with
@@ -651,13 +651,13 @@ let refinements
 
 let task_refinements
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
-      ~(input_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
-      ~(output_refinements : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
+      ~(input_refinements : ('typ,'value,'var,'constr,'func) refiner)
+      ~(output_refinements : ('typ,'value,'var,'constr,'func) refiner)
       
       (m : (('typ,'value,'var,'constr,'func) Task_model.task_model) as 'task_model)
-      (prs : ('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads)
-      (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
-      (dsro : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
+      (prs : ('typ,'value,'constr,'var,'func) Task_model.pairs_reads)
+      (dsri : ('typ,'value,'constr,'var,'func) Task_model.reads)
+      (dsro : ('typ,'value,'constr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseq =
@@ -674,10 +674,10 @@ let task_refinements
 
 let task_prunings
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
-      ~(input_prunings : ('typ,'value,'dconstr,'var,'constr,'func) refiner)
+      ~(input_prunings : ('typ,'value,'var,'constr,'func) refiner)
       
       (m : (('typ,'value,'var,'constr,'func) Task_model.task_model as 'task_model))
-      (dsri : ('typ,'value,'dconstr,'var,'func) Task_model.reads)
+      (dsri : ('typ,'value,'constr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
   let* pi, ri, suppi, dli', mi', varseq =
     input_prunings ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:dsri.dl_m

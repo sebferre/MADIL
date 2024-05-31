@@ -43,18 +43,18 @@ let size_task_model_ast
 
 (* pair reading and encoding *)
   
-type ('typ,'value,'dconstr,'var,'func) pairs_reads =
+type ('typ,'value,'constr,'var,'func) pairs_reads =
   (* result of reading a list of pairs of grids *)
   { dl_mi : dl; (* input model DL *)
     dl_mo : dl; (* output model DL *)
-    inputs_reads : (('typ,'value,'dconstr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
+    inputs_reads : (('typ,'value,'constr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
     reads : ('read * 'read * dl) list list; (* outer list over examples, inner list over parses, sorted in increasing DL *)
   }
 
 let read_pairs
       ~(max_nb_reads : int)
       ~(dl_task_model : (('typ,'value,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
-      ~(read : env:(('value,'dconstr) data as 'data) ->
+      ~(read : env:(('value,'constr) data as 'data) ->
                bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
@@ -62,7 +62,7 @@ let read_pairs
       ~(env : 'data)
       (m : 'task_model)
       (pairs : 'value Task.pair list)
-    : ('typ,'value,'dconstr,'var,'func) pairs_reads result =
+    : ('typ,'value,'constr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
   let dl_mi, dl_mo = dl_task_model m in
   let| inputs_reads_reads =
@@ -95,13 +95,13 @@ let read_pairs
   let inputs_reads, reads = List.split inputs_reads_reads in
   Result.Ok {dl_mi; dl_mo; inputs_reads; reads})
 
-type ('typ,'value,'dconstr,'var,'func) reads =
+type ('typ,'value,'constr,'var,'func) reads =
   { dl_m : dl; (* DL of the model *)
-    reads : ('typ,'value,'dconstr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
+    reads : ('typ,'value,'constr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
   }
   
 let split_pairs_read
-      (prs : ('typ,'value,'dconstr,'var,'func) pairs_reads) : ('typ,'value,'dconstr,'var,'func) reads double =
+      (prs : ('typ,'value,'constr,'var,'func) pairs_reads) : ('typ,'value,'constr,'var,'func) reads double =
   let project_reads proj =
     List.map
       (fun pair_reads ->
@@ -131,7 +131,7 @@ type dl_split =
 
 let dl_model_data
       ~(alpha : float)
-      (psr : ('typ,'value,'dconstr,'var,'func) pairs_reads) : dl_split = (* QUICK *)
+      (psr : ('typ,'value,'constr,'var,'func) pairs_reads) : dl_split = (* QUICK *)
   let lmi = psr.dl_mi in
   let lmo = psr.dl_mo in
   let lri, lro, ldi, ldo =
@@ -153,7 +153,7 @@ let dl_model_data
 
 let make_norm_dl_model_data
       ~(alpha : float)
-      () : ('typ,'value,'dconstr,'var,'func) pairs_reads -> dl_split =
+      () : ('typ,'value,'constr,'var,'func) pairs_reads -> dl_split =
   let lmdi0 = ref (-1.) in
   let lmdo0 = ref (-1.) in
   fun psr ->
@@ -175,10 +175,10 @@ let make_norm_dl_model_data
 let apply
       ~(max_nb_reads : int)
       ~(max_nb_writes : int)
-      ~(read : env:(('value,'dconstr) data as 'data) ->
+      ~(read : env:(('value,'constr) data as 'data) ->
                bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value ->
-               ('typ,'value,'dconstr,'var,'func) read Myseq.t)
+               ('typ,'value,'constr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 'model -> 'info -> ('data * dl) Myseq.t)

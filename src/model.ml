@@ -316,7 +316,7 @@ let get_bindings  (* QUICK *)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
       (m0 : ('typ,'value,'var,'constr,'func) model as 'model)
-      (d0 : ('value,'dconstr) data as 'data)
+      (d0 : ('value,'constr) data as 'data)
     : ('var,'typ,'value) Expr.bindings =
   let rec aux rev_xls m (d_tree : 'data Ndtree.t) acc =
     match m with
@@ -396,14 +396,14 @@ let get_bindings  (* QUICK *)
 
 (* model-based generation *)
 
-type ('info,'var,'typ,'value,'dconstr) generator = ('var,'typ,'value) Expr.bindings -> 'info -> (('value,'dconstr) data * 'info) Myseq.t
+type ('info,'var,'typ,'value,'constr) generator = ('var,'typ,'value) Expr.bindings -> 'info -> (('value,'constr) data * 'info) Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
       ~(bool_of_value : 'value -> bool result)
       ~(generator_value : 'value -> 'gen)
       ~(generator_any : 'typ -> 'gen)
-      ~(generator_pat : 'typ -> 'constr -> (('info,'var,'typ,'value,'dconstr) generator as 'gen) array -> 'gen)
+      ~(generator_pat : 'typ -> 'constr -> (('info,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
       ~(generator_end : depth:int -> 'info -> 'info Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
     : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> 'gen =
@@ -477,7 +477,7 @@ let generator (* on evaluated models: no expr, no def *)
      
 (* model-based parsing *)
 
-type ('input,'var,'typ,'value,'dconstr) parseur = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'dconstr) data * 'input) Myseq.t
+type ('input,'var,'typ,'value,'constr) parseur = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'constr) data * 'input) Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
@@ -487,7 +487,7 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
       ~(parseur_end : depth:int -> 'input -> 'input Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
-    : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> (('input,'var,'typ,'value,'dconstr) parseur as 'parse) =
+    : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> (('input,'var,'typ,'value,'constr) parseur as 'parse) =
   let rec parse rev_xis m bindings input =
     match m with
     | Def (x,m1) ->
@@ -557,12 +557,12 @@ let parseur (* on evaluated models: no expr, no def *)
 
 let dl_data
       ~(encoding_dany : 'value -> 'encoding)
-      ~(encoding_dpat : 'dconstr -> 'encoding array -> 'encoding)
+      ~(encoding_dpat : 'constr -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_seq : 'encoding array -> 'encoding)
       ~(encoding_expr_value : 'value -> 'encoding) (* DL = 0 *)
       ~(dl_of_encoding : 'encoding -> dl)
-    : (('value,'dconstr) data as 'data) -> dl = (* QUICK *)
+    : (('value,'constr) data as 'data) -> dl = (* QUICK *)
   let rec aux (D (v, dm)) =
     match dm with
     | DAny v_r -> encoding_dany v_r
@@ -745,17 +745,17 @@ let dl
        
 (* reading *)
 
-type ('typ,'value,'dconstr,'var,'func) read =
-  { env : ('value,'dconstr) data;
+type ('typ,'value,'constr,'var,'func) read =
+  { env : ('value,'constr) data;
     bindings : ('var,'typ,'value) Expr.bindings;
     mutable lazy_index : ('typ,'value,'var,'func) Expr.Index.t option; (* not using Lazy.t because breaks comparisons and hash *)
-    data : ('value,'dconstr) data;
+    data : ('value,'constr) data;
     dl_rank : dl;
     dl : dl } (* including rank *)
 
 let force_index
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)
-      (read : ('typ,'value,'dconstr,'var,'func) read)
+      (read : ('typ,'value,'constr,'var,'func) read)
     : ('typ,'value,'var,'func) Expr.Index.t =
   match read.lazy_index with
   | Some index -> index
@@ -775,16 +775,16 @@ let force_index
 
 exception Parse_failure
 
-type ('input,'var,'typ,'value,'dconstr) parse_bests = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'dconstr) data * dl) list result
+type ('input,'var,'typ,'value,'constr) parse_bests = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'constr) data * dl) list result
         
 let parse_bests
       ~(max_nb_parse : int)
-      ~(parseur : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'dconstr) parseur)
-      ~(dl_data : ('value,'dconstr) data -> dl)
+      ~(parseur : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'constr) parseur)
+      ~(dl_data : ('value,'constr) data -> dl)
 
       ?(xis = [])
       (m : ('typ,'value,'var,'constr,'func) model)
-    : ('input,'var,'typ,'value,'dconstr) parse_bests =
+    : ('input,'var,'typ,'value,'constr) parse_bests =
   fun bindings input ->
   Common.prof "Model.parse_bests" (fun () ->
   let parses =
@@ -810,13 +810,13 @@ let parse_bests
 
 let read
       ~(input_of_value : 'typ -> 'value -> 'input)
-      ~(parse_bests : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'dconstr) parse_bests)
+      ~(parse_bests : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'constr) parse_bests)
 
-      ~(env : ('value,'dconstr) data)
+      ~(env : ('value,'constr) data)
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m : ('typ,'value,'var,'constr,'func) model)
       (v : 'value)
-    : ('typ,'value,'dconstr,'var,'func) read Myseq.t =
+    : ('typ,'value,'constr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
   let t = typ m in
   let input = input_of_value t v in
@@ -832,13 +832,13 @@ let read
 exception Generate_failure
   
 let write
-      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('info,'var,'typ,'value,'dconstr) generator)
-      ~(dl_data : ('value,'dconstr) data -> dl)
+      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('info,'var,'typ,'value,'constr) generator)
+      ~(dl_data : ('value,'constr) data -> dl)
       
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m : ('typ,'value,'var,'constr,'func) model)
       (info : 'info)
-    : (('value,'dconstr) data * dl) Myseq.t =
+    : (('value,'constr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
   let* data, _ = generator m bindings info in
   let dl = dl_data data in (* encoding of what is not specified by the evaluated model *)

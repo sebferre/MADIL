@@ -4,12 +4,12 @@ open Task_model
 
 (* learning : used by batch only, replicate changes in arc_lis *)
 
-type ('typ,'value,'dconstr,'var,'constr,'func) results =
-  { result_refining : ('typ,'value,'dconstr,'var,'constr,'func) results_phase;
-    result_pruning : ('typ,'value,'dconstr,'var,'constr,'func) results_phase }
-and ('typ,'value,'dconstr,'var,'constr,'func) results_phase =
+type ('typ,'value,'var,'constr,'func) results =
+  { result_refining : ('typ,'value,'var,'constr,'func) results_phase;
+    result_pruning : ('typ,'value,'var,'constr,'func) results_phase }
+and ('typ,'value,'var,'constr,'func) results_phase =
   { task_model : ('typ,'value,'var,'constr,'func) Task_model.task_model;
-    pairs_reads : ('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads;
+    pairs_reads : ('typ,'value,'constr,'var,'func) Task_model.pairs_reads;
     timed_out : bool;
     memed_out: bool;
     nsteps : int;
@@ -18,12 +18,12 @@ and ('typ,'value,'dconstr,'var,'constr,'func) results_phase =
     njumps_sol : int;
   }
 
-type ('typ,'value,'dconstr,'var,'constr,'func) state =
+type ('typ,'value,'var,'constr,'func) state =
   { r : ('typ,'value,'var,'constr,'func) Task_model.refinement; (* last refinement *)
     m : ('typ,'value,'var,'constr,'func) Task_model.task_model; (* current task model *)
-    prs : ('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads; (* pairs reads *)
-    drsi : ('typ,'value,'dconstr,'var,'func) Task_model.reads; (* input reads *)
-    drso : ('typ,'value,'dconstr,'var,'func) Task_model.reads; (* output reads *)
+    prs : ('typ,'value,'constr,'var,'func) Task_model.pairs_reads; (* pairs reads *)
+    drsi : ('typ,'value,'constr,'var,'func) Task_model.reads; (* input reads *)
+    drso : ('typ,'value,'constr,'var,'func) Task_model.reads; (* output reads *)
     dl_split : dl_split; (* all DLs *)
     lmd : dl; (* whole normalized DL, with ldi=lri in pruning mode *)
     lrido : dl; (* input rank + output data normalized DL *)
@@ -43,10 +43,10 @@ let learn
           env:'data ->
           (('t,'value,'var,'constr,'func) Task_model.task_model as 'task_model) ->
           'value Task.pair list ->
-          (('typ,'value,'dconstr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
+          (('typ,'value,'constr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
-          (('typ,'value,'dconstr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
+          (('typ,'value,'constr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
           ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
       ~(task_prunings :
           'task_model -> 'reads ->
@@ -64,7 +64,7 @@ let learn
       ~env (* environment data to the input model *)
       ~init_task_model
       (pairs : 'value Task.pair list)
-    : ('typ,'value,'dconstr,'var,'constr,'func) results
+    : ('typ,'value,'var,'constr,'func) results
   = Common.prof "Learning.learn" (fun () ->
   let norm_dl_model_data = make_norm_dl_model_data ~alpha () in
   let data_of_model ~pruning r m =

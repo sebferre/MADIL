@@ -14,9 +14,6 @@ module type BASIC_TYPES =
     val typ_bool : typ
     val xp_typ : typ html_xp
 
-    type dconstr
-    val xp_dpat : dconstr -> unit html_xp array -> unit html_xp
-
     type var
     val xp_var : var html_xp
 
@@ -45,7 +42,7 @@ module type TYPES =
     type task_pair = value Task.pair
     type task = value Task.task
               
-    type data = (value,dconstr) Data.data
+    type data = (value,constr) Data.data
     val xp_data : data html_xp
               
     type path = (var,constr) Model.path
@@ -70,17 +67,17 @@ module type TYPES =
     type refinement = (typ,value,var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
-    type read = (typ,value,dconstr,var,func) Model.read
-    type reads = (typ,value,dconstr,var,func) Task_model.reads
-    type pairs_reads = (typ,value,dconstr,var,func) Task_model.pairs_reads
+    type read = (typ,value,constr,var,func) Model.read
+    type reads = (typ,value,constr,var,func) Task_model.reads
+    type pairs_reads = (typ,value,constr,var,func) Task_model.pairs_reads
 
-    type generator = (generator_info,var,typ,value,dconstr) Model.generator
-    type parseur = (input,var,typ,value,dconstr) Model.parseur
+    type generator = (generator_info,var,typ,value,constr) Model.generator
+    type parseur = (input,var,typ,value,constr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
     val xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp
 
-    type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
+    type best_reads = (typ,value,constr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * Task_model.dl_split * dl)
@@ -106,8 +103,8 @@ module Defined_types (T : BASIC_TYPES) =
     type task_pair = value Task.pair
     type task = value Task.task
               
-    type data = (value,dconstr) Data.data
-    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_dpat
+    type data = (value,constr) Data.data
+    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_pat
                                
     type path = (var,constr) Model.path
     let xp_path : path html_xp = Model.xp_path ~xp_var ~xp_field
@@ -131,17 +128,17 @@ module Defined_types (T : BASIC_TYPES) =
     type refinement = (typ,value,var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
-    type read = (typ,value,dconstr,var,func) Model.read
-    type reads = (typ,value,dconstr,var,func) Task_model.reads
-    type pairs_reads = (typ,value,dconstr,var,func) Task_model.pairs_reads
+    type read = (typ,value,constr,var,func) Model.read
+    type reads = (typ,value,constr,var,func) Task_model.reads
+    type pairs_reads = (typ,value,constr,var,func) Task_model.pairs_reads
                      
-    type generator = (generator_info,var,typ,value,dconstr) Model.generator
-    type parseur = (input,var,typ,value,dconstr) Model.parseur
+    type generator = (generator_info,var,typ,value,constr) Model.generator
+    type parseur = (input,var,typ,value,constr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.Index.t
     let xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp = Expr.Index.xp ~xp_typ ~xp_value ~xp_var ~xp_func
 
-    type best_reads = (typ,value,dconstr,var,func) Refining.best_read list
+    type best_reads = (typ,value,constr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * Task_model.dl_split * dl)
@@ -200,7 +197,7 @@ module type DOMAIN =
     (* description lengths *)
 
     val encoding_dany : value -> encoding
-    val encoding_dpat : dconstr -> encoding array -> encoding
+    val encoding_dpat : constr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_seq : encoding array -> encoding
     val encoding_expr_value : value -> encoding
