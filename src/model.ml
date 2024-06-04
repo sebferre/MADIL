@@ -335,7 +335,7 @@ let get_bindings  (* QUICK *)
          let di_tree =
            let< d = d_tree in
            match d with
-           | D (_v, DPat (dc, dargs)) ->
+           | DPat (_v, dc, dargs) ->
               assert (Array.length dargs = n);
               dargs.(i)
            | _ -> assert false in
@@ -346,26 +346,26 @@ let get_bindings  (* QUICK *)
        let d1_tree =
          let<? d = d_tree in
          match d with
-         | D (_v, DAlt (_prob,b,d12)) -> if b then Some d12 else None
+         | DAlt (_prob,b,d12) -> if b then Some d12 else None
          | _ -> assert false in
        let acc = aux rev_xls m1 d1_tree acc in
        let d2_tree =
          let<? d = d_tree in
          match d with
-         | D (_v, DAlt (_prob,b,d12)) -> if b then None else Some d12
+         | DAlt (_prob,b,d12) -> if b then None else Some d12
          | _ -> assert false in
        let acc = aux rev_xls m2 d2_tree acc in
        let vc_tree =
          let< d = d_tree in
          match d with
-         | D (_v, DAlt (_prob,b,d12)) -> value_of_bool b
+         | DAlt (_prob,b,d12) -> value_of_bool b
          | _ -> assert false in
        Mymap.add xc (typ_bool, vc_tree) acc
     | Loop (xl,m1) ->
        let d1_tree =
          let<* d = d_tree in
          match d with
-         | Some (D (_v, DSeq ds1)) ->
+         | Some (DSeq (_v, ds1)) ->
             Ndtree.pack1 (Array.map (fun d1 -> Some d1) ds1)
          | None ->
             Ndtree.pack1 [|None|]
@@ -419,11 +419,11 @@ let generator (* on evaluated models: no expr, no def *)
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
          let* d1, info = gen rev_xis m1 bindings info in
-         let d = D (value d1, DAlt (prob,true,d1)) in
+         let d = DAlt (prob,true,d1) in
          Myseq.return (d, info) in
        let gen_b_d2 prob =
          let* d2, info = gen rev_xis m2 bindings info in
-         let d = D (value d2, DAlt (prob,false,d2)) in
+         let d = DAlt (prob,false,d2) in
          Myseq.return (d, info) in
        (match c with
         | Undet prob ->
@@ -451,7 +451,7 @@ let generator (* on evaluated models: no expr, no def *)
        (* Myseq.star_dependent_max prevents stop anywhere *)
        let ds1 = Array.of_list ld1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       let d = D (v, DSeq ds1) in
+       let d = DSeq (v, ds1) in
        Myseq.return (d, info)
     | Nil (t) -> Myseq.empty
     | Cons (xl,m0,m1) ->
@@ -466,7 +466,7 @@ let generator (* on evaluated models: no expr, no def *)
        if List.length is >= Ndtree.ndim v_tree
        then
          match Ndtree.lookup v_tree is with
-         | Some v -> generator_value v bindings info (* Myseq.return (D (v, DExpr), info) *)
+         | Some v -> generator_value v bindings info (* Myseq.return (DExpr v, info) *)
          | None -> Myseq.empty
        else Myseq.empty (* TODO: accepting vtrees ? *)
     | Derived t ->
@@ -500,11 +500,11 @@ let parseur (* on evaluated models: no expr, no def *)
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
          let* d1, input = parse rev_xis m1 bindings input in
-         let d = D (value d1, DAlt (prob,true,d1)) in
+         let d = DAlt (prob,true,d1) in
          Myseq.return (d, input) in
        let seq2 prob =
          let* d2, input = parse rev_xis m2 bindings input in
-         let d = D (value d2, DAlt (prob,false,d2)) in
+         let d = DAlt (prob,false,d2) in
          Myseq.return (d, input) in
        (match c with
         | Undet prob ->
@@ -530,7 +530,7 @@ let parseur (* on evaluated models: no expr, no def *)
        (* Myseq.star_dependent_max prevents stop anywhere *)
        let ds1 = Array.of_list ld1 in
        let v = value_of_seq (Array.map Data.value ds1) in
-       let d = D (v, DSeq ds1) in
+       let d = DSeq (v, ds1) in
        Myseq.return (d, input)
     | Nil (t) -> Myseq.empty
     | Cons (xl,m0,m1) ->
@@ -563,20 +563,19 @@ let dl_data
       ~(encoding_expr_value : 'value -> 'encoding) (* DL = 0 *)
       ~(dl_of_encoding : 'encoding -> dl)
     : (('value,'constr) data as 'data) -> dl = (* QUICK *)
-  let rec aux (D (v, dm)) =
-    match dm with
-    | DAny v_r -> encoding_dany v_r
-    | DPat (dc, dargs) ->
+  let rec aux = function
+    | DAny (_, v_r) -> encoding_dany v_r
+    | DPat (_, dc, dargs) ->
        let encs = Array.map aux dargs in
        encoding_dpat dc encs
     | DAlt (prob,b,d12) ->
        let dl_choice = Mdl.Code.usage prob in
        let enc12 = aux d12 in
        encoding_alt dl_choice enc12
-    | DSeq ds1 ->
+    | DSeq (_, ds1) ->
        let encs = Array.map aux ds1 in
        encoding_seq encs
-    | DExpr -> encoding_expr_value v
+    | DExpr v -> encoding_expr_value v
   in
   fun d ->
   let enc = aux d in

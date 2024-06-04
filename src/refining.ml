@@ -172,8 +172,7 @@ let make_alt_if_allowed_and_needed
           let prob = if matching then prob else 1. -. prob in
           let new_data =
             Ndtree.map
-              (fun new_d ->
-                Data.D (Data.value new_d, DAlt (prob, matching, new_d)))
+              (fun new_d -> Data.DAlt (prob, matching, new_d))
               new_data in
           {unselected_reads; matching; read; data; new_data})
         best_reads in
@@ -295,7 +294,7 @@ let refinements
                    aux ctxi rev_xls mi
                      (map_reads
                         (function
-                         | Data.D (_, DPat (dc, args)) ->
+                         | Data.DPat (_, dc, args) ->
                             assert (i >= 0 && i < Array.length args);
                             args.(i)
                          | _ -> assert false)
@@ -316,7 +315,7 @@ let refinements
             let sel1 =
               filter_map_reads
                 (function
-                 | Data.D (_, DAlt (prob,b,d12)) ->
+                 | Data.DAlt (prob,b,d12) ->
                     if b
                     then Some d12
                     else None
@@ -328,7 +327,7 @@ let refinements
             let sel2 =
               filter_map_reads
                 (function
-                 | Data.D (_, DAlt (prob,b,d12)) ->
+                 | Data.DAlt (prob,b,d12) ->
                     if not b
                     then Some d12
                     else None
@@ -339,7 +338,7 @@ let refinements
        aux ctx (xl::rev_xls) m1
          (bind_reads
             (function
-             | Data.D (_, DSeq ds1) -> ds1
+             | Data.DSeq (_, ds1) -> ds1
              | _ -> assert false)
             selected_reads)
     | Model.Nil t -> Myseq.empty
@@ -529,31 +528,31 @@ let refinements
       (fun (read, data : _ read) ->
         if Ndtree.for_all_defined
              (function
-              | Data.D (_, DAlt (prob, b, d12)) -> b
+              | Data.DAlt (prob, b, d12) -> b
               | _ -> assert false)
              data then
           let data1 =
             Ndtree.map_filter
               (function
-               | Data.D (_, DAlt (prob, b, d12)) -> if b then Some d12 else None
+               | Data.DAlt (prob, b, d12) -> if b then Some d12 else None
                | _ -> assert false)
               data in
           [m1, varseq0, data1]
         else if Ndtree.for_all_defined
              (function
-              | Data.D (_, DAlt (prob, b, d12)) -> not b
+              | Data.DAlt (prob, b, d12) -> not b
               | _ -> assert false)
              data then
           let data2 =
             Ndtree.map_filter
               (function
-               | Data.D (_, DAlt (prob, b, d12)) -> if not b then Some d12 else None
+               | Data.DAlt (prob, b, d12) -> if not b then Some d12 else None
                | _ -> assert false)
               data in
           [m2, varseq0, data2]
         else [])
 (*        match read.data with
-        | Data.D (_, DAlt (prob, b, d12)) ->
+        | Data.DAlt (prob, b, d12) ->
            if b
            then [m1, varseq0, d12]
            else [m2, varseq0, d12]
@@ -568,7 +567,7 @@ let refinements
         let vc_tree =
           Ndtree.map
           (function
-           | Data.D (v, DAlt (_prob, b, d12)) -> value_of_bool b
+           | Data.DAlt (_prob, b, d12) -> value_of_bool b
            | _ -> assert false)
           data in
         let es : _ Expr.Exprset.t =
@@ -577,7 +576,7 @@ let refinements
         let new_data = (* new data *)
           Ndtree.map
             (function
-             | Data.D (v, DAlt (_prob, b, d12)) -> Data.D (v, DAlt (1.,b,d12))
+             | Data.DAlt (_prob, b, d12) -> Data.DAlt (1.,b,d12)
              | _ -> assert false)
             data in
         Myseq.fold_left
@@ -593,11 +592,11 @@ let refinements
 (* too clumsy - above code is more symmetrical wrt true/false but issue about missing false condition expressions
       (fun (read : _ Model.read) ->        
         match read.data with
-        | Data.D (v, DAlt (_prob, true, d1)) ->
+        | Data.DAlt (_prob, true, d1) ->
            let vc = value_of_bool true in
            let es : _ Expr.Exprset.t = Expr.Index.lookup (typ_bool, Ndtree.scalar vc) (Lazy.force read.lazy_index) in
            Myseq.fold_left
-             (fun rs e -> (e, varseq0, Data.D (v, DAlt (1., true, d1))) :: rs)
+             (fun rs e -> (e, varseq0, Data.DAlt (1., true, d1)) :: rs)
              [] (Expr.Exprset.to_seq es)
         | Data.D (_, DAlt (_, false, _)) ->
            (* we only look for true expressions because the index does not contain all false expressions *)
@@ -613,10 +612,10 @@ let refinements
               selected_reads best_reads
               (fun read ->
                 match read.data with
-                | D (v, DAlt (_prob, b, d1)) ->
+                | DAlt (_prob, b, d1) ->
                    let v_true = value_of_bool true in
                    if not b && not (Expr.Exprset.mem e (Expr.Index.lookup (typ_bool, Ndtree.scalar v_true) (Lazy.force read.lazy_index)))
-                   then Some (read, D (v, DAlt (1., false, d1)))
+                   then Some (read, DAlt (1., false, d1))
                    else None
                 | _ -> assert false) in
         let supp1, nb1 = best_reads_stats best_reads in
