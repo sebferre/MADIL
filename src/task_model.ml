@@ -217,8 +217,8 @@ let apply
   
 type ('typ,'value,'var,'constr,'func) refinement =
   | RInit
-  | Rinput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
-  | Routput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl (* estimated result DL *)
+  | Rinput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl result (* estimated result DL *)
+  | Routput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl result (* estimated result DL *)
 
 let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)

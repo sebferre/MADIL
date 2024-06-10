@@ -109,21 +109,27 @@ object
            print_endline (Printexc.to_string exn);
            Myseq.empty)
         |> Myseq.fold_left
-             (fun (quota_compressive,refinements, errors as res) (r,m) ->
+             (fun (quota_compressive,refinements, errors as res) (r,m_res) ->
                if quota_compressive <= 0
                then res (* TODO: stop generating sequence *)
                else
-                 match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage r focus.env m focus.info_o with
-                 | Result.Ok state ->
-                    let compressive =
-                      state.norm_lmd < focus.norm_lmd
-                      && (if focus.stage = Prune && state.stage = Prune
-                          then (* in pruning stage, L(input rank + output data|M) must not increase *)
-                            state.norm_lrido <= focus.norm_lrido
-                          else true) in
-                    (if compressive then quota_compressive - 1 else quota_compressive),
-                    (compressive,state)::refinements,
-                    errors
+                 match m_res with
+                 | Result.Ok m ->
+                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage r focus.env m focus.info_o with
+                     | Result.Ok state ->
+                        let compressive =
+                          state.norm_lmd < focus.norm_lmd
+                          && (if focus.stage = Prune && state.stage = Prune
+                              then (* in pruning stage, L(input rank + output data|M) must not increase *)
+                                state.norm_lrido <= focus.norm_lrido
+                              else true) in
+                        (if compressive then quota_compressive - 1 else quota_compressive),
+                        (compressive,state)::refinements,
+                        errors
+                     | Result.Error err ->
+                        quota_compressive,
+                        refinements,
+                        (r,err)::errors)
                  | Result.Error err ->
                     quota_compressive,
                     refinements,

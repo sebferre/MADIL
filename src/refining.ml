@@ -2,6 +2,13 @@
 open Madil_common
 open Ndtree.Operators
 
+let debug = ref false (* set to true to return all candidate refinements with causes for not being valid *)
+exception No_local_parse
+exception Failed_postprocessing
+exception Alt_not_allowed
+exception Alt_cannot_be_pruned
+exception Cond_expr_not_valid
+
 (* computing model refinements from parsing data *)
 
 type ('typ,'value,'constr,'var,'func) read = ('typ,'value,'constr,'var,'func) Model.read * ('value,'constr) Data.data Ndtree.t
@@ -76,7 +83,7 @@ let best_reads_stats (best_reads : ('typ,'value,'constr,'var,'func) best_read li
     (0,0) best_reads
 
 let inter_union_reads
-      (get_rs : (('typ,'value,'constr,'var,'func) read as 'read) -> ('ref * 'var Myseq.t * 'data Ndtree.t) list)
+      (get_rs : (('typ,'value,'constr,'var,'func) read as 'read) -> ('ref * 'var Myseq.t * 'data Ndtree.t option) list)
       (reads : ('readdata list * bool) list)
     : ('ref, 'var Myseq.t * ('typ,'value,'constr,'var,'func) best_read list) Mymap.t =
   (* given a function extracting refinements (submodels) from each read,
@@ -93,10 +100,14 @@ let inter_union_reads
             Common.prof "Refining.inter_union_reads/process_example/get_rs" (fun () ->
             get_rs (read,data)) in
           List.fold_left (* union(refs, refs_read) *)
-            (fun refs (r,varseq',new_data) ->
+            (fun refs (r,varseq',new_data_opt) ->
               if Mymap.mem r refs
               then refs
-              else Mymap.add r (varseq', {unselected_reads; matching = true; read; data; new_data}) refs)
+              else
+                let best_read =
+                  let@ new_data = new_data_opt in
+                  Some {unselected_reads; matching = true; read; data; new_data} in
+                Mymap.add r (varseq', best_read) refs)
             refs refs_read)
         Mymap.empty reads in
     alt_read, refs)
@@ -107,7 +118,13 @@ let inter_union_reads
   | (example0_reads, example0_unselected_reads) :: other_reads ->
      let alt_read0, refs0 = process_example example0_reads example0_unselected_reads in
      let alt_reads = [alt_read0] in
-     let refs = refs0 |> Mymap.map (fun (varseq', best_read) -> varseq', [best_read]) in
+     let refs =
+       refs0
+       |> Mymap.map
+            (fun (varseq', best_read0) ->
+              match best_read0 with
+              | Some best_read0 -> varseq', [best_read0]
+              | _ -> varseq', [alt_read0]) in
      let alt_reads, refs = (* TODO: is alt_read(s) necessary here? *)
        List.fold_left
          (fun (alt_reads,refs) (exampleI_reads, exampleI_unselected_reads) ->
@@ -118,12 +135,20 @@ let inter_union_reads
                (fun r varseq_best_reads_opt varseq_best_readI_opt ->
                  match varseq_best_reads_opt, varseq_best_readI_opt with
                  | Some (varseq, best_reads), Some (varseqI, best_readI) ->
-                    Some (varseq, best_readI :: best_reads)
+                    (match best_readI with
+                     | Some best_readI ->
+                        Some (varseq, best_readI :: best_reads)
+                     | _ ->
+                        Some (varseq, alt_readI :: best_reads))
                  | Some (varseq, best_reads), None ->
                     Some (varseq, alt_readI :: best_reads)
                  | None, Some (varseqI, best_readI) ->
-                    Some (varseqI, best_readI :: alt_reads)
-                 | _ -> None)
+                    (match best_readI with
+                     | Some best_readI ->
+                        Some (varseqI, best_readI :: alt_reads)
+                     | _ ->
+                        Some (varseqI, alt_readI :: alt_reads))
+                 | _ -> assert false (* None *))
                refs refsI) in
            let alt_reads = alt_readI :: alt_reads in
            alt_reads, refs)
@@ -158,9 +183,9 @@ let make_alt_if_allowed_and_needed
       (m_false : 'model)
       (varseq : 'var Myseq.t)
       (best_reads : (('typ,'value,'constr,'var,'func) best_read as 'best_read) list)
-    : ('model * 'var Myseq.t * 'best_read list) Myseq.t =
+    : ('model * 'var Myseq.t * 'best_read list result) Myseq.t =
   if supp = nb then (* no need for alternative *)
-    Myseq.return (m_true, varseq, best_reads)
+    Myseq.return (m_true, varseq, Result.Ok best_reads)
   else if allowed then
     (* making an alternative, model and data *)
     let xc, varseq' = new_var varseq in
@@ -176,9 +201,11 @@ let make_alt_if_allowed_and_needed
               new_data in
           {unselected_reads; matching; read; data; new_data})
         best_reads in
-    Myseq.return (m', varseq', best_reads')
+    Myseq.return (m', varseq', Result.Ok best_reads')
   else (* alt not allowed *)
-    Myseq.empty
+    if !debug
+    then Myseq.return (m_true, varseq, Result.Error Alt_not_allowed)
+    else Myseq.empty
 
 let make_cons xl m1' m varseq1' =
   let x0, varseq' = new_var varseq1' in
@@ -199,7 +226,7 @@ type ('typ,'value,'var,'constr,'func) refiner =
   -> (('var,'constr) Model.path (* refinement location *)
       * 'model (* refined submodel *)
       * int (* support *)
-      * dl (* new DL *)
+      * dl result (* new DL or error *)
       * 'model (* new model, after applying refinement *)
       * 'var Myseq.t (* remaining fresh vars *)
      ) Myseq.t
@@ -231,15 +258,15 @@ let refinements
   let parse_best m xis bindings input = Common.prof "Refining.refinements/parse_best" (fun () ->
     match parse_bests m ~xis bindings input with
     | Result.Ok ((d',dl')::_) -> Result.Ok d'
-    | _ -> Result.Error Not_found)
+    | _ -> Result.Error No_local_parse)
   in
   fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
   Myseq.prof "Refining.refinements" (
   let aux_gen (type r)
         ctx rev_xls m selected_reads (* ctx is reverse path *)
-        (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t) list)
-        (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads) Myseq.t)
-      : ('path * 'model * 'varseq * int * dl) Myseq.t =
+        (read_refs : 'read * 'data Ndtree.t -> (r * 'varseq * 'data Ndtree.t option) list)
+        (postprocessing : r -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads result) Myseq.t)
+      : ('path * 'model * 'varseq * int * dl result) Myseq.t =
     Myseq.prof "Refining.refinements/aux_gen" (
     let p = List.rev ctx in (* local path *)
     let ndim = List.length rev_xls in
@@ -248,28 +275,36 @@ let refinements
     let* r, (varseq', best_reads) = Mymap.to_seq r_best_reads in
     let supp, nb = best_reads_stats best_reads in
     let alt = (supp < nb) in
-    let* m_new, varseq', best_reads = postprocessing r varseq' ~supp ~nb ~alt best_reads in
-    let dl_m_new = dl_model ~nb_env_vars ~ndim m_new in
-    let dl_new =
-      dl_M -. dl_m +. dl_m_new
-      +. alpha *. Mdl.sum best_reads
-                    (fun {matching; read; data; new_data} ->
-                      if matching
-                      then
-                        let dl_d =
-                          Ndtree.fold
-                            ~scalar:(function Some d -> dl_data d | None -> 0.)
-                            ~vector:array_float_sum
-                            data in
-                        let dl_d_new =
-                          Ndtree.fold
-                            ~scalar:(function Some d -> dl_data d | None -> 0.)
-                            ~vector:array_float_sum
-                            new_data in
-                        read.dl -. dl_d +. dl_d_new
-                      else 0.) (* no change in this case *) in
-    let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
-    Myseq.return (p, m_new, varseq', supp, dl_new))
+    let* m_new, varseq', best_reads_res =
+      postprocessing r varseq' ~supp ~nb ~alt best_reads in
+    if supp = 0 then (* only alt_reads, no parse at all *)
+      Myseq.return (p, m_new, varseq', supp, Result.Error No_local_parse)
+    else
+      match best_reads_res with
+      | Result.Error error ->
+         Myseq.return (p, m_new, varseq', supp, Result.Error error)
+      | Result.Ok best_reads ->
+         let dl_m_new = dl_model ~nb_env_vars ~ndim m_new in
+         let dl_new =
+           dl_M -. dl_m +. dl_m_new
+           +. alpha *. Mdl.sum best_reads
+                         (fun {matching; read; data; new_data} ->
+                           if matching
+                           then
+                             let dl_d =
+                               Ndtree.fold
+                                 ~scalar:(function Some d -> dl_data d | None -> 0.)
+                                 ~vector:array_float_sum
+                                 data in
+                             let dl_d_new =
+                               Ndtree.fold
+                                 ~scalar:(function Some d -> dl_data d | None -> 0.)
+                                 ~vector:array_float_sum
+                                 new_data in
+                             read.dl -. dl_d +. dl_d_new
+                           else 0.) (* no change in this case *) in
+         let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
+         Myseq.return (p, m_new, varseq', supp, Result.Ok dl_new))
   in
   let rec aux ctx rev_xls m selected_reads =
   Myseq.prof "Refining.refinements/aux" (
@@ -374,10 +409,10 @@ let refinements
               let m1 = Model.undef m1 in
               aux_gen ctx rev_xls m selected_reads
                 (fun (read, data : _ read) ->
-                  [m1, varseq0, data])
+                  [m1, varseq0, Some data])
                 (* not m0 because it raises ndim errors because scalar becomes vector *)
                 (fun m' varseq' ~supp ~nb ~alt best_reads ->
-                  Myseq.return (m', varseq', best_reads))
+                  Myseq.return (m', varseq', Result.Ok best_reads))
             else Myseq.empty) ]
     | Model.Expr (k, Expr.Const (t,v)) ->
        if pruning (* pruning constants *)
@@ -385,9 +420,9 @@ let refinements
          aux_gen ctx rev_xls m selected_reads
            (fun (read, data : _ read) ->
              refinements_value t v varseq0
-             |> List.map (fun (m',varseq') -> (m',varseq',data)))
+             |> List.map (fun (m',varseq') -> (m',varseq', Some data)))
            (fun m' varseq' ~supp ~nb ~alt best_reads ->
-             Myseq.return (m', varseq', best_reads))
+             Myseq.return (m', varseq', Result.Ok best_reads))
        else (*Myseq.empty*)
          (* generalizing constant into variable expression *)
          aux_expr ctx rev_xls m selected_reads
@@ -433,7 +468,7 @@ let refinements
                    let rec aux_cons refs is_const me varseq d_tree' xvd_trees =
                      (* adding Cons around e, and replacing head by d_tree', |xvd_trees| times *)
                      match xvd_trees with
-                     | [] -> (me,varseq,d_tree')::refs
+                     | [] -> (me,varseq, Some d_tree')::refs
                      | (xl, v_tree1, d_tree1)::xvd_trees1 ->
                         let is_const1 = is_const && Ndtree.is_constant v_tree1 <> None in
                         let me1, varseq1, d_tree1' =
@@ -459,17 +494,20 @@ let refinements
                | xl::xls_down1, Some v_tree_0, Some d_tree_0 ->
                   aux refs xls_down1 (ndim-1) v_tree_0 d_tree_0 ((xl,v_tree,d_tree)::xvd_trees)
                | _ ->
-                  (Model.make_nil t, varseq0, d_tree) :: refs (* empty ndtree *)
+                  (Model.make_nil t, varseq0, Some d_tree) :: refs (* empty ndtree *)
              else refs
            in
            let v_tree = Ndtree.map Data.value data in
            aux [] (List.rev rev_xls) (Ndtree.ndim v_tree) v_tree data []))
          (fun m' varseq' ~supp ~nb ~alt best_reads ->
-           let* m_new, best_reads =
-             postprocessing t m m' ~supp ~nb ~alt best_reads in
-           make_alt_if_allowed_and_needed
-             ~allowed ~supp ~nb
-             m_new m varseq' best_reads)
+           Myseq.if_not_empty_else
+             (let* m', best_reads = postprocessing t m m' ~supp ~nb ~alt best_reads in
+              make_alt_if_allowed_and_needed
+                ~allowed ~supp ~nb
+                m' m varseq' best_reads)
+             (if !debug
+              then Myseq.return (m', varseq', Result.Error Failed_postprocessing)
+              else Myseq.empty))
        |> Myseq.sort (fun (_,_,_,supp1,dl1) (_,_,_,supp2,dl2) -> Stdlib.compare (supp2,dl1) (supp1,dl2))
        |> Myseq.slice ~limit:max_expr_refinements_per_var
   and aux_any_pat ctx rev_xls m t get_refs selected_reads =
@@ -501,16 +539,21 @@ let refinements
                           input_tree in
                       match data'_res with
                       | Result.Ok data' ->
-                         Result.Ok (m',varseq',data') (* could add what follows as an alternative *)
+                         Result.Ok (m',varseq', Some data') (* could add what follows as an alternative *)
                       | _ -> (* does not match full sequence, look at head *)
                          match ok_cons, xls, Ndtree.head_opt data, Ndtree.head_opt input_tree with
                          | true, xl::xls1, Some data1, Some input_tree1 ->
-                            let| m1', varseq1', data1' = aux_cons xls1 data1 input_tree1 in
-                            assert (Ndtree.ndim data1' = Ndtree.ndim data1);
+                            let| m1', varseq1', data1'_opt = aux_cons xls1 data1 input_tree1 in
                             let m', varseq' = make_cons xl m' m varseq' in
-                            let data' = Ndtree.replace_head data data1' in
-                            Result.Ok (m',varseq',data')
-                         | _ -> Result.Error Not_found
+                            let data'_opt =
+                              let@ data1' = data1'_opt in
+                              assert (Ndtree.ndim data1' = Ndtree.ndim data1);
+                              Some (Ndtree.replace_head data data1') in
+                            Result.Ok (m',varseq', data'_opt)
+                         | _ ->
+                            if !debug
+                            then Result.Ok (m',varseq', None)
+                            else Result.Error Not_found
                     in
                     aux_cons (List.rev rev_xls) data input_tree in
                   match ref_cons with (* adding it to refs *)
@@ -518,11 +561,15 @@ let refinements
                   | Result.Error _ -> refs)
                 []))
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
-        let* m_new, best_reads =
-          postprocessing t m m' ~supp ~nb ~alt best_reads in
-        make_alt_if_allowed_and_needed
-          ~allowed ~supp ~nb
-          m_new m varseq' best_reads)
+        Myseq.if_not_empty_else
+          (let* m', best_reads =
+             postprocessing t m m' ~supp ~nb ~alt best_reads in
+           make_alt_if_allowed_and_needed
+             ~allowed ~supp ~nb
+             m' m varseq' best_reads)
+          (if !debug
+           then Myseq.return (m', varseq', Result.Error Failed_postprocessing)
+           else Myseq.empty))
   and aux_alt_prune ctx rev_xls m m1 m2 selected_reads =
     aux_gen ctx rev_xls m selected_reads
       (fun (read, data : _ read) ->
@@ -537,7 +584,7 @@ let refinements
                | Data.DAlt (prob, b, d12) -> if b then Some d12 else None
                | _ -> assert false)
               data in
-          [m1, varseq0, data1]
+          [m1, varseq0, Some data1]
         else if Ndtree.for_all_defined
              (function
               | Data.DAlt (prob, b, d12) -> not b
@@ -549,7 +596,7 @@ let refinements
                | Data.DAlt (prob, b, d12) -> if not b then Some d12 else None
                | _ -> assert false)
               data in
-          [m2, varseq0, data2]
+          [m2, varseq0, Some data2]
         else [])
 (*        match read.data with
         | Data.DAlt (prob, b, d12) ->
@@ -559,8 +606,11 @@ let refinements
         | _ -> assert false) *)
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
         if supp = nb
-        then Myseq.return (m', varseq', best_reads)
-        else Myseq.empty)
+        then Myseq.return (m', varseq', Result.Ok best_reads)
+        else
+          if !debug
+          then Myseq.return (m', varseq', Result.Error Alt_cannot_be_pruned)
+          else Myseq.empty)
   and aux_alt_cond_undet ctx rev_xls m xc c m1 m2 selected_reads =
     aux_gen ctx rev_xls m selected_reads
       (fun (read, data : _ read) ->
@@ -580,15 +630,21 @@ let refinements
              | _ -> assert false)
             data in
         Myseq.fold_left
-          (fun rs e -> (e, varseq0, new_data) :: rs)
+          (fun rs e -> (e, varseq0, Some new_data) :: rs)
           [] (Expr.Exprset.to_seq ~max_expr_size es))
       (fun e varseq' ~supp ~nb ~alt best_reads ->
         if supp = nb
         then
           let c_new = Model.BoolExpr e in
-          let m_new = Model.Alt (xc, c_new, m1, m2) in
-          Myseq.return (m_new, varseq', best_reads)
-        else Myseq.empty)
+          let m' = Model.Alt (xc, c_new, m1, m2) in
+          Myseq.return (m', varseq', Result.Ok best_reads)
+        else
+          if !debug
+          then
+            let c_new = Model.BoolExpr e in
+            let m' = Model.Alt (xc, c_new, m1, m2) in
+            Myseq.return (m', varseq', Result.Error Cond_expr_not_valid)
+          else Myseq.empty)
 (* too clumsy - above code is more symmetrical wrt true/false but issue about missing false condition expressions
       (fun (read : _ Model.read) ->        
         match read.data with
@@ -639,13 +695,17 @@ let refinements
             example_reads in
         (example_reads, false))
       reads in
-  let* p, r, varseq', supp, dl' =
+  let* p, r, varseq', supp, dl'_res =
     aux Model.ctx0 [] m0 selected_reads
-    |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1) (p2,r2,vs2,supp2,dl2) ->
-           dl_compare dl1 dl2)
+    |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1_res) (p2,r2,vs2,supp2,dl2_res) ->
+           match dl1_res, dl2_res with
+           | Result.Ok dl1, Result.Ok dl2 -> dl_compare dl1 dl2
+           | Result.Ok _, _ -> -1
+           | _, Result.Ok _ -> 1
+           | _ -> 0)
     |> Myseq.slice ~limit:max_refinements in
   let m' = Model.refine p r m0 in
-  Myseq.return (p, r, supp, dl', m', varseq'))
+  Myseq.return (p, r, supp, dl'_res, m', varseq'))
 
 
 let task_refinements
@@ -657,19 +717,23 @@ let task_refinements
       (prs : ('typ,'value,'constr,'var,'func) Task_model.pairs_reads)
       (dsri : ('typ,'value,'constr,'var,'func) Task_model.reads)
       (dsro : ('typ,'value,'constr,'var,'func) Task_model.reads)
-    : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
+    : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model result) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (let* p, ri, suppi, dli', mi, varseq =
          input_refinements ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:prs.dl_mi
            m.input_model m.varseq dsri.reads in
-       let m' = Task_model.make ~binding_vars varseq mi m.output_model in 
-       Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), m'));
+       let m'_res =
+         let| _ = dli' in
+         Result.Ok (Task_model.make ~binding_vars varseq mi m.output_model) in 
+       Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), m'_res));
 
       (let* p, ro, suppo, dlo', mo, varseq =
          output_refinements ~nb_env_vars:m.nb_env_vars ~env_vars:m.env_vars ~dl_M:prs.dl_mo
            m.output_model m.varseq dsro.reads in
-       let m' = Task_model.make ~binding_vars varseq m.input_model mo in
-       Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), m')) ]
+       let m'_res =
+         let| _ = dlo' in
+         Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo) in
+       Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), m'_res)) ]
 
 let task_prunings
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
@@ -677,9 +741,11 @@ let task_prunings
       
       (m : (('typ,'value,'var,'constr,'func) Task_model.task_model as 'task_model))
       (dsri : ('typ,'value,'constr,'var,'func) Task_model.reads)
-    : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model) Myseq.t = (* QUICK Myseq.next *)
+    : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model result) Myseq.t = (* QUICK Myseq.next *)
   let* pi, ri, suppi, dli', mi', varseq =
     input_prunings ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:dsri.dl_m
       m.input_model m.varseq dsri.reads in
-  let m' = Task_model.make ~binding_vars varseq mi' m.output_model in
-  Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), m')
+  let m'_res =
+    let| _ = dli' in
+    Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model) in
+  Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), m'_res)

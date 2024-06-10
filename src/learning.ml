@@ -47,10 +47,10 @@ let learn
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
           (('typ,'value,'constr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
-          ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model) Myseq.t)
+          ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model result) Myseq.t)
       ~(task_prunings :
           'task_model -> 'reads ->
-          ('refinement * 'task_model) Myseq.t)
+          ('refinement * 'task_model result) Myseq.t)
       ~(log_reading :
           'refinement -> 'task_model ->
           status:[ `Success of ('pairs_reads * 'reads * 'reads * dl_split * dl)
@@ -114,7 +114,8 @@ let learn
     else
       let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
         myseq_find_map_k refine_degree
-          (fun (r1,m1) ->
+          (fun (r1,m1_res) ->
+            let@ m1 = Result.to_option m1_res in
             match data_of_model ~pruning:false r1 m1 with
             | None -> None (* failure to parse with model m1 *)
             | Some state1 ->
@@ -212,7 +213,8 @@ let learn
     log_refining state.r state.m state.prs state.lmd;
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
       myseq_find_map_k refine_degree
-        (fun (r1,m1) ->
+        (fun (r1,m1_res) ->
+          let@ m1 = Result.to_option m1_res in
           match data_of_model ~pruning:true r1 m1 with
           | None -> None (* failure to parse with model m1 *)
           | Some state1 ->
