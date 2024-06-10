@@ -161,9 +161,10 @@ let learn
                  let ok =
                    rank < jump_width &&
                      (match state1.r, state2.r with
-                      | Task_model.Routput (_, Model.Expr _, _, _), _ -> false (* not for exprs *)
-                      | Rinput (p1,sm1,_,_), Rinput (p2,sm2,_,_) -> p1 = p2 (* same path *)
-                      | Routput (p1,sm1,_,_), Routput (p2,sm2,_,_) -> p1 = p2 (* same path *)
+                      | Task_model.RStep (`Output, _, Model.Expr _, _, _, _), _ -> false (* not for exprs *)
+                      | RStep (side1,p1,sm1,_,_,_), RStep (side2,p2,sm2,_,_,_) -> side1 = side2 && p1 = p2 (* same side and path *)
+(* REM                      | Rinput (p1,sm1,_,_), Rinput (p2,sm2,_,_) -> p1 = p2 (* same path *)
+                      | Routput (p1,sm1,_,_), Routput (p2,sm2,_,_) -> p1 = p2 (* same path *) *)
                       | _ -> false) in
                  if ok
                  then

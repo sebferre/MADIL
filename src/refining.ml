@@ -719,21 +719,21 @@ let task_refinements
       (dsro : ('typ,'value,'constr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model result) Myseq.t = (* QUICK Myseq.next *)
   Myseq.interleave (* TODO: rather order by estimated dl *)
-    [ (let* p, ri, suppi, dli', mi, varseq =
+    [ (let* p, ri, suppi, dli'_res, mi', varseq =
          input_refinements ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:prs.dl_mi
            m.input_model m.varseq dsri.reads in
        let m'_res =
-         let| _ = dli' in
-         Result.Ok (Task_model.make ~binding_vars varseq mi m.output_model) in 
-       Myseq.return (Task_model.Rinput (p,ri,suppi,dli'), m'_res));
+         let| _ = dli'_res in
+         Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model) in 
+       Myseq.return (Task_model.RStep (`Input,p,ri,suppi,dli'_res,mi'),m'_res));
 
-      (let* p, ro, suppo, dlo', mo, varseq =
+      (let* p, ro, suppo, dlo'_res, mo', varseq =
          output_refinements ~nb_env_vars:m.nb_env_vars ~env_vars:m.env_vars ~dl_M:prs.dl_mo
            m.output_model m.varseq dsro.reads in
        let m'_res =
-         let| _ = dlo' in
-         Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo) in
-       Myseq.return (Task_model.Routput (p,ro,suppo,dlo'), m'_res)) ]
+         let| _ = dlo'_res in
+         Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo') in
+       Myseq.return (Task_model.RStep (`Output,p,ro,suppo,dlo'_res,mo'),m'_res)) ]
 
 let task_prunings
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
@@ -742,10 +742,10 @@ let task_prunings
       (m : (('typ,'value,'var,'constr,'func) Task_model.task_model as 'task_model))
       (dsri : ('typ,'value,'constr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * 'task_model result) Myseq.t = (* QUICK Myseq.next *)
-  let* pi, ri, suppi, dli', mi', varseq =
+  let* pi, ri, suppi, dli'_res, mi', varseq =
     input_prunings ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:dsri.dl_m
       m.input_model m.varseq dsri.reads in
   let m'_res =
-    let| _ = dli' in
+    let| _ = dli'_res in
     Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model) in
-  Myseq.return (Task_model.Rinput (pi,ri,suppi,dli'), m'_res)
+  Myseq.return (Task_model.RStep (`Input,pi,ri,suppi,dli'_res,mi'),m'_res)

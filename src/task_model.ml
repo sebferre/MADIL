@@ -214,16 +214,14 @@ let apply
 
 
 (* refinements *)
-  
+
 type ('typ,'value,'var,'constr,'func) refinement =
   | RInit
-  | Rinput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl result (* estimated result DL *)
-  | Routput of ('var,'constr) path * ('typ,'value,'var,'constr,'func) model * int (* support *) * dl result (* estimated result DL *)
+  | RStep of [`Input|`Output] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *) * dl result (* estimated result DL or error *) * ('typ,'value,'var,'constr,'func) model (* new model *)
 
 let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
-  | Rinput (_,_,supp,_) -> supp
-  | Routput (_,_,supp,_) -> supp             
+  | RStep (_,_,_,supp,_,_) -> supp
 
 let xp_refinement
       ~(xp_path : ('var,'constr) path html_xp)
@@ -231,9 +229,13 @@ let xp_refinement
     : ('typ,'value,'var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
-    | Rinput (p,ri,supp,dl') -> aux2 ~html print " In" p ri supp dl' "i"
-    | Routput (p,ro,supp,dl') -> aux2 ~html print " Out" p ro supp dl' "o"
-  and aux2 ~html print in_out p r supp dl' i_o =
+    | RStep (side,p,ri,supp,dl'_res,m') ->
+       let in_out, i_o =
+         match side with
+         | `Input -> " In", "i"
+         | `Output -> " Out", "o" in
+       aux2 ~html print in_out p ri supp dl'_res i_o
+  and aux2 ~html print in_out p r supp dl'_res i_o =
     (* if dl' <> 0. (* undefined value *) then (* showing DL estimate *)
       print#string (Printf.sprintf " (~%.3f) " dl'); *)
     if supp <> 0 (* undefined value *) then
@@ -247,18 +249,3 @@ let xp_refinement
     print#string " #"; print#int supp; print#string " "
   in
   aux
-
-let refine
-      ~(binding_vars : ('typ,'value,'var,'constr,'func) model -> ('var,'typ) Expr.binding_vars)
-      (r : ('typ,'value,'var,'constr,'func) refinement) (m : ('typ,'value,'var,'constr,'func) task_model)
-    : (('typ,'value,'var,'constr,'func) refinement * ('typ,'value,'var,'constr,'func) task_model) result =
-  match r with
-  | RInit -> Result.Error (Failure "Task_model.refine")
-  | Rinput (p,ri,supp,dl') ->
-     let m' = make ~binding_vars m.varseq
-                (Model.refine p ri m.input_model) m.output_model in
-     Result.Ok (r, m')
-  | Routput (p,ro,supp,dl') ->
-     let m' = make ~binding_vars m.varseq
-                m.input_model (Model.refine p ro m.output_model) in
-     Result.Ok (r, m')
