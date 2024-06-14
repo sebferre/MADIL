@@ -396,7 +396,7 @@ let get_bindings  (* QUICK *)
 
 (* model-based generation *)
 
-type ('info,'var,'typ,'value,'constr) generator = ('var,'typ,'value) Expr.bindings -> 'info -> (('value,'constr) data * 'info) Myseq.t
+type ('info,'var,'typ,'value,'constr) generator = 'info -> (('value,'constr) data * 'info) Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
@@ -406,23 +406,24 @@ let generator (* on evaluated models: no expr, no def *)
       ~(generator_pat : 'typ -> 'constr -> (('info,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
       ~(generator_end : depth:int -> 'info -> 'info Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
-    : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> 'gen =
-  let rec gen rev_xis m bindings info =
+    : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> 'gen =
+  fun ?(xis = []) m bindings info ->
+  let rec gen rev_xis m info =
     match m with
     | Def (x,m1) ->
-       gen rev_xis m1 bindings info
+       gen rev_xis m1 info
     | Any t ->
-       generator_any t bindings info
+       generator_any t info
     | Pat (t,c,args) ->
        let gen_args = Array.map (gen rev_xis) args in
-       generator_pat t c gen_args bindings info
+       generator_pat t c gen_args info
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
-         let* d1, info = gen rev_xis m1 bindings info in
+         let* d1, info = gen rev_xis m1 info in
          let d = DAlt (prob,true,d1) in
          Myseq.return (d, info) in
        let gen_b_d2 prob =
-         let* d2, info = gen rev_xis m2 bindings info in
+         let* d2, info = gen rev_xis m2 info in
          let d = DAlt (prob,false,d2) in
          Myseq.return (d, info) in
        (match c with
@@ -445,7 +446,7 @@ let generator (* on evaluated models: no expr, no def *)
        let depth = 1 + List.length rev_xis in
        let seq_gen_m1 =
          let* i = Myseq.counter 0 in
-         Myseq.return (gen ((xl,i)::rev_xis) m1 bindings) in (* not updating bindings through sequence *)
+         Myseq.return (gen ((xl,i)::rev_xis) m1) in
        let* ld1, info = Myseq.star_dependent_max (* _fair : BUGGY *) seq_gen_m1 info in
        let* info = generator_end ~depth info in (* checking valid end *)
        (* Myseq.star_dependent_max prevents stop anywhere *)
@@ -458,26 +459,25 @@ let generator (* on evaluated models: no expr, no def *)
        (* choosing model according to first index *)
        (match List.assoc_opt xl rev_xis with
         | None -> Myseq.empty
-        | Some 0 -> gen (List.remove_assoc xl rev_xis) m0 bindings info
-        | Some i -> gen (list_replace_assoc xl (i-1) rev_xis) m1 bindings info)
+        | Some 0 -> gen (List.remove_assoc xl rev_xis) m0 info
+        | Some i -> gen (list_replace_assoc xl (i-1) rev_xis) m1 info)
     | Expr (t,e) ->
        let* v_tree = Myseq.from_result (eval_expr e bindings) in
        let is = List.rev_map snd rev_xis in
        if List.length is >= Ndtree.ndim v_tree
        then
          match Ndtree.lookup v_tree is with
-         | Some v -> generator_value v bindings info (* Myseq.return (DExpr v, info) *)
+         | Some v -> generator_value v info (* Myseq.return (DExpr v, info) *)
          | None -> Myseq.empty
        else Myseq.empty (* TODO: accepting vtrees ? *)
     | Derived t ->
        failwith "Derived arguments must not be generated but computed" (* must be computed, not generated *)
   in
-  fun ?(xis = []) m bindings info ->
-  gen (List.rev xis) m bindings info
+  gen (List.rev xis) m info
      
 (* model-based parsing *)
 
-type ('input,'var,'typ,'value,'constr) parseur = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'constr) data * 'input) Myseq.t
+type ('input,'var,'typ,'value,'constr) parseur = 'input -> (('value,'constr) data * 'input) Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value Ndtree.t result)
@@ -487,23 +487,24 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
       ~(parseur_end : depth:int -> 'input -> 'input Myseq.t)
       ~(value_of_seq : 'value array -> 'value)
-    : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> (('input,'var,'typ,'value,'constr) parseur as 'parse) =
-  let rec parse rev_xis m bindings input =
+    : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('input,'var,'typ,'value,'constr) parseur as 'parse) =
+  fun ?(xis = []) m bindings input ->
+  let rec parse rev_xis m input =
     match m with
     | Def (x,m1) ->
-       parse rev_xis m1 bindings input
+       parse rev_xis m1 input
     | Any t ->
-       parseur_any t bindings input
+       parseur_any t input
     | Pat (t,c,args) ->
        let parse_args = Array.map (parse rev_xis) args in
-       parseur_pat t c parse_args bindings input
+       parseur_pat t c parse_args input
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
-         let* d1, input = parse rev_xis m1 bindings input in
+         let* d1, input = parse rev_xis m1 input in
          let d = DAlt (prob,true,d1) in
          Myseq.return (d, input) in
        let seq2 prob =
-         let* d2, input = parse rev_xis m2 bindings input in
+         let* d2, input = parse rev_xis m2 input in
          let d = DAlt (prob,false,d2) in
          Myseq.return (d, input) in
        (match c with
@@ -524,7 +525,7 @@ let parseur (* on evaluated models: no expr, no def *)
        let depth = 1 + List.length rev_xis in
        let seq_parse_m1 =
          let* i = Myseq.counter 0 in
-         Myseq.return (parse ((xl,i)::rev_xis) m1 bindings) in (* not updating bindings through sequence *)
+         Myseq.return (parse ((xl,i)::rev_xis) m1) in
        let* ld1, input = Myseq.star_dependent_max (* _fair : BUGGY *) seq_parse_m1 input in
        let* input = parseur_end ~depth input in (* checking valid end *)
        (* Myseq.star_dependent_max prevents stop anywhere *)
@@ -536,22 +537,21 @@ let parseur (* on evaluated models: no expr, no def *)
     | Cons (xl,m0,m1) ->
        (match List.assoc_opt xl rev_xis with
         | None -> Myseq.empty
-        | Some 0 -> parse (List.remove_assoc xl rev_xis) m0 bindings input
-        | Some i -> parse (list_replace_assoc xl (i-1) rev_xis) m1 bindings input)
+        | Some 0 -> parse (List.remove_assoc xl rev_xis) m0 input
+        | Some i -> parse (list_replace_assoc xl (i-1) rev_xis) m1 input)
     | Expr (t,e) ->
        let* v_tree = Myseq.from_result (eval_expr e bindings) in
        let is = List.rev_map snd rev_xis in
        if List.length is >= Ndtree.ndim v_tree
        then
          match Ndtree.lookup v_tree is with
-         | Some v -> parseur_value v bindings input
+         | Some v -> parseur_value v input
          | None -> Myseq.empty
        else Myseq.empty (* TODO: accepting vtrees ? *)
     | Derived t ->
        failwith "Derived arguments must not be parsed but computed" 
   in
-  fun ?(xis = []) m bindings input ->
-  parse (List.rev xis) m bindings input
+  parse (List.rev xis) m input
 
 (* model-based encoding of data *)
 
@@ -778,7 +778,7 @@ type ('input,'var,'typ,'value,'constr) parse_bests = ('var,'typ,'value) Expr.bin
         
 let parse_bests
       ~(max_nb_parse : int)
-      ~(parseur : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'constr) parseur)
+      ~(parseur : ?xis:(('var * int) list) -> ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('input,'var,'typ,'value,'constr) parseur)
       ~(dl_data : ('value,'constr) data -> dl)
 
       ?(xis = [])
@@ -831,7 +831,7 @@ let read
 exception Generate_failure
   
 let write
-      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('info,'var,'typ,'value,'constr) generator)
+      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('info,'var,'typ,'value,'constr) generator)
       ~(dl_data : ('value,'constr) data -> dl)
       
       ~(bindings : ('var,'typ,'value) Expr.bindings)

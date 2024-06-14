@@ -260,7 +260,7 @@ module Make (Domain : DOMAIN) =
       
     (* model-based generation and parsing *)
       
-    let generator : ?xis:((var * int) list) -> model -> generator =
+    let generator : ?xis:((var * int) list) -> model -> bindings -> generator =
       Model.generator
         ~eval_expr
         ~bool_of_value
@@ -270,7 +270,7 @@ module Make (Domain : DOMAIN) =
         ~generator_end
         ~value_of_seq
 
-    let parseur : ?xis:((var * int) list) -> model -> parseur =
+    let parseur : ?xis:((var * int) list) -> model -> bindings -> parseur =
       Model.parseur
         ~eval_expr
         ~bool_of_value
