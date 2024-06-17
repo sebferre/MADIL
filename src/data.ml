@@ -43,11 +43,12 @@ let xp_data
            (fun arg -> (fun ~html print () -> aux ~prio_ctx:0 ~html print arg))
            args in
        xp_pat c xp_args ~html print ()
-    | DAlt (_prob,_b,d12) ->
+    | DAlt (_prob,b,d12) ->
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->
            xp_html_elt "div" ~classe:"data-alt" ~html print
              (fun () ->
+               print#string (if b then "T " else "F ");
                aux ~prio_ctx:2 ~html print d12))
     | DSeq (_v,items) ->
        xp_array ~delims:("〈#" ^ string_of_int (Array.length items) ^ ": ", "〉")
