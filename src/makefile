@@ -1,6 +1,6 @@
 
 OBJ=bintree.cmo common.cmo xprint.cmo iterator.cmo myseq.cmo mymap.cmo mdl.cmo find_merge.cmo intmap.cmo
-SRC=madil_common.cmo ndtree.cmo task.cmo data.cmo expr.cmo model.cmo task_model.cmo refining.cmo learning.cmo madil.cmo batch.cmo
+SRC=madil_common.cmo ndtree.cmo task.cmo data.cmo expr.cmo model.cmo task_model.cmo refining.cmo learning.cmo madil.cmo batch.cmo ndseq.cmo
 SRC_FABLIS=focus.cmo syntax.cmo lis.cmo jsutils.cmo webapp.cmo html.cmo widget_focus.cmo widget_suggestions.cmo widget_table.cmo widget_commandline.cmo
 
 FLAGS= -g -principal -I ../../lib -package unix,str,num,csv,yojson,ppx_deriving_yojson

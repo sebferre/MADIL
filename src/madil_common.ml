@@ -49,11 +49,35 @@ let rec list_partition_map (f : 'a -> ('b,'c) Result.t) (selected : 'a list) (ot
      | Result.Ok y -> y::r1, r2
      | Result.Error z -> r1, z::r2 )
 
+let rec list_map3 (f : 'a -> 'b -> 'c -> 'd) (l1 : 'a list) (l2 : 'b list) (l3 : 'c list) : 'd list =
+  match l1, l2, l3 with
+  | [], [], [] -> []
+  | x1::r1, x2::r2, x3::r3 -> f x1 x2 x3 :: list_map3 f r1 r2 r3
+  | _ -> invalid_arg "Madil_common.list_map3: inconsistent lengths"
+
 let list_list_map (f : 'a -> 'b) (reads : 'a list list) : 'b list list  =
   List.map
     (fun l ->
       List.map f l)
     reads
+
+let list_mapi_monad (type a b bm blm) (return : b list -> blm) (bind : bm -> (b -> blm) -> blm) (bind_list : blm -> (b list -> blm) -> blm) (f : int -> a -> bm) (l : a list) : blm =
+  let rec aux i = function
+    | [] -> return []
+    | x::xs ->
+       bind (f i x)
+         (fun y ->
+           bind_list (aux (i+1) xs)
+             (fun ys ->
+               return (y::ys)))
+  in
+  aux 0 l
+let list_mapi_option =
+  fun f l -> list_mapi_monad Option.some Option.bind Option.bind f l
+let list_mapi_result =
+  fun f l -> list_mapi_monad Result.ok Result.bind Result.bind f l
+let list_mapi_myseq =
+  fun f l -> list_mapi_monad Myseq.return Myseq.bind Myseq.bind f l
 
 (* array *)
 
