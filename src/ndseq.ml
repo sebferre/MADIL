@@ -217,21 +217,30 @@ let map_tup ?name ~depth res_depth (f : 'a -> 'b) (args : 'a) : 'b =
   (* checking parameters *)
   let repr_res_depth = Obj.repr res_depth in
   let repr_args = Obj.repr args in
-  assert (Obj.is_block repr_res_depth && Obj.tag repr_res_depth = 0); (* res_depth is a tuple *)
   assert (Obj.is_block repr_args && Obj.tag repr_args = 0); (* args is a tuple *)
   let n = Obj.size repr_args in
-  let m = Obj.size repr_res_depth in
-  for i = 0 to m-1 do assert (Obj.is_int (Obj.field repr_res_depth i)) done; (* res_depth is made of ints *)
+  let res_depth, m =
+    if Obj.is_int repr_res_depth
+    then (Obj.magic [|res_depth|] : int array), 1
+    else (
+      assert (Obj.is_block repr_res_depth && Obj.tag repr_res_depth = 0);
+      let m = Obj.size repr_res_depth in
+      for i = 0 to m-1 do assert (Obj.is_int (Obj.field repr_res_depth i)) done; (* res_depth is made of ints *)
+      (Obj.magic res_depth : int array), m
+    ) in
   let (res : 'bx t array) =
     mapn_n ?name ~depth
-      (Obj.magic res_depth : int array) (* from int tuple *)
+      res_depth
       (fun (args : 'ax array) ->
         let args = if n = 1 then (Obj.magic args.(0) : 'a) else (Obj.magic args : 'a) in (* singleton handling *)
         let res = f args in
         (* checking result *)
-        let repr_res = Obj.repr res in
-        assert (Obj.is_block repr_res && Obj.tag repr_res = 0 && Obj.size repr_res = m);
-        (Obj.magic res : 'bx array)) (* from tuple *)
+        if m = 1
+        then (Obj.magic [|res|] : 'bx array)
+        else
+          let repr_res = Obj.repr res in
+          assert (Obj.is_block repr_res && Obj.tag repr_res = 0 && Obj.size repr_res = m);
+          (Obj.magic res : 'bx array)) (* from tuple *)
       (Obj.magic args : 'ax t array) in
   if m = 1 then (Obj.magic res.(0) : 'b) else (Obj.magic res : 'b) (* singleton handling *)
 
@@ -291,11 +300,17 @@ let map_tup_myseq ?name ~depth res_depth (f : 'a -> 'b Myseq.t) (args : 'a) : 'b
   (* checking parameters *)
   let repr_res_depth = Obj.repr res_depth in
   let repr_args = Obj.repr args in
-  assert (Obj.is_block repr_res_depth && Obj.tag repr_res_depth = 0); (* res_depth is a tuple *)
   assert (Obj.is_block repr_args && Obj.tag repr_args = 0); (* args is a tuple *)
   let n = Obj.size repr_args in
-  let m = Obj.size repr_res_depth in
-  for i = 0 to m-1 do assert (Obj.is_int (Obj.field repr_res_depth i)) done; (* res_depth is made of ints *)
+  let res_depth, m =
+    if Obj.is_int repr_res_depth
+    then (Obj.magic [|res_depth|] : int array), 1
+    else (
+      assert (Obj.is_block repr_res_depth && Obj.tag repr_res_depth = 0);
+      let m = Obj.size repr_res_depth in
+      for i = 0 to m-1 do assert (Obj.is_int (Obj.field repr_res_depth i)) done; (* res_depth is made of ints *)
+      (Obj.magic res_depth : int array), m
+    ) in
   let* (res : 'bx t array) =
     mapn_n_myseq ?name ~depth
       (Obj.magic res_depth : int array) (* from int tuple *)
@@ -303,9 +318,12 @@ let map_tup_myseq ?name ~depth res_depth (f : 'a -> 'b Myseq.t) (args : 'a) : 'b
         let args = if n = 1 then (Obj.magic args.(0) : 'a) else (Obj.magic args : 'a) in (* singleton handling *)
         let* res = f args in
         (* checking result *)
-        let repr_res = Obj.repr res in
-        assert (Obj.is_block repr_res && Obj.tag repr_res = 0 && Obj.size repr_res = m);
-        Myseq.return (Obj.magic res : 'bx array)) (* from tuple *)
+        if m = 1
+        then Myseq.return (Obj.magic [|res|] : 'bx array)
+        else
+          let repr_res = Obj.repr res in
+          assert (Obj.is_block repr_res && Obj.tag repr_res = 0 && Obj.size repr_res = m);
+          Myseq.return (Obj.magic res : 'bx array)) (* from tuple *)
       (Obj.magic args : 'ax t array) in
   let res = if m = 1 then (Obj.magic res.(0) : 'b) else (Obj.magic res : 'b) in
   Myseq.return res
