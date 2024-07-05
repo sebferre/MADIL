@@ -14,7 +14,9 @@ module TEST = (* for profiling visually, used for the JS version *)
 
 type 'a double = 'a * 'a
 type 'a triple = 'a * 'a * 'a
-  
+
+let tup1 (x : 'a) = (Obj.magic [|x|] : 'a)
+
 (* list *)
 
 let rec list_remove x l =
@@ -78,6 +80,20 @@ let list_mapi_result =
   fun f l -> list_mapi_monad Result.ok Result.bind Result.bind f l
 let list_mapi_myseq =
   fun f l -> list_mapi_monad Myseq.return Myseq.bind Myseq.bind f l
+
+
+let rec list_list_transpose (ll : 'a list list) : 'a list list =
+  if List.for_all (fun l -> l <> []) ll
+  then
+    let l_hd_tl =
+      List.map
+        (function
+         | [] -> assert false
+         | x::r -> x, r)
+        ll in
+    let l_hd, l_tl = List.split l_hd_tl in
+    l_hd :: list_list_transpose l_tl
+  else List.map (fun _ -> []) ll
 
 (* array *)
 
