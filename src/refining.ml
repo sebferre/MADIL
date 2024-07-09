@@ -267,8 +267,9 @@ let refinements
       | Result.Ok ((d',dl')::_) -> Result.Ok d'
       | _ -> Result.Error No_local_parse
     with exn ->
-      print_endline (Printexc.to_string exn);
-      Result.Error exn) (* to assign unexpected errors to individual refinements *)
+      if !debug
+      then Result.Error exn (* to assign unexpected errors to individual refinements, for easier debugging *)
+      else raise exn) (* otherwise, make those errors silent *)
   in
   fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
   Myseq.prof "Refining.refinements" (
