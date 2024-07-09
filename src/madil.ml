@@ -140,6 +140,25 @@ module Defined_types (T : BASIC_TYPES) =
 
     type best_reads = (typ,value,constr,var,func) Refining.best_read list
 
+    class type cconstr = (* class definition of a constr *)
+      object
+        method xp_pat : unit html_xp array -> unit html_xp
+        method xp_field : int html_xp
+        method generator_pat : typ -> generator array -> generator
+        method parseur_pat : typ -> parseur array -> parseur
+        method encoding_pat : encoding array -> encoding
+        method dl_params : typ -> dl
+        method refinements_pat : env_vars:binding_vars -> typ -> model array -> varseq -> value -> (model * varseq) list
+        method prunings_pat : env_vars:binding_vars -> typ -> model array -> varseq -> value -> (model * varseq) list
+      end
+
+    class type cfunc = (* class definition of a func *)
+      object
+        method xp : unit html_xp
+        method eval : value Ndtree.t array -> value Ndtree.t result
+        method dl_params : typ -> dl
+      end
+    
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * Task_model.dl_split * dl)
       | `Failure
