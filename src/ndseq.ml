@@ -75,7 +75,9 @@ let rec map_myseq ?(depth = -1) (delta_depth : int) (f : 'a -> 'b Myseq.t) (x : 
   else
     match x with
     | `Seq (d,i_opt,l) ->
-       let* ly = list_mapi_myseq (fun i x -> map_myseq ~depth:(depth-1) delta_depth f x) l in
+       let* ly =
+         Myseq.product_fair
+           (List.map (map_myseq ~depth:(depth-1) delta_depth f) l) in
        Myseq.return (`Seq (d + delta_depth, i_opt, ly))
     | _ -> f x
 
@@ -112,55 +114,6 @@ let rec map2_result ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c result
        else invalid_arg "Utilities.XSeq.map2: inconsistent structure"
     | _ -> f x1 x2
 
-(* let rec map3 ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c -> 'd) (x1 : 'a t) (x2 : 'b t) (x3 : 'c t) : 'd t =
-  if depth = 0
-  then f x1 x2 x3
-  else
-    match x1, x2, x3 with
-    | `Seq (d1,i1_opt,l1), `Seq (d2,i2_opt,l2), `Seq (d3,i3_opt,l3) ->
-       let n = List.length l1 in
-       if i2_opt = i1_opt && i3_opt = i1_opt
-          && List.length l2 = n && List.length l3 = n
-       then `Seq (d1 + delta_depth, i1_opt, list_map3 (map3 ~depth:(depth-1) delta_depth f) l1 l2 l3)
-       else invalid_arg "Utilities.XSeq.map3: inconsistent structure"
-    | _ -> f x1 x2 x3
-
-let combine3 ?(depth = -1) x1 x2 x3 =
-  map3 ~depth 0 (fun x1 x2 x3 -> `X3 (x1,x2,x3)) x1 x2 x3 *)
-
-(* let rec map3_result ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c -> 'd result) (x1 : 'a t) (x2 : 'b t) (x3 : 'c t) : 'd t result =
-  if depth = 0
-  then f x1 x2 x3
-  else
-    match x1, x2, x3 with
-    | `Seq (d1,i1_opt,l1), `Seq (d2,i2_opt,l2), `Seq (d3,i3_opt,l3) ->
-       let n = List.length l1 in
-       if i2_opt = i1_opt && i3_opt = i1_opt
-          && List.length l2 = n && List.length l3 = n
-       then
-         let l = List.combine l1 (List.combine l2 l3) in
-         let| ly =
-           list_map_result
-             (fun (x1,(x2,x3)) ->
-               map3 ~depth:(depth-1) delta_depth f x1 x2 x3)
-             l in
-         Result.Ok (`Seq (d1 + delta_depth, i1_opt, ly))
-       else invalid_arg "Utilities.XSeq.map3: inconsistent structure"
-    | _ -> f x1 x2 x3 *)
-
-(* let rec map_2 ~(depth : int) (res_depth : int * int) (f : 'a -> 'b * 'c) (x : 'a t) : 'b t * 'c t =
-  (* depth(b) = depth + fst res_depth, depth(c) = depth + snd res_depth *)
-  if depth = 0
-  then f x
-  else
-    match x with
-    | `Seq (d,i_opt,l) ->
-       let lres = List.map (map_2 ~depth:(depth-1) res_depth f) l in
-       let lres1, lres2 = List.split lres in
-       `Seq (depth - 1 + fst res_depth, i_opt, lres1),
-       `Seq (depth - 1 + snd res_depth, i_opt, lres2)
-    | _ -> f x *)
-
 let mapn_n ?(name = "?") ~(depth : int) (res_depth : int array) (f : 'a t array -> 'b t array) (args : 'a t array) : 'b t array =
   assert (args <> [||]);
   let m = Array.length res_depth in
@@ -187,7 +140,7 @@ let mapn_n ?(name = "?") ~(depth : int) (res_depth : int array) (f : 'a t array 
         | _ -> None in
       (match i_opt_ok with
        | None ->
-          invalid_arg ("Ndseq.mapn_n_myseq: inconsistent depths @ " ^ name)
+          invalid_arg ("Ndseq.mapn_n: inconsistent depths @ " ^ name)
        | Some i_opt ->
           let args_l : 'a list array =
             Array.map
@@ -199,7 +152,7 @@ let mapn_n ?(name = "?") ~(depth : int) (res_depth : int array) (f : 'a t array 
             if Array.for_all (fun l -> l = []) args_l then
               res_nil
             else if Array.exists (fun l -> l = []) args_l then
-              invalid_arg ("Ndseq.mapn_n_myseq: inconsistent lengths @ " ^ name)
+              invalid_arg ("Ndseq.mapn_n: inconsistent lengths @ " ^ name)
             else
               let args_hd = Array.map List.hd args_l in
               let args_tl = Array.map List.tl args_l in
@@ -253,7 +206,6 @@ let map_tup ?name ~depth res_depth (f : 'a -> 'b) (args : 'a) : 'b =
 let mapn_n_myseq ?(name = "?") ~(depth : int) (res_depth : int array) (f : 'a array -> 'b array Myseq.t) (args : 'a t array) : 'b t array Myseq.t =
   assert (args <> [||]);
   let m = Array.length res_depth in
-  let res_nil = Array.make m [] in
   let rec aux ~depth args =
     if depth = 0
     then
@@ -284,25 +236,29 @@ let mapn_n_myseq ?(name = "?") ~(depth : int) (res_depth : int array) (f : 'a ar
                | `Seq (_,_,li) -> li
                | _ -> assert false)
               args in
-          let rec aux2 args_l =
+          let rec aux2 args_l : 'b t array Myseq.t list =
             if Array.for_all (fun l -> l = []) args_l then
-              Myseq.return res_nil
+              []
             else if Array.exists (fun l -> l = []) args_l then
               invalid_arg ("Ndseq.mapn_n_myseq: inconsistent lengths @ " ^ name)
             else
               let args_hd = Array.map List.hd args_l in
               let args_tl = Array.map List.tl args_l in
-              let* res_hd = aux ~depth:(depth-1) args_hd in
-              let* res_tl = aux2 args_tl in (* TODO: have a more fair enum *)
-              let res = Array.map2 (fun hd tl -> hd::tl) res_hd res_tl in
-              Myseq.return res
+              let res_s_hd = aux ~depth:(depth-1) args_hd in
+              let res_s_tl = aux2 args_tl in
+              res_s_hd::res_s_tl
           in
-          let* res_l = aux2 args_l in
-          assert (Array.length res_l = m);
-          let res =
-            Array.mapi
-              (fun i l -> `Seq (depth - 1 + res_depth.(i), i_opt, l))
-              res_l in
+          let res_s_l = aux2 args_l in
+          let* res_l : 'b t array list = Myseq.product_fair res_s_l in
+          let res : 'b t array =
+            Array.init m
+              (fun j ->
+                let l =
+                  List.map
+                    (fun res ->
+                      res.(j))
+                    res_l in
+                `Seq (depth - 1 + res_depth.(j), i_opt, l)) in
           Myseq.return res)
   in
   aux ~depth args
@@ -353,37 +309,6 @@ let test2_map_tup_myseq ~depth (x : 'a) : 'b Myseq.t =
      | _ -> assert false)
     (tup1 x)
 
-
-(* let mapn_myseq ~name ~depth (res_depth : int) (f : 'a array -> 'b Myseq.t) (args : 'a t array) : 'b t Myseq.t =
-  let* res =
-    mapn_n_myseq ~name ~depth [|res_depth|]
-      (fun args ->
-        let* res = f args in
-        Myseq.return [|res|])
-      args in
-  match res with
-  | [|res|] -> Myseq.return res
-  | _ -> assert false
-
-let map_n_myseq ~name ~depth (res_depth : int array) (f : 'a -> 'b array Myseq.t) (arg : 'a t) : 'b t array Myseq.t =
-  mapn_n_myseq ~name ~depth res_depth
-    (function
-     | [|arg|] -> f arg
-     | _ -> assert false)
-    [|arg|] *)
-
-(* REM let map_myseq ~name ~depth (res_depth : int) (f : 'a -> 'b Myseq.t) (arg : 'a t) : 'b t Myseq.t =
-  let* res =
-    mapn_n_myseq ~name ~depth [|res_depth|]
-      (function
-       | [|arg|] ->
-          let* res = f arg in
-          Myseq.return [|res|]
-       | _ -> assert false)
-      [|arg|] in
-  match res with
-  | [|res|] -> Myseq.return res
-  | _ -> assert false *)
 
 let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 : 'a t) (x2 : 'b t) : ('c t * 'd t) Myseq.t =
   (* delta_depth = depth(c or d) - dpeth(b) *)
@@ -510,6 +435,13 @@ let rec unnest_path (path : int list) (x : 'a t) : 'a t =
      then unnest_path path1 x1
      else invalid_arg "Ndseq.unnest_path: inconsistent position"
   | _ -> invalid_arg "Ndseq.unnest_path: inconsistent path"
+
+let parseur_item (p : 'a t -> ('data * 'a t) Myseq.t) (rev_path : int list) (input_item : 'a) : ('value * 'a) Myseq.t =
+  let path, input = nest_path rev_path input_item in
+  let* data, input = p input in
+  let v_item = unnest_path path (Data.value data) in
+  let input_item = unnest_path path input in
+  Myseq.return (v_item, input_item)
 
 
 let is_complete ~depth (x : 'a t) : bool =
