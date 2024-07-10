@@ -8,7 +8,6 @@ type ('typ,'value,'var,'func) expr =
   | Apply of 'typ * 'func * ('typ,'value,'var,'func) expr array
   | Arg of 'typ (* implicit unique argument of functions *)
   | Fun of 'typ (* arg type *) * ('typ,'value,'var,'func) expr (* support for unary functions, to be used as arg of higher-order functions *)
-(* TODO: add indexing construct for ndtree values ? with exprs for the ndtree and the indexes ? *)
 
 let typ : ('typ,'value,'var,'func) expr -> 'typ = function
   | Const (t,v) -> t
@@ -20,7 +19,7 @@ let typ : ('typ,'value,'var,'func) expr -> 'typ = function
 type ('var,'typ) binding_vars = ('var, 'typ) Mymap.t
 let binding_vars0 = Mymap.empty
 
-type ('var,'typ,'value) bindings = ('var, 'typ * 'value Ndtree.t) Mymap.t
+type ('var,'typ,'value) bindings = ('var, 'typ * 'value) Mymap.t
 let bindings0 = Mymap.empty
 
 let xp_expr
@@ -54,27 +53,26 @@ let xp_bindings
   print#string "BINDINGS";
   xp_newline ~html print ();
   Mymap.iter
-    (fun x (t,v_tree) ->
+    (fun x (t,v) ->
       xp_var ~html print x;
       print#string " : ";
       xp_typ ~html print t;
       print#string " = ";
-      Ndtree.xp ~xp_elt:xp_value ~html print v_tree;
+      xp_value ~html print v;
       xp_newline ~html print ())
     bindings
   
 (* expression evaluation *)
 
 let eval
-      ~(eval_unbound_var : 'var -> 'value Ndtree.t result) (* ex: return some null value, or fail *)
-      ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
-      ~(eval_arg : unit -> 'value Ndtree.t result) (* the value should be the identity function *)
+      ~(eval_unbound_var : 'var -> 'value result) (* ex: return some null value, or fail *)
+      ~(eval_func : 'func -> 'value array -> 'value result)
+      ~(eval_arg : unit -> 'value result) (* the value should be the identity function *)
       (e : ('typ,'value,'var,'func) expr) (bindings : ('var,'typ,'value) bindings)
-    : 'value Ndtree.t result =
+    : 'value result =
   let rec aux e =
     match e with
-    | Const (t,v) ->
-       Result.Ok (Ndtree.scalar (Some v))
+    | Const (t,v) -> Result.Ok v
     | Ref (t,x) ->
        (match Mymap.find_opt x bindings with
         | Some (t,v) -> Result.Ok v
@@ -457,7 +455,7 @@ module Exprset = Exprset_new
 
 module Index =
   struct
-    type ('typ,'value,'var,'func) t = ('typ * 'value Ndtree.t, ('typ,'value,'var,'func) Exprset.t) Mymap.t
+    type ('typ,'value,'var,'func) t = ('typ * 'value, ('typ,'value,'var,'func) Exprset.t) Mymap.t
 
     let xp
           ~(xp_typ : 'typ html_xp)
@@ -471,11 +469,11 @@ module Index =
       print#string "INDEX";
       xp_newline ~html print ();
       Mymap.iter
-        (fun (t,v_tree) es ->
+        (fun (t,v) es ->
           if on_typ t then (
             xp_typ ~html print t;
             print#string " ";
-            Ndtree.xp ~xp_elt:xp_value ~html print v_tree;
+            xp_value ~html print v;
             print#string " = ";
             xp_exprset ~html print es;
             xp_newline ~html print ()
@@ -484,14 +482,14 @@ module Index =
 
     let empty = Mymap.empty
                 
-    let bind_ref (tv : 'typ * 'value Ndtree.t) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
+    let bind_ref (tv : 'typ * 'value) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
       Mymap.update tv
         (function
          | None -> Some (Exprset.add_ref x (Exprset.empty (fst tv)))
          | Some es -> Some (Exprset.add_ref x es))
         index
       
-    let bind_apply (tv : 'typ * 'value Ndtree.t) (f : 'func) (es_args : ('typ,'value,'var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t = (* QUICK *)
+    let bind_apply (tv : 'typ * 'value) (f : 'func) (es_args : ('typ,'value,'var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t = (* QUICK *)
       Mymap.update tv
         (function
          | None -> Some (Exprset.add_apply f es_args (Exprset.empty (fst tv)))
@@ -504,7 +502,7 @@ module Index =
 
     let iter = Mymap.iter
                 
-    let lookup (tv : 'typ * 'value Ndtree.t) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) Exprset.t =
+    let lookup (tv : 'typ * 'value) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) Exprset.t =
       match find_opt tv index with
       | None -> Exprset.empty (fst tv)
       | Some exprs -> exprs
@@ -520,16 +518,16 @@ type ('typ,'value) args_spec =
   | `Custom of [`Pos of int | `Val of 'typ * 'value] array ]
   
 let index_apply_functions
-      ~(eval_func : 'func -> 'value Ndtree.t array -> 'value Ndtree.t result)
+      ~(eval_func : 'func -> 'value array -> 'value result)
       index
       (max_arity : int)
-      (get_functions : 'typ array * 'value Ndtree.t array -> ('typ * 'func * ('typ,'value) args_spec) list)
+      (get_functions : 'typ array * 'value array -> ('typ * 'func * ('typ,'value) args_spec) list)
     : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   let args_k =
     Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
       (fun k -> (* three undefined arrays for types, values, and exprsets *)
         Array.make k (Obj.magic () : 'typ),
-        Array.make k (Obj.magic () : 'value Ndtree.t),
+        Array.make k (Obj.magic () : 'value),
         Array.make k (Obj.magic () : ('typ,'value,'var,'func) Exprset.t)) in
   let rec aux k res =
     let res = (* generating and applying functions for arity k *)
@@ -548,7 +546,7 @@ let index_apply_functions
                        | `Pos i ->
                           if not (i>=0 && i < k) then failwith "Expr.index_apply_functions: invalid position in args_spec";
                           v_args_k.(i)
-                       | `Val (t,v) -> Ndtree.scalar (Some v))
+                       | `Val (t,v) -> v)
                       ar in
                   let es_args =
                     Array.map

@@ -5,7 +5,6 @@ type ('value,'constr) data = (* data according to model, must be self-contained 
   | DAny of 'value * 'value (* bare value, and an enriched form of value often coming with some range constraint for DL computing *)
   | DPat of 'value * 'constr * ('value,'constr) data array
   | DAlt of float (* prob *) * bool * ('value,'constr) data (* the bool indicates which branch was chosen *)
-  | DSeq of 'value * ('value,'constr) data array
   | DExpr of 'value (* computed value *)
 
 (* TODO: consider adding DNil as nil data, for use as nil env *)
@@ -15,15 +14,12 @@ let rec value (d : ('value,'constr) data) : 'value =
   | DAny (v,_) -> v
   | DPat (v,_,_) -> v
   | DAlt (prob,b,d) -> value d
-  | DSeq (v, _) -> v
   | DExpr v -> v (* TODO: consider including the expression *)
 
 let make_dany (value : 'value) (value_range : 'value) : ('value,'constr) data =
   DAny (value, value_range)
 let make_dpat (value : 'value) (c : 'constr) (args : ('value,'constr) data array) : ('value,'constr) data =
   DPat (value, c, args)
-let make_dseq (value : 'value) (ds : ('value,'constr) data array) : ('value,'constr) data =
-  DSeq (value, ds)
 let make_dexpr (value : 'value) : ('value,'constr) data =
   DExpr value
           
@@ -50,10 +46,6 @@ let xp_data
              (fun () ->
                print#string (if b then "T " else "F ");
                aux ~prio_ctx:2 ~html print d12))
-    | DSeq (_v,items) ->
-       xp_array ~delims:("〈#" ^ string_of_int (Array.length items) ^ ": ", "〉")
-         (aux ~prio_ctx:2)
-         ~html print items
     | DExpr v ->
        xp_html_elt "span" ~classe:"data-expr" ~html print
          (fun () ->

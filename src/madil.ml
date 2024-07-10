@@ -155,7 +155,7 @@ module Defined_types (T : BASIC_TYPES) =
     class type cfunc = (* class definition of a func *)
       object
         method xp : unit html_xp
-        method eval : value Ndtree.t array -> value Ndtree.t result
+        method eval : value array -> value result
         method dl_params : typ -> dl
       end
     
@@ -192,33 +192,29 @@ module type DOMAIN =
 
     val bool_of_value : value -> bool result
     val value_of_bool : bool -> value
-    val value_of_seq : value array -> value (* value for a data sequence *)      
 
     (* bindings and evaluation *)
 
-    val eval_func : func -> value Ndtree.t array -> value Ndtree.t result
-    val eval_unbound_var : var -> value Ndtree.t result
-    val eval_arg : unit -> value Ndtree.t result
+    val eval_func : func -> value array -> value result
+    val eval_unbound_var : var -> value result
+    val eval_arg : unit -> value result
 
     (* model-based generation and parsing *)
 
     val generator_value : value -> generator
     val generator_any : typ -> generator
     val generator_pat : typ -> constr -> generator array -> generator
-    val generator_end : depth:int -> generator_info -> generator_info Myseq.t
 
     val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
     val parseur_any : typ -> parseur
     val parseur_pat : typ -> constr -> parseur array -> parseur
-    val parseur_end : depth:int -> input -> input Myseq.t
 
     (* description lengths *)
 
     val encoding_dany : value -> encoding
     val encoding_dpat : constr -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
-    val encoding_seq : encoding array -> encoding
     val encoding_expr_value : value -> encoding
     val dl_of_encoding : encoding -> dl
 
@@ -271,7 +267,7 @@ module Make (Domain : DOMAIN) =
         ~typ_bool
         ~value_of_bool
 
-    let eval_expr : expr -> bindings -> value Ndtree.t result =
+    let eval_expr : expr -> bindings -> value result =
       Expr.eval
         ~eval_unbound_var
         ~eval_func
@@ -279,25 +275,21 @@ module Make (Domain : DOMAIN) =
       
     (* model-based generation and parsing *)
       
-    let generator : ?xis:((var * int) list) -> model -> bindings -> generator =
+    let generator : model -> bindings -> generator =
       Model.generator
         ~eval_expr
         ~bool_of_value
         ~generator_value
         ~generator_any
         ~generator_pat
-        ~generator_end
-        ~value_of_seq
 
-    let parseur : ?xis:((var * int) list) -> model -> bindings -> parseur =
+    let parseur : model -> bindings -> parseur =
       Model.parseur
         ~eval_expr
         ~bool_of_value
         ~parseur_value
         ~parseur_any
         ~parseur_pat
-        ~parseur_end
-        ~value_of_seq
 
     (* description lengths *)
       
@@ -306,11 +298,10 @@ module Make (Domain : DOMAIN) =
         ~encoding_dany
         ~encoding_dpat
         ~encoding_alt
-        ~encoding_seq
         ~encoding_expr_value
         ~dl_of_encoding
 
-    let (dl_model, reset_dl_model) : (nb_env_vars:int -> ?ndim:int -> model -> dl) * (unit -> unit) =
+    let (dl_model, reset_dl_model) : (nb_env_vars:int -> model -> dl) * (unit -> unit) =
       let nb_expr_ast, reset_nb_expr_ast =
         Expr.nb_expr_ast
           ~funcs:asd#funcs in
