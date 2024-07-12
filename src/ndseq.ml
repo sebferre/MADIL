@@ -333,8 +333,11 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 
   match x1, x2 with
   | `Seq (_,i1_opt,l1), `Seq (d2,None,l2) ->
      assert (i1_opt = None);
-     if List.length l1 = List.length l2
+     let n1 = List.length l1 in
+     let n2 = List.length l2 in
+     if n1 >= n2
      then
+       let l1 = if n1 = n2 then l1 else Common.sub_list l1 0 n2 in
        let d = d2 + delta_depth in
        let* ly = Myseq.product_fair (List.map2 (match_myseq delta_depth f) l1 l2) in
        let ly1, ly2 = List.split ly in
