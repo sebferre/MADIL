@@ -161,9 +161,18 @@ let learn
                  let ok =
                    rank < jump_width &&
                      (match state1.r, state2.r with
-                      | Task_model.RStep (`Output, _, Model.Expr _, _, _, _), _ -> false (* not for exprs *)
-                      | RStep (side1,p1,sm1,_,_,_), RStep (side2,p2,sm2,_,_,_) -> side1 = side2 && p1 = p2 (* same side and path *)
-                      | _ -> false) in
+                      | RStep (side1,p1,sm1,_,_,_),
+                        RStep (side2,p2,sm2,_,_,_) ->
+                         if side1 = `Output (* no expression in the submodel *)
+                            && Model.fold
+                                 (fun res ->
+                                   function
+                                   | Model.Expr _ -> res
+                                   | _ -> false)
+                                 true sm1
+                         then false
+                         else side1 = side2 && p1 = p2 (* same side and path *)
+                      | _ -> assert false) in
                  if ok
                  then
                    let lmd2 = state2.lmd in

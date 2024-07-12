@@ -13,24 +13,24 @@ exception Cond_expr_not_valid
 
 type ('typ,'value,'constr,'var,'func) read = ('typ,'value,'constr,'var,'func) Model.read * ('value,'constr) Data.data
    
-let map_reads (f : 'data -> 'data) (reads : ('read list * bool) list) : ('read list * bool) list  =
+let map_reads (f : 'read -> 'data -> 'data) (reads : ('readdata list * bool) list) : ('readdata list * bool) list  =
   List.map
     (fun (example_reads, unselected_reads) ->
       List.map
         (fun (read,data) ->
-          let data' = f data in
+          let data' = f read data in
           (read, data'))
         example_reads,
       unselected_reads)
     reads
   
-let filter_map_reads (f : 'data -> 'data option) (selected_reads : ('read list * bool) list) : ('read list * bool) list =
+let filter_map_reads (f : 'read -> 'data -> 'data option) (selected_reads : ('readdata list * bool) list) : ('readdata list * bool) list =
   List.filter_map
     (fun (example_reads, unselected_reads) ->
       let defined_example_reads, undefined_reads =
         List.partition_map
           (fun (read,data) ->
-            match f data with
+            match f read data with
             | None -> Either.Right ()
             | Some data' -> Either.Left (read, data'))
           example_reads in
@@ -215,6 +215,7 @@ let refinements
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ('input,'var,'typ,'value,'constr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
+      ~(decompositions : 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_any : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
@@ -234,8 +235,22 @@ let refinements
   in
   fun ~nb_env_vars ~env_vars ~dl_M m0 varseq0 reads ->
   Myseq.prof "Refining.refinements" (
+  let aux_dl_new dl_m m_new best_reads =
+    let dl_m_new = dl_model ~nb_env_vars m_new in
+    let dl_new =
+      dl_M -. dl_m +. dl_m_new
+      +. alpha *. Mdl.sum best_reads
+                    (fun {matching; read; data; new_data} ->
+                      if matching
+                      then
+                        let dl_d = dl_data data in (* TODO: pb, not comparable reliably to dl_d_new: data should be the result of parsing input(value(data)) *)
+                        let dl_d_new = dl_data new_data in
+                        read.dl -. dl_d +. dl_d_new
+                      else 0.) (* no change in this case *) in
+    dl_round dl_new (* rounding to absorb float error accumulation *)
+  in
   let aux_gen (type r)
-        ctx m selected_reads (* ctx is reverse path *)
+        ctx m varseq selected_reads (* ctx is reverse path *)
         (read_refs : 'read * 'data -> (r * 'varseq * 'data result) list)
         (model_of_ref : r -> 'model)
         (postprocessing : 'model -> 'varseq -> supp:int -> nb:int -> alt:bool -> 'best_reads -> ('model * 'varseq * 'best_reads result) Myseq.t)
@@ -243,6 +258,16 @@ let refinements
     Myseq.prof "Refining.refinements/aux_gen" (
     let p = List.rev ctx in (* local path *)
     let dl_m = dl_model ~nb_env_vars m in
+    let selected_reads = (* local re-parsing of data from value for comparability with m' *)
+      Common.prof "Refining.refinements/aux_gen/reparsing" (fun () ->
+      map_reads
+        (fun read data ->
+          let v = Data.value data in
+          let input = input_of_value (Model.typ m) v in
+          match parse_best m read.Model.bindings input with
+          | Result.Ok data -> data
+          | _ -> print_endline "ERROR failed local parsing with current model"; data) (* TODO: better handle: parsing should not fail *)
+        selected_reads) in
     let r_best_reads = inter_union_reads read_refs selected_reads in
     let* r, (varseq', best_reads_res) = Mymap.to_seq r_best_reads in
     let m_new = model_of_ref r in
@@ -267,43 +292,33 @@ let refinements
             then Myseq.return (p, m_new, varseq', supp, Result.Error error)
             else Myseq.empty
          | Result.Ok best_reads ->
-         let dl_m_new = dl_model ~nb_env_vars m_new in
-         let dl_new =
-           dl_M -. dl_m +. dl_m_new
-           +. alpha *. Mdl.sum best_reads
-                         (fun {matching; read; data; new_data} ->
-                           if matching
-                           then
-                             let dl_d = dl_data data in
-                             let dl_d_new = dl_data new_data in
-                             read.dl -. dl_d +. dl_d_new
-                           else 0.) (* no change in this case *) in
-         let dl_new = dl_round dl_new in (* rounding to absorb float error accumulation *)
-         Myseq.return (p, m_new, varseq', supp, Result.Ok dl_new))
+            let dl_new = aux_dl_new dl_m m_new best_reads in
+            Myseq.return (p, m_new, varseq', supp, Result.Ok dl_new))
   in
-  let rec aux ctx m selected_reads =
+  let rec aux ctx m varseq selected_reads =
   Myseq.prof "Refining.refinements/aux" (
   if selected_reads = [] then Myseq.empty
   else
     match m with
     | Model.Def (x,m1) ->
        let ctx = [Model.Alias (x,ctx)] in
-       aux ctx m1 selected_reads
+       aux ctx m1 varseq selected_reads
     | Model.Any t ->
        Myseq.interleave
-         [aux_expr ctx m selected_reads;
-          aux_any_pat ctx m t (refinements_any ~env_vars t varseq0) selected_reads]
+         [aux_expr ctx m varseq selected_reads;
+          aux_any_pat ctx m varseq t (refinements_any ~env_vars t) selected_reads;
+          aux_decomp ctx t m varseq selected_reads]
     | Model.Pat (t,c,args) ->
        Myseq.interleave
-         (aux_expr ctx m selected_reads
-          :: aux_any_pat ctx m t (refinements_pat ~env_vars t c args varseq0) selected_reads
+         (aux_expr ctx m varseq selected_reads
+          :: aux_any_pat ctx m varseq t (refinements_pat ~env_vars t c args) selected_reads
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
                    let ctxi = Model.Field (c,i)::ctx in
-                   aux ctxi mi
+                   aux ctxi mi varseq
                      (map_reads
-                        (function
+                        (fun read -> function
                          | Data.DPat (_, dc, args) ->
                             assert (i >= 0 && i < Array.length args);
                             args.(i)
@@ -312,51 +327,51 @@ let refinements
                  args))
     | Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave
-         [ aux_expr ctx m selected_reads;
+         [ aux_expr ctx m varseq selected_reads;
            
            (match c with
             | Undet _ ->
                if pruning
-               then aux_alt_prune ctx m m1 m2 selected_reads
-               else aux_alt_cond_undet ctx m xc c m1 m2 selected_reads
+               then aux_alt_prune ctx m m1 m2 varseq selected_reads
+               else aux_alt_cond_undet ctx m xc c m1 m2 varseq selected_reads
             | BoolExpr _ -> Myseq.empty);
            
            (let ctx1 = Model.Branch true :: ctx in
             let sel1 =
               filter_map_reads
-                (function
+                (fun read -> function
                  | Data.DAlt (prob,b,d12) ->
                     if b
                     then Some d12
                     else None
                  | _ -> assert false)
                 selected_reads in
-            aux ctx1 m1 sel1);
+            aux ctx1 m1 varseq sel1);
                         
            (let ctx2 = Model.Branch false :: ctx in
             let sel2 =
               filter_map_reads
-                (function
+                (fun read -> function
                  | Data.DAlt (prob,b,d12) ->
                     if not b
                     then Some d12
                     else None
                  | _ -> assert false)
                 selected_reads in
-            aux ctx2 m2 sel2) ]
+            aux ctx2 m2 varseq sel2) ]
     | Model.Expr (k, Expr.Const (t,v)) ->
        if pruning (* pruning constants *)
        then
-         aux_gen ctx m selected_reads
+         aux_gen ctx m varseq selected_reads
            (fun (read, data : _ read) ->
-             refinements_value t v varseq0
+             refinements_value t v varseq
              |> List.map (fun (m',varseq') -> (m',varseq', Result.Ok data)))
            (fun m' -> m')
            (fun m' varseq' ~supp ~nb ~alt best_reads ->
              Myseq.return (m', varseq', Result.Ok best_reads))
        else (*Myseq.empty*)
          (* generalizing constant into variable expression *)
-         aux_expr ctx m selected_reads
+         aux_expr ctx m varseq selected_reads
          |> Myseq.filter
               (fun (p,m',varseq',supp,dl') ->
                 match m' with
@@ -364,7 +379,93 @@ let refinements
                 | _ -> true)
     | Model.Expr (k,e) -> Myseq.empty
     | Model.Derived t -> Myseq.empty)
-  and aux_expr ctx m selected_reads = (* QUICK *)
+  and aux_decomp ctx t m varseq selected_reads =
+    let p = List.rev ctx in
+    let dl_m = dl_model ~nb_env_vars m in
+    let nb = List.length selected_reads in
+    let vss =
+      List.map
+        (fun (example,_) ->
+          List.map
+            (fun (read,data) ->
+              Data.value data)
+            example)
+        selected_reads in
+    let refs =
+      decompositions t varseq vss
+      |> List.fold_left
+           (fun refs (m',varseq') ->
+             let selected_reads' =
+               filter_map_reads
+                 (fun read data ->
+                   let v = Data.value data in
+                   let input = input_of_value t v in
+                   (*let data_res = parse_best m read.Model.bindings input in*)
+                   let data'_res = parse_best m' read.Model.bindings input in
+                   (* (match data_res, data'_res with (* checking data DL invariance *)
+                    | Result.Ok data, Result.Ok data' ->
+                       let dl = dl_data data in
+                       let dl' = dl_data data' in
+                       if dl_round dl <> dl_round dl'
+                       then Printf.printf "ERROR decomposition data DL: %.5f vs %.5f\n" dl dl' 
+                       else print_endline "OK decomposition data DL"
+                    | _ -> ()); *)
+                   Result.to_option data'_res)
+                 selected_reads in
+             let supp = List.length selected_reads' in
+             if supp = nb
+             then (m',varseq', Result.Ok selected_reads')::refs
+             else
+               if !debug
+               then (m',varseq', Result.Error No_local_parse)::refs
+               else refs)
+           [] in
+    let* m', varseq', selected_reads'_res = Myseq.from_list refs in
+    match m', selected_reads'_res with
+    | Model.Pat (_t, c, args), Result.Ok selected_reads' ->
+       let dl_m' = dl_model ~nb_env_vars m' in
+       let n = Array.length args in
+       Myseq.interleave
+         (Array.to_list
+            (Array.mapi
+               (fun i arg_i ->
+                 let ctx_i = Model.Field (c,i)::ctx in
+                 let ctx_i, m_i =
+                   match arg_i with
+                   | Model.Def (x,m_i) -> [Model.Alias (x,ctx_i)], m_i
+                   | _ -> ctx_i, arg_i in
+                 let selected_reads_i =
+                   map_reads
+                     (fun read -> function
+                      | Data.DPat (_,_c,dargs) ->
+                         assert (Array.length dargs = n);
+                         dargs.(i)
+                      | _ -> assert false)
+                     selected_reads' in
+                 let* p_i, m'_i, varseq', supp, dl'_i_res =
+                   aux ctx_i m_i varseq' selected_reads_i in
+                 let m'_i =
+                   match arg_i with
+                   | Model.Def (x,_) -> Model.Def (x,m'_i)
+                   | _ -> m'_i in
+                 let m' =
+                   let args' = Array.copy args in
+                   args'.(i) <- m'_i;
+                   Model.make_pat t c args' in
+                 let dl'_res = (* adding extra-cost of decomposition on model, assuming no cost on data *)
+                   let| dl'_i = dl'_i_res in
+                   Result.Ok (dl'_i -. dl_m +. dl_m') in
+                 Myseq.return (p, m', varseq', supp, dl'_res)) (* pattern c(args) is assumed DL-invariant *)
+               args))
+    | _, Result.Error error ->
+       if !debug
+       then Myseq.return (p, m', varseq', 0, Result.Error error)
+       else Myseq.empty
+    | _ ->
+       if !debug
+       then Myseq.return (p, m', varseq', 0, Result.Error (Failure "decompositions must be patterns"))
+       else Myseq.empty        
+  and aux_expr ctx m varseq selected_reads = (* QUICK *)
     if pruning then Myseq.empty
     else
     let t = Model.typ m in
@@ -372,7 +473,7 @@ let refinements
     | false, [] -> Myseq.empty (* no expression here *)
     | const_ok, ts1 ->
        let allowed = asd#alt_opt t in
-       aux_gen ctx m selected_reads
+       aux_gen ctx m varseq selected_reads
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
            let v = Data.value data in
            let s_expr = (* index expressions evaluating to v *)
@@ -393,7 +494,7 @@ let refinements
                 (fun refs e ->
                   let me = Model.make_expr t e in
                   let data' = Data.make_dexpr v in
-                  (me, varseq0, Result.Ok data')::refs)
+                  (me, varseq, Result.Ok data')::refs)
                 []))
          (fun m' -> m')
          (fun m' varseq' ~supp ~nb ~alt best_reads ->
@@ -405,15 +506,24 @@ let refinements
              (if !debug
               then Myseq.return (m', varseq', Result.Error Failed_postprocessing)
               else Myseq.empty))
-       |> Myseq.sort (fun (_,_,_,supp1,dl1) (_,_,_,supp2,dl2) -> Stdlib.compare (supp2,dl1) (supp1,dl2))
+       |> Myseq.sort (fun (_,_,_,supp1,dl1_res) (_,_,_,supp2,dl2_res) ->
+              let c = Stdlib.compare supp2 supp1 in (* higher support first *)
+              if c = 0
+              then
+                match dl1_res, dl2_res with
+                | Result.Ok dl1, Result.Ok dl2 -> dl_compare dl1 dl2
+                | Result.Ok _, _ -> -1
+                | _, Result.Ok _ -> 1
+                | _ -> 0
+              else c)
        |> Myseq.slice ~limit:max_expr_refinements_per_var
-  and aux_any_pat ctx m t get_refs selected_reads =
+  and aux_any_pat ctx m varseq t get_refs selected_reads =
     let allowed = asd#alt_opt t in
-    aux_gen ctx m selected_reads
+    aux_gen ctx m varseq selected_reads
       (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_any/get_rs" (fun () ->
         let v = Data.value data in
         let input = input_of_value t v in
-        get_refs v
+        get_refs varseq v
         |> List.fold_left
              (fun refs (m',varseq') ->
                let data'_res = parse_best m' read.bindings input in
@@ -436,14 +546,14 @@ let refinements
           (if !debug
            then Myseq.return (m', varseq', Result.Error Failed_postprocessing)
            else Myseq.empty))
-  and aux_alt_prune ctx m m1 m2 selected_reads =
-    aux_gen ctx m selected_reads
+  and aux_alt_prune ctx m m1 m2 varseq selected_reads =
+    aux_gen ctx m varseq selected_reads
       (fun (read, data : _ read) ->
         match data with
         | Data.DAlt (prob, b, d12) ->
            if b
-           then [m1, varseq0, Result.Ok d12]
-           else [m2, varseq0, Result.Ok d12]
+           then [m1, varseq, Result.Ok d12]
+           else [m2, varseq, Result.Ok d12]
         | _ -> assert false)
       (fun m' -> m')
       (fun m' varseq' ~supp ~nb ~alt best_reads ->
@@ -453,8 +563,8 @@ let refinements
           if !debug
           then Myseq.return (m', varseq', Result.Error Alt_cannot_be_pruned)
           else Myseq.empty)
-  and aux_alt_cond_undet ctx m xc c m1 m2 selected_reads =
-    aux_gen ctx m selected_reads
+  and aux_alt_cond_undet ctx m xc c m1 m2 varseq selected_reads =
+    aux_gen ctx m varseq selected_reads
       (fun (read, data : _ read) ->
         match data with
         | Data.DAlt (_prob, b, d12) ->
@@ -464,7 +574,7 @@ let refinements
                (Model.force_index ~make_index read) in
            let new_data = Data.DAlt (1.,b,d12) in
            Myseq.fold_left
-             (fun rs e -> (e, varseq0, Result.Ok new_data) :: rs)
+             (fun rs e -> (e, varseq, Result.Ok new_data) :: rs)
              [] (Expr.Exprset.to_seq ~max_expr_size es)
         | _ -> assert false)
       (fun e ->
@@ -490,7 +600,7 @@ let refinements
         (example_reads, false))
       reads in
   let* p, r, varseq', supp, dl'_res =
-    aux Model.ctx0 m0 selected_reads
+    aux Model.ctx0 m0 varseq0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1_res) (p2,r2,vs2,supp2,dl2_res) ->
            match dl1_res, dl2_res with
            | Result.Ok dl1, Result.Ok dl2 -> dl_compare dl1 dl2

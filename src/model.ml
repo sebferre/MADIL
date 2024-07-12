@@ -47,7 +47,20 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Alt (xc,c,m1,m2) -> typ m1
   | Expr (t,e) -> t
   | Derived t -> t
-    
+
+let rec fold (f : 'a -> 'model -> 'a) (acc : 'a) (m : 'model) : 'a =
+  let acc = f acc m in 
+  match m with
+  | Def (x,m1) -> fold f acc m1
+  | Any t -> acc
+  | Pat (t,c,args) -> Array.fold_left (fold f) acc args
+  | Alt (xc,c,m1,m2) ->
+     let acc = fold f acc m1 in
+     let acc = fold f acc m2 in
+     acc
+  | Expr (t,e) -> acc
+  | Derived t -> acc
+
 (* printing *)
   
 let xp_model
