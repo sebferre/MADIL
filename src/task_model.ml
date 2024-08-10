@@ -238,7 +238,7 @@ let xp_refinement
   and aux2 ~html print in_out p r supp dl'_res i_o =
     (* (match dl'_res with
      | Result.Ok dl' when dl' <> 0. (* undefined value *) -> (* showing DL estimate *)
-        print#string (Printf.sprintf " (~%.3f) " dl')
+        print#string (Printf.sprintf " (~%.1f) " dl')
      | _ -> ()); *)
     if supp <> 0 (* undefined value *) then
       aux_support ~html print supp;

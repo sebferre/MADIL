@@ -243,10 +243,10 @@ let refinements
                     (fun {matching; read; data; new_data} ->
                       if matching
                       then
-                        let dl_d = dl_data data in (* TODO: pb, not comparable reliably to dl_d_new: data should be the result of parsing input(value(data)) *)
+                        let dl_d = dl_data data in
                         let dl_d_new = dl_data new_data in
                         read.dl -. dl_d +. dl_d_new
-                      else 0.) (* no change in this case *) in
+                      else read.dl) (* no change in this case *) in
     dl_round dl_new (* rounding to absorb float error accumulation *)
   in
   let aux_gen (type r)
@@ -420,7 +420,9 @@ let refinements
                then (m',varseq', Result.Error No_local_parse)::refs
                else refs)
            [] in
-    let* m', varseq', selected_reads'_res = Myseq.from_list refs in
+    Myseq.interleave
+      (List.map
+         (fun (m', varseq', selected_reads'_res) ->
     match m', selected_reads'_res with
     | Model.Pat (_t, c, args), Result.Ok selected_reads' ->
        let dl_m' = dl_model ~nb_env_vars m' in
@@ -464,7 +466,8 @@ let refinements
     | _ ->
        if !debug
        then Myseq.return (p, m', varseq', 0, Result.Error (Failure "decompositions must be patterns"))
-       else Myseq.empty        
+       else Myseq.empty)
+         refs)
   and aux_expr ctx m varseq selected_reads = (* QUICK *)
     if pruning then Myseq.empty
     else
