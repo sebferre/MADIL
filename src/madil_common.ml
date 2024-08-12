@@ -19,6 +19,14 @@ let tup1 (x : 'a) = (Obj.magic [|x|] : 'a)
 
 (* list *)
 
+let list_foldi_left (f : 'b -> int -> 'a -> 'b) (init : 'b) (l : 'a list) : 'b =
+  let rec aux acc i l =
+    match l with
+    | [] -> acc
+    | x::r -> aux (f acc i x) (i+1) r
+  in
+  aux init 0 l
+
 let rec list_remove x l =
   match l with
   | [] -> []

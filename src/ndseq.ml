@@ -45,6 +45,16 @@ let fold_left (f : 'b -> 'a -> 'b) (init : 'b) (x : 'a t) : 'b =
   in
   aux init x
 
+let foldi_left (f : 'b -> int list (* revpath *) -> 'a -> 'b) (init : 'b) (x : 'a t) : 'b =
+  let rec aux acc revpath = function
+    | `Seq (_, _, l) ->
+       list_foldi_left
+         (fun acc i x -> aux acc (i::revpath) x)
+         acc l
+    | x -> f acc revpath x
+  in
+  aux init [] x
+
 let rec map ?(depth = -1) (delta_depth : int) (f : 'a -> 'b) (x : 'a t) : 'b t =
   (* delta_depth = depth(b) - depth(a) *)
   if depth = 0
