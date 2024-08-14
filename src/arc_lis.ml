@@ -96,7 +96,7 @@ object
   inherit [arc_lis,arc_focus,arc_extent,arc_suggestion] Lis.place lis focus
 
   method eval k_extent k_suggestions =
-    k_extent focus;
+    let> _ = k_extent focus in
     if focus.suggestions = [] then (
       Jsutils.firebug "Computing suggestions...";
       let _, refinements, errors = (* selecting up to [refine_degree] compressive refinements, keeping other for information *)
@@ -355,7 +355,7 @@ let render_place place k =
   let> _ = Jsutils.toggle_class elt_lis "computing" in (* turn on *)
   Jsutils.firebug "Displaying the new model...";   
   let xml = xml_of_focus place#focus in
-  w_focus#set_syntax xml;
+  let> _ = w_focus#set_syntax xml in
   place#eval
     (fun ext ->
       Jsutils.firebug "Displaying the examples...";
