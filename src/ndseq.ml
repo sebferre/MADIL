@@ -218,7 +218,8 @@ let mapi_tup ?name ~depth res_depth (f : int list -> 'a -> 'b) (args : 'a) : 'b 
         then (Obj.magic [|res|] : 'bx array)
         else
           let repr_res = Obj.repr res in
-          assert (Obj.is_block repr_res && Obj.tag repr_res = 0 && Obj.size repr_res = m);
+          assert (Obj.is_block repr_res && Obj.tag repr_res = 0);
+          if not (Obj.size repr_res = m) then failwith "Ndseq.map*_tup: inconsistent number of results";
           (Obj.magic res : 'bx array)) (* from tuple *)
       (Obj.magic args : 'ax t array) in
   if m = 1 then (Obj.magic res.(0) : 'b) else (Obj.magic res : 'b) (* singleton handling *)
@@ -315,7 +316,8 @@ let mapi_tup_myseq ?name ~depth res_depth (f : int list -> 'a -> 'b Myseq.t) (ar
         then Myseq.return (Obj.magic [|res|] : 'bx array)
         else
           let repr_res = Obj.repr res in
-          assert (Obj.is_block repr_res && Obj.tag repr_res = 0 && Obj.size repr_res = m);
+          assert (Obj.is_block repr_res && Obj.tag repr_res = 0);
+          if not (Obj.size repr_res = m) then failwith "Ndseq.map*_tup_myseq: inconsistent number of results";
           Myseq.return (Obj.magic res : 'bx array)) (* from tuple *)
       (Obj.magic args : 'ax t array) in
   let res = if m = 1 then (Obj.magic res.(0) : 'b) else (Obj.magic res : 'b) in
