@@ -229,7 +229,7 @@ module type DOMAIN =
 
     (* refining *)
 
-    val decompositions : typ -> varseq -> value list list -> (model * varseq) list
+    val decompositions : env_vars:binding_vars -> typ -> varseq -> value list list -> (model * varseq) list
 
     val refinements_any : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
     val refinements_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
@@ -386,7 +386,7 @@ module Make (Domain : DOMAIN) =
         ~input_of_value
         ~parse_bests
         ~make_index
-        ~decompositions:(fun t varseq value -> [])
+        ~decompositions:(fun ~env_vars t varseq value -> [])
         ~refinements_value:prunings_value
         ~refinements_any:prunings_any
         ~refinements_pat:prunings_pat

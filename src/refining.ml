@@ -215,7 +215,7 @@ let refinements
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ('input,'var,'typ,'value,'constr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
-      ~(decompositions : 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
+      ~(decompositions : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_any : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
       ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
@@ -392,7 +392,7 @@ let refinements
             example)
         selected_reads in
     let refs =
-      decompositions t varseq vss
+      decompositions ~env_vars t varseq vss
       |> List.fold_left
            (fun refs (m',varseq') ->
              let selected_reads' =
