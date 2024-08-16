@@ -201,6 +201,7 @@ type ('typ,'value,'var,'constr,'func) refiner =
 
 let refinements
       ~(pruning : bool)
+      ~(xp_value : 'value html_xp)
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
       ~(max_expr_size : int)
@@ -266,7 +267,11 @@ let refinements
           let input = input_of_value (Model.typ m) v in
           match parse_best m read.Model.bindings input with
           | Result.Ok data -> data
-          | _ -> print_endline "ERROR failed local parsing with current model"; data) (* TODO: better handle: parsing should not fail *)
+          | _ -> (* should not happen *)
+             print_endline "ERROR failed local parsing with current model";
+             print_string "local model: "; pp_endline xp_model m;
+             print_string "parsed value: "; pp_endline xp_value v;
+             data)
         selected_reads) in
     let r_best_reads = inter_union_reads read_refs selected_reads in
     let* r, (varseq', best_reads_res) = Mymap.to_seq r_best_reads in
