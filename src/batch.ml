@@ -38,28 +38,44 @@ let print_dl_task_model ~env name task model =
 
 type measures = (string * [`Tasks|`Bits|`MRR|`Seconds|`Steps|`Jumps|`ModelElts] * float) list
 
-let print_measures name count ms =
+let print_measures name list_ms =
+  let count = List.length list_ms in
   (* printing CSV line *)
-  if name <> "" then (
-    print_string "CSV,";
-    print_string name;
-    List.iter
-      (fun (a,t,v) -> print_char ','; print_float v)
-      ms);
+  (match name, list_ms with
+   | "", _ -> ()
+   | name, [ms] ->
+      print_string "CSV,";
+      print_string name;
+      List.iter
+        (fun (a,t,v) -> print_char ','; print_float v)
+        ms
+   | _ -> ());
   print_newline ();
-  (* printing readable measures *)
-  List.iter
-    (fun (a,t,v) ->
-     match t with
-     | `Tasks -> Printf.printf "%s = %.2f tasks (%.2f%%)\n" a v (100. *. v /. float count)
-     | `Bits -> Printf.printf "%s = %.1f bits (%.1f bits/task)\n" a v (v /. float count)
-     | `MRR -> Printf.printf "%s = %.2f\n" a (v /. float count)
-     | `Seconds -> Printf.printf "%s = %.1f sec (%.1f sec/task)\n" a v (v /. float count)
-     | `Steps -> Printf.printf "%s = %.0f steps (%.1f steps/task)\n" a v (v /. float count)
-     | `Jumps -> Printf.printf "%s = %.0f jumps (%.1f jumps/task)\n" a v (v /. float count)
-     | `ModelElts -> Printf.printf "%s = %.0f model elts (%.1f elts/task)\n" a v (v /. float count))
-    ms;
-  print_newline ()
+  (* printing readable measures: sum and average *)
+  (match list_ms with
+   | [] -> ()
+   | ms0::lms1 ->
+      let sum_ms =
+        List.fold_left
+          (fun res ms1 ->
+            List.map2
+	      (fun (a,t,sum_v) (a',t',v) ->
+	        assert (a=a' && t=t');
+	        (a,t,sum_v+.v))
+	      res ms1)
+          ms0 lms1 in
+      List.iter
+        (fun (a,t,v) ->
+          match t with
+          | `Tasks -> Printf.printf "%s = %.2f tasks (%.2f%%)\n" a v (100. *. v /. float count)
+          | `Bits -> Printf.printf "%s = %.1f bits (%.1f bits/task)\n" a v (v /. float count)
+          | `MRR -> Printf.printf "%s = %.2f\n" a (v /. float count)
+          | `Seconds -> Printf.printf "%s = %.1f sec (%.1f sec/task)\n" a v (v /. float count)
+          | `Steps -> Printf.printf "%s = %.0f steps (%.1f steps/task)\n" a v (v /. float count)
+          | `Jumps -> Printf.printf "%s = %.0f jumps (%.1f jumps/task)\n" a v (v /. float count)
+          | `ModelElts -> Printf.printf "%s = %.0f model elts (%.1f elts/task)\n" a v (v /. float count))
+        sum_ms;
+      print_newline ())
 
 let apply_model ~env m v_i info_o =
   try
@@ -261,7 +277,7 @@ let print_learned_model
 	 "acc-test-macro", `Tasks, macro_test;
          "acc-test-mrr", `MRR, mrr_test;
        ] in
-     print_measures name 1 ms;
+     print_measures name [ms];
      ms)
 
 
@@ -272,7 +288,7 @@ let task_of_name dir name =
 
 let process_task
       name task
-      count sum_ms =
+      list_ms =
       let {env; varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
       let init_task_model = make_task_model varseq input_model output_model in
       print_endline "\n# evaluating init_task_model";
@@ -282,20 +298,25 @@ let process_task
         print_learned_model
           ~env ~info_o
           ~init_task_model name task in
-      count := !count+1;
-      sum_ms :=
-	if !sum_ms = []
-	then ms
-	else
-	  List.map2
-	    (fun (a,t,sum_v) (a',t',v) ->
-	     assert (a=a' && t=t');
-	     (a,t,sum_v+.v))
-	    !sum_ms ms
+      list_ms := ms :: !list_ms
 
-let summarize_tasks count sum_ms =
+let summarize_tasks list_ms =
+  (* stats over all tasks *)
+  let count = List.length list_ms in
   Printf.printf "\n## performance measures averaged over %d tasks\n" count;
-  print_measures "" count sum_ms;
+  print_measures "" list_ms;
+  (* stats over solved tasks: acc-train-macro = 1 *)
+  let list_ms_solved =
+    List.filter
+      (fun ms ->
+        List.exists
+          (fun (a,t,v) ->
+            a = "acc-train-macro" && v = 1.)
+          ms)
+      list_ms in
+  let count_solved = List.length list_ms_solved in
+  Printf.printf "\n## performance measures averaged over %d solved tasks\n" count_solved;
+  print_measures "" list_ms_solved;
   flush stdout
   
 let main () : unit =
@@ -348,8 +369,7 @@ let main () : unit =
   print_newline ();
   
   let nb_tasks = List.length !names in
-  let count = ref 0 in
-  let sum_ms = ref [] in
+  let list_ms = ref [] in
   let _ =
     print_endline "CSV,task,runtime-learning,nb-steps,nb-jumps,nb-steps-sol,nb-jumps-sol,model-size,bits-train-error,acc-train-micro,acc-train-macro,acc-train-mrr,acc-test-micro,acc-test-macro,acc-test-mrr";
     List.fold_left
@@ -363,13 +383,13 @@ let main () : unit =
 	    (List.length task.Task.test);
           process_task
             name task
-            count sum_ms;
+            list_ms;
           reset_memoization ();
           Gc.compact () (* to avoid MEMOUT *)
         );
        rank-1)
       nb_tasks !names in
-  summarize_tasks !count !sum_ms;
+  summarize_tasks !list_ms;
   Common.prerr_profiling ()
 
   end
