@@ -105,12 +105,14 @@ let learn
   let state_ref = ref state0 in
   (* refining phase *)
   let rec loop_refine nsteps_sol jumps_sol state delta conts =
-    log_refining state.r state.m state.prs state.lmd;
-    if state.lrido = 0. (* end of search *)
-    then (
+    (* recording current state as best state *)
+    if state.lmd < (!state_ref).lmd then (
       nsteps_sol_ref := nsteps_sol;
       jumps_sol_ref := jumps_sol;
-      state_ref := state )
+      state_ref := state );
+    log_refining state.r state.m state.prs state.lmd;
+    if state.lrido = 0. (* end of search *)
+    then ()
     else
       let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
         myseq_find_map_k refine_degree
@@ -126,10 +128,6 @@ let learn
                task_refinements state.m state.prs state.drsi state.drso)) in
       if lstate1 = [] (* no compressive refinement *)
       then (
-        if state.lmd < (!state_ref).lmd then (
-          nsteps_sol_ref := nsteps_sol;
-          jumps_sol_ref := jumps_sol;
-          state_ref := state ); (* recording current state as best state *)
         try (* jumping to most promising continuation *)
           let delta1, ostate1 = Bintree.min_elt conts in
           let nsteps_sol1 = ostate1#nsteps_sol in
