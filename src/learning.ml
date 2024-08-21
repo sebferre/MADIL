@@ -106,7 +106,7 @@ let learn
   (* refining phase *)
   let rec loop_refine nsteps_sol jumps_sol state delta conts =
     (* recording current state as best state *)
-    if state.lmd < (!state_ref).lmd then (
+    if state.lrido = 0. || state.lmd < (!state_ref).lmd then (
       nsteps_sol_ref := nsteps_sol;
       jumps_sol_ref := jumps_sol;
       state_ref := state );
@@ -176,7 +176,8 @@ let learn
                    let lmd2 = state2.lmd in
                    let nsteps_sol2 = nsteps_sol + 1 in
                    let jumps_sol2 = rank :: jumps_sol in
-                   let delta2 = delta +. (lmd2 -. lmd1) in
+                   let delta2 = fst delta + rank,
+                                snd delta +. (lmd2 -. lmd1) in
                    let ostate2 =
                      object
                        method nsteps_sol = nsteps_sol2
@@ -202,7 +203,7 @@ let learn
         (fun () ->
           Common.do_timeout_gc (float timeout_refine)
             (fun () ->
-              loop_refine 0 [] state0 0. Bintree.empty)) in
+              loop_refine 0 [] state0 (0,0.) Bintree.empty)) in
     !state_ref, (res_opt = Some None), (res_opt = None) in
   let result_refining =
     { task_model = state_refine.m;
