@@ -57,7 +57,7 @@ let learn
                  | `Failure
                  | `Timeout
                  | `Error of exn] -> unit)
-      ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> unit)
+      ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> dl -> unit)
 
       ~memout ~timeout_refine ~timeout_prune
       ~(jump_width : int) ~(refine_degree : int)
@@ -110,7 +110,7 @@ let learn
       nsteps_sol_ref := nsteps_sol;
       jumps_sol_ref := jumps_sol;
       state_ref := state );
-    log_refining state.r state.m state.prs state.lmd;
+    log_refining state.r state.m state.prs state.lmd state.lrido;
     if state.lrido = 0. (* end of search *)
     then ()
     else
@@ -217,7 +217,7 @@ let learn
     } in
   (* pruning phase *)
   let rec loop_prune state =
-    log_refining state.r state.m state.prs state.lmd;
+    log_refining state.r state.m state.prs state.lmd state.lrido;
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
       myseq_find_map_k refine_degree
         (fun (r1,m1_res) ->

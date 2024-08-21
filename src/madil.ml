@@ -244,7 +244,7 @@ module type DOMAIN =
       
     val get_init_config : string (* task name *) -> task -> init_config
     val log_reading : refinement -> task_model -> status:status -> unit
-    val log_refining : refinement -> task_model -> pairs_reads -> dl -> unit
+    val log_refining : refinement -> task_model -> pairs_reads -> dl (* lmd *)  -> dl (* lrido *) -> unit
 
     val default_name_task : string * task
 
