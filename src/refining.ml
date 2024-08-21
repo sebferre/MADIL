@@ -514,12 +514,16 @@ let refinements
              (if !debug
               then Myseq.return (m', varseq', Result.Error Failed_postprocessing)
               else Myseq.empty))
-       |> Myseq.sort (fun (_,_,_,supp1,dl1_res) (_,_,_,supp2,dl2_res) ->
+       |> Myseq.sort (fun (p1,r1,_,supp1,dl1_res) (p2,r2,_,supp2,dl2_res) ->
               let c = Stdlib.compare supp2 supp1 in (* higher support first *)
               if c = 0
               then
                 match dl1_res, dl2_res with
-                | Result.Ok dl1, Result.Ok dl2 -> dl_compare dl1 dl2
+                | Result.Ok dl1, Result.Ok dl2 ->
+                   let c1 = dl_compare dl1 dl2 in
+                   if c1 = 0
+                   then Stdlib.compare (p1,r1) (p2,r2)
+                   else c1
                 | Result.Ok _, _ -> -1
                 | _, Result.Ok _ -> 1
                 | _ -> 0
@@ -611,7 +615,11 @@ let refinements
     aux Model.ctx0 m0 varseq0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1_res) (p2,r2,vs2,supp2,dl2_res) ->
            match dl1_res, dl2_res with
-           | Result.Ok dl1, Result.Ok dl2 -> dl_compare dl1 dl2
+           | Result.Ok dl1, Result.Ok dl2 ->
+              let c1 = dl_compare dl1 dl2 in
+              if c1 = 0
+              then Stdlib.compare (p1,r1) (p2,r2)
+              else c1
            | Result.Ok _, _ -> -1
            | _, Result.Ok _ -> 1
            | _ -> 0)
