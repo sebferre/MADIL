@@ -226,7 +226,7 @@ let xml_of_focus focus =
                      (match focus.stage with
                       | Build -> "building stage"
                       | Prune -> "pruning stage"))];
-      [Syntax.Kwd (Printf.sprintf "DL = %f" focus.norm_lmd)];
+      [Syntax.Kwd (Printf.sprintf "DL = %f / %frido" focus.norm_lmd focus.norm_lrido)];
       [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi / %.3fri + %.3fdo / %.3fro) = %.3fi + %.3fo" l.md.io l.m.io l.d.io l.m.i l.m.o l.d.i l.r.i l.d.o l.r.o l.md.i l.md.o)];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.input_model)];
       [Syntax.Kwd " ⬇ "];
@@ -254,11 +254,11 @@ let html_of_suggestion ~input_dico = function
      "reset current task"
   | ChangeStage s ->
      Jsutils.escapeHTML
-       (Printf.sprintf "(%f) switch to %s stage " s.norm_lmd
+       (Printf.sprintf "(%.3f / %.3frido) switch to %s stage " s.norm_lmd s.norm_lrido
           (match s.stage with Build -> "building" | Prune -> "pruning"))
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
-       (Printf.sprintf "(%f)  " s.norm_lmd
+       (Printf.sprintf "(%.3f / %.3f)  " s.norm_lmd s.norm_lrido
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
   | FailedRefinement (r,err) ->
      Html.span ~classe:"failed-refinement"
