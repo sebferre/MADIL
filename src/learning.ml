@@ -55,49 +55,105 @@ class ['state] ostate (state : 'state) =
             | rank -> print_char ' '; print_int rank)
   end
 
-class type ['state] conts =
+class virtual ['state] conts =
   (* mutable collection of search continuation points *)
   object
-    method push : 'state (* final/completed state *)
-                  -> 'state ostate (* incomplete state as continuation point *)
-                  -> unit (* added to collection, using information from final state *)
-    method pop : 'state ostate (* most promising continuation point, removed from collection *)
+    method virtual is_empty : bool        
+    method virtual push : 'state ostate (* final/completed state *)
+                          -> 'state ostate (* incomplete state as continuation point *)
+                          -> unit (* added to collection, using information from final state *)
+    method virtual pop : 'state ostate option (* most promising continuation point, removed from collection *)
   end
 
-class virtual ['state,'fitness] conts_fitness =
-        (* fitness function to specify ordering of continuations *)
+class virtual ['state,'fitness] conts_fitness = (* fitness function to specify ordering of continuations *)
   object (self)
+    inherit ['state] conts
     val mutable conts : ('fitness * 'state ostate) Bintree.t = Bintree.empty
-    method virtual fitness : 'state -> 'state ostate -> 'fitness
-    method push (final_state : 'state) (ostate : 'state ostate) : unit =
-      let fitness = self#fitness final_state ostate in
-      conts <- Bintree.add (fitness, ostate) conts
-    method pop : 'state ostate =
-      let _, ostate = Bintree.min_elt conts in
-      conts <- Bintree.remove_min_elt conts;
-      ostate
+    method virtual fitness : 'state ostate -> 'state ostate -> 'fitness
+    method is_empty = Bintree.is_empty conts
+    method push (final_ostate : 'state ostate) (jump_ostate : 'state ostate) : unit =
+      let fitness = self#fitness final_ostate jump_ostate in
+      conts <- Bintree.add (fitness, jump_ostate) conts
+    method pop : 'state ostate option =
+      try
+        let _, ostate = Bintree.min_elt conts in
+        conts <- Bintree.remove_min_elt conts;
+        Some ostate
+      with Not_found -> None
   end
 
 class ['state] conts_v0 =
   object
     constraint 'fitness = int * int
     inherit ['state, 'fitness] conts_fitness
-    method fitness final_state ostate =
+    method fitness final_ostate jump_ostate =
       let _, njumps, sumdepths =
         List.fold_right
           (fun rank (depth, njumps, sumdepths) ->
             (depth + 1, njumps + rank,
              if rank > 0 then sumdepths + depth else sumdepths))
-          ostate#jumps_sol (0,0,0) in
+          jump_ostate#jumps_sol (0,0,0) in
       (njumps, sumdepths)
   end
 
 class ['state] conts_v1 =
   object
-    constraint 'fitness = float * int * int
+    constraint 'fitness = int * int
     inherit ['state, 'fitness] conts_fitness
-    method fitness final_state ostate =
-      (final_state.lmd, ostate#nsteps_sol, List.hd ostate#jumps_sol)
+    method fitness final_ostate jump_ostate =
+      (jump_ostate#nsteps_sol, List.hd jump_ostate#jumps_sol)
+  end
+let make_conts_v1 () = (new conts_v1 :> 'state conts)
+
+class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state conts) =
+  (* choosing a final based on softmax of the reached DL (lmd), tuned by temperature,
+     then choosing a related cont according to a specified conts (make_subconts) *) 
+  object
+    inherit ['state] conts
+    val mutable final_conts : (float (* exp(lmd) *) * 'state ostate, 'state conts) Mymap.t = Mymap.empty
+    val mutable sum_exp : float = 0.
+
+    method is_empty = Mymap.is_empty final_conts
+    
+    method push final_ostate jump_ostate =
+      let exp = 2. ** (-. final_ostate#state.lmd /. temp) in (* lower DL, higher weight *)
+      let k = (-. exp, final_ostate) in (* negative for sorting by decreasing weight, final_ostate to distinguish same-exp finals *)
+      let subconts =
+        match Mymap.find_opt k final_conts with
+        | Some subconts -> subconts
+        | None -> (* new final *)
+           let subconts = make_subconts () in
+           final_conts <- Mymap.add k subconts final_conts;
+           sum_exp <- exp +. sum_exp;
+           subconts in
+      subconts#push final_ostate jump_ostate
+
+    method pop =
+      (* final_conts used as probability distribution *)
+      let threshold = Random.float sum_exp in (* drawing a position in prob distrib *)
+      let last_i, _, subconts_opt = (* looking for the selected subconts *)
+        Mymap.fold (* left-to-right traversal *)
+          (fun (neg_exp_i,_ as k_i) subconts_i (i,th,subconts_opt as res) ->
+            if subconts_opt = None
+            then
+              let th = th +. neg_exp_i in
+              if th < 0. (* drawn element reached *)
+              then (i, th, Some (i,k_i,subconts_i))
+              else (i+1, th, subconts_opt)
+            else res) (* already found *)
+          final_conts (0, threshold, None) in
+      match subconts_opt with
+      | None -> None (* no more conts *)
+      | Some (i, (neg_exp, _ as k), subconts) ->
+         let ostate_opt = subconts#pop in
+         assert (ostate_opt <> None);
+         if subconts#is_empty (* empty subconts *)
+         then ( (* updating *)
+           final_conts <- Mymap.remove k final_conts;
+           sum_exp <- sum_exp +. neg_exp
+         );
+         ostate_opt
+
   end
 
 let learn
@@ -124,6 +180,7 @@ let learn
 
       ~memout ~timeout_refine ~timeout_prune
       ~(jump_width : int) ~(refine_degree : int)
+      ~(search_temperature : float)
       ~env (* environment data to the input model *)
       ~init_task_model
       (pairs : 'value Task.pair list)
@@ -165,9 +222,11 @@ let learn
   let nsteps_ref = ref 0 in (* total nb steps *)
   let njumps_ref = ref 0 in (* total nb jumps *)
   let ostate_sol_ref = ref ostate0 in (* current solution *)
-  let conts = new conts_v0 in (* collection of search continuations, mutable *)
+  let conts = new conts_softmax
+                ~temp:search_temperature
+                ~make_subconts:make_conts_v1 in (* collection of search continuations, mutable *)
   (* refining phase *)
-  let rec loop_refine ostate ostates = (* current ostate and list of pending continuation points *)
+  let rec loop_refine ostate jump_ostates = (* current ostate and list of pending continuation points *)
     let state = ostate#state in
     (* recording current state as best state *)
     if state.lrido = 0. || state.lmd < (!ostate_sol_ref)#state.lmd then (
@@ -190,20 +249,21 @@ let learn
                task_refinements state.m state.prs state.drsi state.drso)) in
       if lstate1 = [] (* no compressive refinement *)
       then (
-        (* adding ostates as continuations *)
+        (* adding jump_ostates as continuations *)
         List.iter
-          (fun ostate -> conts#push state ostate)
-          ostates;
+          (fun jump_ostate -> conts#push ostate jump_ostate)
+          jump_ostates;
         (* jumping to most promising continuation *)
-        try
-          let ostate1 = conts#pop in
-          incr njumps_ref;
-          let () = (* showing JUMP *)
-            print_string "JUMP TO";
-            ostate1#print_jumps;
-            print_newline () in
-          loop_refine ostate1 []
-        with Not_found -> () ) (* no continuation *)
+        (match conts#pop with
+         | None -> () (* no continuation *)
+         | Some ostate1 ->
+            incr njumps_ref;
+            let () = (* showing JUMP *)
+              print_string "JUMP TO";
+              ostate1#print_jumps;
+              print_newline () in
+            loop_refine ostate1 []
+      ))
       else (
         let lstate1 =
           List.sort
@@ -214,7 +274,7 @@ let learn
         | [] -> assert false
         | state1::others ->
            let ostate1 = ostate#child 0 state1 in
-           let nb_alts, ostates =
+           let nb_alts, jump_ostates =
              List.fold_left (* selecting alternate refinements, at most jump_width-1 *)
                (fun (rank,res) state2 ->
                  let ok =
@@ -229,7 +289,7 @@ let learn
                    let ostate2 = ostate#child rank state2 in
                    rank+1, ostate2::res
                  else rank, res)
-               (1,ostates) others in
+               (1,jump_ostates) others in
            incr nsteps_ref;
            let () = (* showing point of choice *)
              if nb_alts > 1 then (
@@ -237,7 +297,7 @@ let learn
                ostate#print_jumps;
                print_newline ()
              ) in
-           loop_refine ostate1 ostates)
+           loop_refine ostate1 jump_ostates)
   in
   let ostate_refine, timed_out_refine, memed_out_refine =
     print_endline "REFINING PHASE";

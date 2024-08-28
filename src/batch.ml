@@ -215,7 +215,9 @@ let print_learned_model
           ~memout:(!memout)
           ~timeout_refine:(!timeout_refine)
           ~timeout_prune:(!timeout_prune)
-          ~jump_width:(!jump_width) ~refine_degree:(!max_refinements)
+          ~jump_width:(!jump_width)
+          ~refine_degree:(!max_refinements)
+          ~search_temperature:(!search_temperature)
           ~env ~init_task_model
           task.train)
   in
