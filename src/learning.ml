@@ -31,22 +31,33 @@ type ('typ,'value,'var,'constr,'func) state =
 
 (* encapsulation of state and search path information *)
 (* using an object to hide some mysterious functional value inside state that is a problem with Bintree *)
-class ['state] ostate (state : 'state) =
+class ['state] ostate ?(from : ('state ostate * int (* rank *)) option) (state : 'state) =
   object (self)
-    val nsteps_sol : int = 0 (* nb of refinement steps from initial model *)
-    val jumps_sol : int list = [] (* reverse list of refinement ranks from initial model *)
+    val nsteps_sol : int = (* nb of refinement steps from initial model *)
+      match from with
+      | None -> 0
+      | Some (p,rank) -> 1 + p#nsteps_sol
+    val jumps_sol : int list = (* reverse list of refinement ranks from initial model *)
+      match from with
+      | None -> []
+      | Some (p,rank) -> rank :: p#jumps_sol
     val state : 'state = state (* reached state *)
+    val parent_opt : 'state ostate option =
+      match from with
+      | None -> None
+      | Some (p,rank) -> Some p
+    val rank : int =
+      match from with
+      | None -> 0
+      | Some (p,rank) -> rank
+    
     method nsteps_sol = nsteps_sol
     method jumps_sol = jumps_sol
     method state = state
+    method parent_opt = parent_opt
+    method rank = rank 
 
-    method child (rank : int) (state1 : 'state) =
-      (* building the child ostate following rank-th refinement *)
-      {< nsteps_sol = 1 + nsteps_sol;
-         jumps_sol = rank :: jumps_sol;
-         state = state1 >}
-
-    method print_jumps =
+    method print_jumps : unit =
       jumps_sol
       |> List.rev
       |> List.iter
@@ -58,9 +69,11 @@ class ['state] ostate (state : 'state) =
 class virtual ['state] conts =
   (* mutable collection of search continuation points *)
   object
-    method virtual is_empty : bool        
+    method virtual is_empty : bool
+    method virtual goto : 'state ostate (* selected refined state *)
+                          -> unit
     method virtual push : 'state ostate (* final/completed state *)
-                          -> 'state ostate (* incomplete state as continuation point *)
+                          -> 'state ostate list (* incomplete states as continuation points *)
                           -> unit (* added to collection, using information from final state *)
     method virtual pop : 'state ostate option (* most promising continuation point, removed from collection *)
   end
@@ -71,9 +84,13 @@ class virtual ['state,'fitness] conts_fitness = (* fitness function to specify o
     val mutable conts : ('fitness * 'state ostate) Bintree.t = Bintree.empty
     method virtual fitness : 'state ostate -> 'state ostate -> 'fitness
     method is_empty = Bintree.is_empty conts
-    method push (final_ostate : 'state ostate) (jump_ostate : 'state ostate) : unit =
-      let fitness = self#fitness final_ostate jump_ostate in
-      conts <- Bintree.add (fitness, jump_ostate) conts
+    method goto ostate = ()
+    method push (final_ostate : 'state ostate) (jump_ostates : 'state ostate list) : unit =
+      List.iter
+        (fun jump_ostate ->
+          let fitness = self#fitness final_ostate jump_ostate in
+          conts <- Bintree.add (fitness, jump_ostate) conts)
+        jump_ostates
     method pop : 'state ostate option =
       try
         let _, ostate = Bintree.min_elt conts in
@@ -114,8 +131,10 @@ class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state co
     val mutable sum_exp : float = 0.
 
     method is_empty = Mymap.is_empty final_conts
+
+    method goto ostate = ()
     
-    method push final_ostate jump_ostate =
+    method push final_ostate jump_ostates =
       let exp = 2. ** (-. final_ostate#state.lmd /. temp) in (* lower DL, higher weight *)
       let k = (-. exp, final_ostate) in (* negative for sorting by decreasing weight, final_ostate to distinguish same-exp finals *)
       let subconts =
@@ -126,7 +145,7 @@ class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state co
            final_conts <- Mymap.add k subconts final_conts;
            sum_exp <- exp +. sum_exp;
            subconts in
-      subconts#push final_ostate jump_ostate
+      subconts#push final_ostate jump_ostates
 
     method pop =
       (* final_conts used as probability distribution *)
@@ -155,6 +174,92 @@ class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state co
          ostate_opt
 
   end
+
+type 'node mcts_info = {
+    mutable is_leaf : bool;
+    (* TODO: mutable rollout_val : float option; (* final value after rollout from this node *) *)
+    mutable count : int; (* nb visits *)
+    mutable sumval : float; (* cumulated value *)
+    mutable children : 'node list; (* children nodes, defined after 1st visit *)
+  }
+class ['state] conts_mcts ?(c : float = sqrt 2.) (root : 'state ostate) =
+  let value_of_ostate (ostate : 'node) : float =
+    1. -. ostate#state.lmd /. 2. in (* lmd normalized to [0,1] *)
+  let init_info (ostate : 'node) : 'node mcts_info =
+    { is_leaf = true;
+      (* TODO: rollout_val = None; *)
+      count = 0;
+      sumval = 0.;
+      children = [] }
+(*    { is_leaf = true;
+      count = 1;
+      sumval = value_of_ostate ostate;
+      children = [] } *)
+  in
+  object (self)
+    inherit ['state] conts
+    
+    val mutable ostate_info : ('state ostate, 'state ostate mcts_info) Hashtbl.t = Hashtbl.create 103
+    initializer
+      Hashtbl.add ostate_info root (init_info root)
+    
+    method is_empty = assert false
+
+    method private insert_child ostate =
+      match ostate#parent_opt with
+      | None -> assert false (* only root has no parent, inserted by initializer *)
+      | Some parent ->
+         let parent_info =
+           try Hashtbl.find ostate_info parent
+           with Not_found -> assert false in
+         parent_info.children <- ostate :: parent_info.children;
+         Hashtbl.add ostate_info ostate (init_info ostate)
+    
+    method goto ostate =
+      self#insert_child ostate
+    
+    method push final_ostate jump_ostates =
+      (* inserting new children *)
+      List.iter self#insert_child jump_ostates;
+      (* backpropagating information from final_ostate *)
+      let value = value_of_ostate final_ostate in
+      let rec backpropagation ostate =
+        let info = try Hashtbl.find ostate_info ostate with _ -> assert false in
+        info.is_leaf <- false;
+        (* TODO: info.rollout_val <- Some value; *)
+        info.count <- info.count + 1;
+        info.sumval <- info.sumval +. value;
+        match ostate#parent_opt with
+        | None -> ()
+        | Some parent -> backpropagation parent
+      in
+      backpropagation final_ostate
+
+    method pop =
+      let rec selection ostate =
+        let info = try Hashtbl.find ostate_info ostate with _ -> assert false in
+        if info.is_leaf
+        then Some ostate
+        else (* make UCB1 choice of a child *)
+          let scored_children =
+            List.map
+              (fun child_ostate ->
+                let child_info = try Hashtbl.find ostate_info child_ostate with _ -> assert false in
+                let child_score =
+                  let n = child_info.count in
+                  let v = if n = 0 then 0. else child_info.sumval /. float n in (* exploitation *)
+                  v +. c *. sqrt (log (float info.count) /. float (n+1)) in (* plus exploration *)
+                child_score, - child_ostate#rank, child_ostate)
+              info.children in
+          let sorted_children = (* decreasing score, increasing rank *)
+            List.rev (List.sort Stdlib.compare scored_children) in
+          List.find_map
+            (fun (_,_,child_ostate) -> selection child_ostate)
+            sorted_children
+      in
+      selection root
+  end
+
 
 let learn
       ~(alpha : float)
@@ -222,9 +327,11 @@ let learn
   let nsteps_ref = ref 0 in (* total nb steps *)
   let njumps_ref = ref 0 in (* total nb jumps *)
   let ostate_sol_ref = ref ostate0 in (* current solution *)
-  let conts = new conts_softmax
-                ~temp:search_temperature
-                ~make_subconts:make_conts_v1 in (* collection of search continuations, mutable *)
+  let conts = (* collection of search continuations, mutable *)
+    new conts_mcts ~c:search_temperature ostate0 in
+(*     new conts_softmax
+      ~temp:search_temperature
+      ~make_subconts:make_conts_v1 in *)
   (* refining phase *)
   let rec loop_refine ostate jump_ostates = (* current ostate and list of pending continuation points *)
     let state = ostate#state in
@@ -250,9 +357,7 @@ let learn
       if lstate1 = [] (* no compressive refinement *)
       then (
         (* adding jump_ostates as continuations *)
-        List.iter
-          (fun jump_ostate -> conts#push ostate jump_ostate)
-          jump_ostates;
+        conts#push ostate jump_ostates;
         (* jumping to most promising continuation *)
         (match conts#pop with
          | None -> () (* no continuation *)
@@ -273,7 +378,8 @@ let learn
         match lstate1 with
         | [] -> assert false
         | state1::others ->
-           let ostate1 = ostate#child 0 state1 in
+           let ostate1 = new ostate ~from:(ostate,0) state1 in
+           conts#goto ostate1;
            let nb_alts, jump_ostates =
              List.fold_left (* selecting alternate refinements, at most jump_width-1 *)
                (fun (rank,res) state2 ->
@@ -286,7 +392,7 @@ let learn
                       | _ -> assert false) in
                  if ok
                  then
-                   let ostate2 = ostate#child rank state2 in
+                   let ostate2 = new ostate ~from:(ostate,rank) state2 in
                    rank+1, ostate2::res
                  else rank, res)
                (1,jump_ostates) others in
