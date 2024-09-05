@@ -177,31 +177,31 @@ class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state co
 
 type 'node mcts_info = {
     mutable is_leaf : bool;
-    (* TODO: mutable rollout_val : float option; (* final value after rollout from this node *) *)
+    mutable rollout_val : float option; (* final value after rollout from this node *)
     mutable count : int; (* nb visits *)
     mutable sumval : float; (* cumulated value *)
     mutable children : 'node list; (* children nodes, defined after 1st visit *)
   }
+
+let init_info () : 'node mcts_info =
+  { is_leaf = false;
+    rollout_val = None;
+    count = 0;
+    sumval = 0.;
+    children = [] }
+
 class ['state] conts_mcts ?(c : float = sqrt 2.) (root : 'state ostate) =
   let value_of_ostate (ostate : 'node) : float =
-    1. -. ostate#state.lmd /. 2. in (* lmd normalized to [0,1] *)
-  let init_info (ostate : 'node) : 'node mcts_info =
-    { is_leaf = true;
-      (* TODO: rollout_val = None; *)
-      count = 0;
-      sumval = 0.;
-      children = [] }
-(*    { is_leaf = true;
-      count = 1;
-      sumval = value_of_ostate ostate;
-      children = [] } *)
+    1. -. ostate#state.lmd /. 2. (* lmd normalized to [0,1] *)
   in
   object (self)
     inherit ['state] conts
     
     val mutable ostate_info : ('state ostate, 'state ostate mcts_info) Hashtbl.t = Hashtbl.create 103
     initializer
-      Hashtbl.add ostate_info root (init_info root)
+        let info = init_info () in
+        info.is_leaf <- true;
+        Hashtbl.add ostate_info root info
     
     method is_empty = assert false
 
@@ -213,33 +213,62 @@ class ['state] conts_mcts ?(c : float = sqrt 2.) (root : 'state ostate) =
            try Hashtbl.find ostate_info parent
            with Not_found -> assert false in
          parent_info.children <- ostate :: parent_info.children;
-         Hashtbl.add ostate_info ostate (init_info ostate)
+         Hashtbl.add ostate_info ostate (init_info ())
     
     method goto ostate =
       self#insert_child ostate
+
+    method private backpropagation value leaf_ostate =
+      let leaf_info = try Hashtbl.find ostate_info leaf_ostate with _ -> assert false in
+      (* leaf is no more a leaf *)
+      leaf_info.is_leaf <- false;
+      (* make leaf children new leaves *)
+      List.iter
+        (fun child_ostate ->
+          let child_info = try Hashtbl.find ostate_info child_ostate with _ -> assert false in
+          child_info.is_leaf <- true)
+        leaf_info.children;
+      (* backpropagate value to leaf and ancestors *)
+      let rec aux ostate info =
+        info.count <- info.count + 1;
+        info.sumval <- info.sumval +. value;
+        match ostate#parent_opt with
+        | None -> ()
+        | Some parent ->
+           let parent_info = try Hashtbl.find ostate_info parent with _ -> assert false in
+           aux parent parent_info
+      in
+      aux leaf_ostate leaf_info
     
     method push final_ostate jump_ostates =
       (* inserting new children *)
       List.iter self#insert_child jump_ostates;
       (* backpropagating information from final_ostate *)
       let value = value_of_ostate final_ostate in
-      let rec backpropagation ostate =
+      let rec find_leaf_ancestor ostate =
         let info = try Hashtbl.find ostate_info ostate with _ -> assert false in
-        info.is_leaf <- false;
-        (* TODO: info.rollout_val <- Some value; *)
-        info.count <- info.count + 1;
-        info.sumval <- info.sumval +. value;
-        match ostate#parent_opt with
-        | None -> ()
-        | Some parent -> backpropagation parent
+        (* recording the rollout_value up to the leaf *)
+        info.rollout_val <- Some value;
+        if info.is_leaf
+        then ostate
+        else
+          match ostate#parent_opt with
+          | None -> assert false (* there must be a leaf above *)
+          | Some parent -> find_leaf_ancestor parent
       in
-      backpropagation final_ostate
+      let leaf_ostate = find_leaf_ancestor final_ostate in
+      self#backpropagation value leaf_ostate
 
     method pop =
       let rec selection ostate =
         let info = try Hashtbl.find ostate_info ostate with _ -> assert false in
         if info.is_leaf
-        then Some ostate
+        then
+          match info.rollout_val with
+          | None -> Some ostate (* compute rollout from there *)
+          | Some value -> (* rollout already done, backpropagate and re-pop *)
+             self#backpropagation value ostate;
+             self#pop             
         else (* make UCB1 choice of a child *)
           let scored_children =
             List.map
@@ -328,7 +357,8 @@ let learn
   let njumps_ref = ref 0 in (* total nb jumps *)
   let ostate_sol_ref = ref ostate0 in (* current solution *)
   let conts = (* collection of search continuations, mutable *)
-    new conts_mcts ~c:search_temperature ostate0 in
+    (* new conts_v0 in *)
+    new conts_mcts ~c:(sqrt 2.) ostate0 in
 (*     new conts_softmax
       ~temp:search_temperature
       ~make_subconts:make_conts_v1 in *)
