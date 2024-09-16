@@ -56,6 +56,14 @@ type arc_extent = arc_state
 let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (refinement : refinement) (env : data) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
   try
   let| prs = read_pairs ~env model task.train in
+  let| () = (* checking that the input model can parse the test inputs *)
+    let mi = model.Task_model.input_model in
+    if
+      List.for_all
+        (fun vi -> does_parse_value mi Expr.bindings0 vi)
+        (List.map (fun pair -> pair.Task.input) task.test)
+    then Result.Ok ()
+    else Result.Error Model.Parse_failure in
   let dsri, dsro = Task_model.split_pairs_read prs in
   let dls = Task_model.dl_model_data ~alpha:(!alpha) prs in
   let norm_dls : Task_model.dl_split = norm_dl_model_data prs in

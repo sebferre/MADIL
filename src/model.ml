@@ -592,6 +592,18 @@ let read
   let dl = dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
   Myseq.return { env; bindings; lazy_index=None; data; dl_rank; dl })
 
+let does_parse_value
+      ~(input_of_value : 'typ -> 'value -> 'input)
+      ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('input,'var,'typ,'value,'constr) parseur)
+
+      (m : ('typ,'value,'var,'constr,'func) model)
+      (bindings : ('var,'typ,'value) Expr.bindings)
+      (value : 'value)
+    : bool =
+  Common.prof "Model.does_parse" (fun () ->
+  let t = typ m in
+  let input = input_of_value t value in
+  not (Myseq.is_empty (parseur m bindings input)))
 
 (* writing *)
 

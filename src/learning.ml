@@ -297,6 +297,10 @@ let learn
           (('t,'value,'var,'constr,'func) Task_model.task_model as 'task_model) ->
           'value Task.pair list ->
           (('typ,'value,'constr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
+      ~(does_parse_value :
+          ('t,'value,'var,'constr,'func) Model.model ->
+          ('var,'typ,'value) Expr.bindings ->
+          'value -> bool)
       ~(task_refinements :
           'task_model -> 'pairs_reads ->
           (('typ,'value,'constr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
@@ -317,20 +321,27 @@ let learn
       ~(search_temperature : float)
       ~env (* environment data to the input model *)
       ~init_task_model
-      (pairs : 'value Task.pair list)
+      (train_pairs : 'value Task.pair list)
+      (test_inputs : 'value list)
     : ('typ,'value,'var,'constr,'func) results
   = Common.prof "Learning.learn" (fun () ->
   let norm_dl_model_data = make_norm_dl_model_data ~alpha () in
   let data_of_model ~pruning r m =
     try
       let state_opt =
-        Result.to_option
-          (let| prs = read_pairs ~env m pairs in
-           let l = norm_dl_model_data prs in
-           let drsi, drso = split_pairs_read prs in
-           Result.Ok {r; m; prs; drsi; drso; dl_split=l;
-                      lmd = (if pruning then l.m.io +. l.r.i +. l.d.o else l.md.io);
-                      lrido = l.r.i +. l.d.o }) in
+        let@ prs = Result.to_option (read_pairs ~env m train_pairs) in
+        if (* checking that the input model can parse the test inputs *)
+          let mi = m.Task_model.input_model in
+          List.for_all
+            (fun vi -> does_parse_value mi Expr.bindings0 vi)
+            test_inputs
+        then
+          let l = norm_dl_model_data prs in
+          let drsi, drso = split_pairs_read prs in
+          Some {r; m; prs; drsi; drso; dl_split=l;
+                lmd = (if pruning then l.m.io +. l.r.i +. l.d.o else l.md.io);
+                lrido = l.r.i +. l.d.o }
+        else None in
       let status =
         match state_opt with
         | Some state -> `Success (state.prs, state.drsi, state.drso, state.dl_split, state.lmd)

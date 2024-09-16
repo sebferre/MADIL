@@ -340,6 +340,11 @@ module Make (Domain : DOMAIN) =
         ~parseur
         ~dl_data
 
+    let does_parse_value =
+      Model.does_parse_value
+        ~input_of_value
+        ~parseur
+    
     let read =
       Model.read
         ~input_of_value
@@ -445,6 +450,7 @@ module Make (Domain : DOMAIN) =
       Learning.learn
         ~alpha:(!alpha)
         ~read_pairs
+        ~does_parse_value
         ~task_refinements
         ~task_prunings
         ~log_reading

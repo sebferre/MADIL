@@ -219,7 +219,8 @@ let print_learned_model
           ~refine_degree:(!max_refinements)
           ~search_temperature:(!search_temperature)
           ~env ~init_task_model
-          task.train)
+          task.train
+          (task.test |> List.map (fun pair -> pair.Task.input)))
   in
   match res with
   | Common.Exn exn ->
