@@ -5,7 +5,7 @@ let debug = ref false (* set to true to return all candidate refinements with ca
 
 exception No_local_parse
 exception Failed_postprocessing
-exception Alt_not_allowed
+exception Alt_not_allowed of int (* support *)
 exception Alt_cannot_be_pruned
 exception Cond_expr_not_valid
 
@@ -74,13 +74,19 @@ let inter_union_reads
             get_rs (read,data)) in
           List.fold_left (* union(refs, refs_read) *)
             (fun refs (r,varseq',new_data_res) ->
-              if Mymap.mem r refs
-              then refs
-              else
-                let best_read =
-                  let| new_data = new_data_res in
-                  Result.Ok {unselected_reads; matching = true; read; data; new_data} in
-                Mymap.add r (varseq', best_read) refs)
+              match Mymap.find_opt r refs with
+              | Some (_, best_read_res) ->
+                 (match best_read_res, new_data_res with
+                  | Result.Error _, Result.Ok new_data ->
+                     let new_best_read =
+                       {unselected_reads; matching = true; read; data; new_data} in
+                     Mymap.add r (varseq', Result.Ok new_best_read) refs
+                  | _ -> refs)
+              | None ->
+                 let best_read_res =
+                   let| new_data = new_data_res in
+                   Result.Ok {unselected_reads; matching = true; read; data; new_data} in
+                 Mymap.add r (varseq', best_read_res) refs)
             refs refs_read)
         Mymap.empty reads in
     alt_read, refs)
@@ -179,7 +185,7 @@ let make_alt_if_allowed_and_needed
     Myseq.return (m', varseq', Result.Ok best_reads')
   else (* alt not allowed *)
     if !debug
-    then Myseq.return (m_true, varseq, Result.Error Alt_not_allowed)
+    then Myseq.return (m_true, varseq, Result.Error (Alt_not_allowed supp))
     else Myseq.empty
 
 type ('typ,'value,'var,'constr,'func) refiner =
