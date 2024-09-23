@@ -402,11 +402,11 @@ let size_model_ast (* for DL computing, QUICK *)
          (if asd#is_default_constr c && args = [||] then 0 else 1)
          args
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Expr (t,e) -> Expr.size_expr_ast e
+    | Expr (t,e) -> 1 + Expr.size_expr_ast e (* simple refs have size 0 *)
     | Derived t -> 0 (* implicit, no information there *)
   and aux_cond = function
     | Undet _ -> 0
-    | BoolExpr e -> Expr.size_expr_ast e
+    | BoolExpr e -> 1 + Expr.size_expr_ast e
   in
   aux m
 
@@ -424,7 +424,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
        let nb = (* counting possible expressions *)
          let const_ok, ts1 = asd#expr_opt t in
          List.fold_left (* not sure this is best to sum over all ts1 if they share a lot *)
-           (fun nb t1 -> nb +. nb_expr_ast t1 size)
+           (fun nb t1 -> nb +. nb_expr_ast t1 (size - 1))
            nb ts1 in
        let nb = (* counting possible Any *)
          if size = size_any
@@ -455,7 +455,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
   and aux_cond (size : int) : float =
     if size = 0
     then 1. (* Undet *)
-    else nb_expr_ast typ_bool size (* BoolExpr *)
+    else nb_expr_ast typ_bool (size - 1) (* BoolExpr *)
   in
   aux, reset
 
