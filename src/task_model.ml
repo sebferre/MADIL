@@ -36,7 +36,7 @@ let xp_task_model
   xp_model ~html print m.output_model
 
 let size_task_model_ast
-      ~(asd : ('typ,'constr,'func) asd)
+      ~(asd : ('typ,'asd_typ,'constr,'func) asd)
       (m : ('typ,'value,'var,'constr,'func) task_model) : int =
   Model.size_model_ast ~asd m.input_model
   + Model.size_model_ast ~asd m.output_model
@@ -64,7 +64,7 @@ let read_pairs
       (pairs : 'value Task.pair list)
     : ('typ,'value,'constr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
-  let dl_mi, dl_mo = dl_task_model m in
+  let dl_mi, dl_mo = Common.prof "Task_model.read_pairs/dl_task_model" (fun () -> dl_task_model m) in
   let| inputs_reads_reads =
     pairs
     |> list_map_result

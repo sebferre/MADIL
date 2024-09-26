@@ -25,7 +25,7 @@ module type BASIC_TYPES =
     type func
     val xp_func : func html_xp
 
-    val asd : (typ,constr,func) Model.asd
+    val asd : (typ,typ,constr,func) Model.asd
 
     type generator_info
     type input
@@ -59,7 +59,7 @@ module type TYPES =
     type model = (typ,value,var,constr,func) Model.model
     val xp_model : model html_xp
 
-    type asd = (typ,constr,func) Model.asd
+    type asd = (typ,typ,constr,func) Model.asd
 
     type task_model = (typ,value,var,constr,func) Task_model.task_model
     val xp_task_model : task_model html_xp
@@ -120,7 +120,7 @@ module Defined_types (T : BASIC_TYPES) =
     type model = (typ,value,var,constr,func) Model.model
     let xp_model : model html_xp = Model.xp_model ~xp_value ~xp_var ~xp_any ~xp_pat ~xp_func
 
-    type asd = (typ,constr,func) Model.asd
+    type asd = (typ,typ,constr,func) Model.asd
 
     type task_model = (typ,value,var,constr,func) Task_model.task_model
     let xp_task_model : task_model html_xp = Task_model.xp_task_model ~xp_model

@@ -214,7 +214,7 @@ let refinements
       ~(max_expr_refinements_per_read : int)
       ~(max_expr_refinements_per_var : int)
       ~(max_refinements : int)
-      ~(asd : ('typ,'constr,'func) Model.asd)
+      ~(asd : ('typ,'abs_typ,'constr,'func) Model.asd)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)

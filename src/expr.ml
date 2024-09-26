@@ -593,17 +593,17 @@ let size_expr_ast (* for DL computing *)
   aux
 
 let nb_expr_ast (* for DL computing *)
-      ~(funcs : 'typ -> ('func * 'typ array) list)
-    : ('typ -> int -> float) * (unit -> unit) =
+      ~(funcs : 'asd_typ -> ('func * 'asd_typ array) list)
+    : ('asd_typ -> int -> float) * (unit -> unit) =
   let tab : ('typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let reset () = Hashtbl.clear tab in
-  let rec aux (k : 'typ) (size : int) : float =
+  let rec aux (k : 'asd_typ) (size : int) : float =
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
     | None -> (* QUICK *)
        let nb = (* counting Const and Ref *)
          if size = 0 then 1. (* Ref *)
-         else if size = 1 then 2. (* Const *)
+         else if size = 1 then 1. (* Const *)
          else 0. in
        let nb = (* counting Apply-s *)
          List.fold_left

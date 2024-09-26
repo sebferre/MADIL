@@ -185,11 +185,13 @@ let xp_path
 
 (* ASD *)
 
-class virtual ['typ,'constr,'func] asd =
+class virtual ['typ,'asd_typ,'constr,'func] asd =
   object (self)
+    method virtual abstract : 'typ -> 'asd_typ
     method virtual is_default_constr : 'constr -> bool
-    method virtual default_and_other_pats : 'typ -> 'constr option * ('constr * 'typ array) list (* omit derived arguments *)
-    method virtual funcs : 'typ -> ('func * 'typ array) list (* None when expressions not allowed for this type *)
+    method virtual default_and_other_pats : 'asd_typ -> 'constr option * ('constr * 'asd_typ array) list (* omit derived arguments *)
+    method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list (* None when expressions not allowed for this type *)
+    
     method virtual expr_opt : 'typ -> bool * 'typ list (* OK to produce constant values, and list of compatible types  *)
     method virtual alt_opt : 'typ -> bool
   end
@@ -391,7 +393,7 @@ let size_any = 1
 let size_alt = 3
   
 let size_model_ast (* for DL computing, QUICK *)
-      ~(asd : ('typ,'constr,'func) asd)
+      ~(asd : ('typ,'asd_typ,'constr,'func) asd)
     (m : ('typ,'value,'var,'constr,'func) model) : int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
@@ -412,50 +414,55 @@ let size_model_ast (* for DL computing, QUICK *)
 
 let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
       ~(typ_bool : 'typ)
-      ~(asd : ('typ,'constr,'func) asd)
-      ~(nb_expr_ast : 'typ -> int -> float) =
-  let tab : ('typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
+      ~(asd : ('typ,'asd_typ,'constr,'func) asd)
+      ~(nb_expr_ast : 'asd_typ -> int -> float) =
+  let tab : ('asd_typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let reset () = Hashtbl.clear tab in
   let rec aux (t : 'typ) (size : int) : float (* float to handle large numbers *) =
-    match Hashtbl.find_opt tab (t,size) with
+    let k = asd#abstract t in
+    match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
     | None -> (* QUICK *)
        let nb = 0. in
        let nb = (* counting possible expressions *)
          let const_ok, ts1 = asd#expr_opt t in
+         let ks1 =
+           ts1
+           |> List.map asd#abstract
+           |> List.sort_uniq Stdlib.compare in
          List.fold_left (* not sure this is best to sum over all ts1 if they share a lot *)
-           (fun nb t1 -> nb +. nb_expr_ast t1 (size - 1))
-           nb ts1 in
+           (fun nb k1 -> nb +. nb_expr_ast k1 (size - 1))
+           nb ks1 in
        let nb = (* counting possible Any *)
          if size = size_any
          then nb +. 1.
          else nb in
        let nb = (* counting possible alternatives *)
          if size >= size_alt && asd#alt_opt t
-         then nb +. sum_conv [aux_cond; aux t; aux t] (size - size_alt)
+         then nb +. sum_conv [aux_cond; aux k; aux k] (size - size_alt)
                              (* split between condition, left model, right model *)
          else nb in
        let nb = (* counting Pat (c,args) *)
-         let default_constr_opt, other_constr_args = asd#default_and_other_pats t in
+         let default_constr_opt, other_constr_args = asd#default_and_other_pats k in
          let nb =
            if size = 0 && default_constr_opt <> None
            then nb +. 1.
            else nb in
          List.fold_left
-           (fun nb (c,t_args) ->
-             if t_args = [||] (* leaf node *)
+           (fun nb (c,k_args) ->
+             if k_args = [||] (* leaf node *)
              then if size = 1 then nb +. 1. else nb
              else
                if size >= 1
-               then nb +. sum_conv (Array.to_list (Array.map aux t_args)) (size-1)
+               then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
            nb other_constr_args in
-       Hashtbl.add tab (t,size) nb;
+       Hashtbl.add tab (k,size) nb;
        nb
   and aux_cond (size : int) : float =
     if size = 0
     then 1. (* Undet *)
-    else nb_expr_ast typ_bool (size - 1) (* BoolExpr *)
+    else nb_expr_ast (asd#abstract typ_bool) (size - 1) (* BoolExpr *)
   in
   aux, reset
 
