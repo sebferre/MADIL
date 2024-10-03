@@ -188,9 +188,8 @@ let xp_path
 class virtual ['typ,'asd_typ,'constr,'func] asd =
   object (self)
     method virtual abstract : 'typ -> 'asd_typ
-    method virtual is_default_constr : 'constr -> bool
-    method virtual default_and_other_pats : 'asd_typ -> 'constr option * ('constr * 'asd_typ array) list (* omit derived arguments *)
-    method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list (* None when expressions not allowed for this type *)
+    method virtual pats : 'asd_typ -> ('constr * 'asd_typ array) list (* omit derived arguments *)
+    method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list
     
     method virtual expr_opt : 'typ -> bool * 'typ list (* OK to produce constant values, and list of compatible types  *)
     method virtual alt_opt : 'typ -> bool
@@ -399,7 +398,6 @@ let size_model_ast (* for DL computing, QUICK *)
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Any t -> size_any
     | Pat (t,c,args) ->
-       assert (not (asd#is_default_constr c));
        Array.fold_left
          (fun res arg -> res + aux arg)
          1 args
@@ -443,11 +441,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
                              (* split between condition, left model, right model *)
          else nb in
        let nb = (* counting Pat (c,args) *)
-         let default_constr_opt, other_constr_args = asd#default_and_other_pats k in
-         (* DEPRECATED let nb =
-           if size = 0 && default_constr_opt <> None
-           then nb +. 1.
-           else nb in *)
+         let constr_args = asd#pats k in
          List.fold_left
            (fun nb (c,k_args) ->
              let len = Array.length k_args in
@@ -457,7 +451,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
                if size >= 1 + len
                then nb +. sum_conv ~min_arg:1 (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
-           nb other_constr_args in
+           nb constr_args in
        Hashtbl.add tab (k,size) nb;
        nb
   and aux_cond (size : int) : float =
