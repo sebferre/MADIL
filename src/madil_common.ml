@@ -332,21 +332,25 @@ let xp_html_elt (tag : string) ?(classe : string = "") : (unit -> unit) html_xp 
 
 (* combinatorics *)
 
-let rec sum_conv (lf : (int -> float) list) (n : int) : float =
+let sum_conv ?(min_arg = 0) (lf : (int -> float) list) (n : int) : float =
   (* distributes [n] over functions in [lf], multiply results, sums over all distribs *)
+  (* assuming [f n] = 0. for n < min_arg, i.e. size of elements at least min_arg *)
   (* TODO: memoize recursive calls? *)
-  match lf with
-  | [] -> if n = 0 then 1. else 0.
-  | [f1] -> f1 n
-  | f1::lf1 ->
-     Common.fold_for
-       (fun n1 res ->
-         let card1 = f1 n1 in
-         let n' = n - n1 in
-         if card1 > 0.
-         then res +. card1 *. sum_conv lf1 n'
-         else res)
-       0 n 0.
+  let rec aux k lf n =
+    match lf with
+    | [] -> if n = 0 then 1. else 0.
+    | [f1] -> f1 n
+    | f1::lf2 ->
+       Common.fold_for
+         (fun n1 res ->
+           let card1 = f1 n1 in
+           if card1 > 0.
+           then res +. card1 *. aux (k - 1) lf2 (n - n1)
+           else res)
+         min_arg (n - (k - 1) * min_arg) 0.
+  in
+  let k = List.length lf in
+  aux k lf n
 
 let distribute (n : int) (lf : (int -> 'a Myseq.t) array) : 'a array Myseq.t =
   (* distributes [n] over functions in [lf] *)

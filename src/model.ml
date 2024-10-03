@@ -439,7 +439,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
          else nb in
        let nb = (* counting possible alternatives *)
          if size >= size_alt && asd#alt_opt t
-         then nb +. sum_conv [aux_cond; aux k; aux k] (size - size_alt)
+         then nb +. sum_conv ~min_arg:0 [aux_cond; aux k; aux k] (size - size_alt)
                              (* split between condition, left model, right model *)
          else nb in
        let nb = (* counting Pat (c,args) *)
@@ -454,7 +454,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
              then if size = 1 then nb +. 1. else nb
              else
                if size >= 1
-               then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
+               then nb +. sum_conv ~min_arg:1 (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
            nb other_constr_args in
        Hashtbl.add tab (k,size) nb;
@@ -504,7 +504,7 @@ let dl
     ~(nb_env_vars : int)
     (m : 'model) -> (* QUICK *)
   let size = size_model_ast m in
-  let t = typ m in    
+  let t = typ m in
   let nb = nb_model_ast t size in
   if not (nb > 0.) then ( (* as [m] has this size, the nb of AST of this size must not be zero *)
     Printf.printf "Failed assertion in Model.dl: size=%d\ttyp=" size;

@@ -612,7 +612,7 @@ let nb_expr_ast (* for DL computing *)
              then if size = 1 then nb +. 1. else nb
              else
                if size >= 1
-               then nb +. sum_conv (Array.to_list (Array.map aux k_args)) (size-1)
+               then nb +. sum_conv ~min_arg:0 (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
            nb (funcs k) in
        (* not yet counting Arg and Fun-s *)
@@ -620,7 +620,7 @@ let nb_expr_ast (* for DL computing *)
        nb
   in
   aux, reset
-  
+
 let dl_expr_params
       ~(dl_value : 'typ -> 'value -> dl)
       ~(dl_var : 'typ -> 'var -> dl)
