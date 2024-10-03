@@ -390,7 +390,7 @@ let dl_parse_rank (rank : int) : dl =
 (* model encoding *)
 
 let size_any = 1
-let size_alt = 3
+let size_alt = 2
   
 let size_model_ast (* for DL computing, QUICK *)
       ~(asd : ('typ,'asd_typ,'constr,'func) asd)
@@ -399,15 +399,15 @@ let size_model_ast (* for DL computing, QUICK *)
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Any t -> size_any
     | Pat (t,c,args) ->
+       assert (not (asd#is_default_constr c));
        Array.fold_left
          (fun res arg -> res + aux arg)
-         (if asd#is_default_constr c && args = [||] then 0 else 1)
-         args
+         1 args
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Expr (t,e) -> 1 + Expr.size_expr_ast e (* simple refs have size 0 *)
+    | Expr (t,e) -> Expr.size_expr_ast e
     | Derived t -> 0 (* implicit, no information there *)
   and aux_cond = function
-    | Undet _ -> 0
+    | Undet _ -> 1
     | BoolExpr e -> 1 + Expr.size_expr_ast e
   in
   aux m
@@ -431,36 +431,37 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
            |> List.map asd#abstract
            |> List.sort_uniq Stdlib.compare in
          List.fold_left (* not sure this is best to sum over all ts1 if they share a lot *)
-           (fun nb k1 -> nb +. nb_expr_ast k1 (size - 1))
+           (fun nb k1 -> nb +. nb_expr_ast k1 size)
            nb ks1 in
        let nb = (* counting possible Any *)
          if size = size_any
          then nb +. 1.
          else nb in
        let nb = (* counting possible alternatives *)
-         if size >= size_alt && asd#alt_opt t
-         then nb +. sum_conv ~min_arg:0 [aux_cond; aux k; aux k] (size - size_alt)
+         if size >= size_alt + 3 && asd#alt_opt t
+         then nb +. sum_conv ~min_arg:1 [aux_cond; aux k; aux k] (size - size_alt)
                              (* split between condition, left model, right model *)
          else nb in
        let nb = (* counting Pat (c,args) *)
          let default_constr_opt, other_constr_args = asd#default_and_other_pats k in
-         let nb =
+         (* DEPRECATED let nb =
            if size = 0 && default_constr_opt <> None
            then nb +. 1.
-           else nb in
+           else nb in *)
          List.fold_left
            (fun nb (c,k_args) ->
-             if k_args = [||] (* leaf node *)
+             let len = Array.length k_args in
+             if len = 0 (* leaf node *)
              then if size = 1 then nb +. 1. else nb
              else
-               if size >= 1
+               if size >= 1 + len
                then nb +. sum_conv ~min_arg:1 (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
            nb other_constr_args in
        Hashtbl.add tab (k,size) nb;
        nb
   and aux_cond (size : int) : float =
-    if size = 0
+    if size = 1
     then 1. (* Undet *)
     else nb_expr_ast (asd#abstract typ_bool) (size - 1) (* BoolExpr *)
   in

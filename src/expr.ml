@@ -582,7 +582,7 @@ let size_expr_ast (* for DL computing *)
     : ('typ,'value,'var,'func) expr -> int =
   let rec aux = function
     | Const (t,v) -> 1
-    | Ref (t,x) -> 0
+    | Ref (t,x) -> 1
     | Apply (t,f,args) ->
        Array.fold_left
          (fun res arg -> res + aux arg)
@@ -602,17 +602,17 @@ let nb_expr_ast (* for DL computing *)
     | Some nb -> nb
     | None -> (* QUICK *)
        let nb = (* counting Const and Ref *)
-         if size = 0 then 1. (* Ref *)
-         else if size = 1 then 1. (* Const *)
+         if size = 1 then 2. (* Const and Ref *)
          else 0. in
        let nb = (* counting Apply-s *)
          List.fold_left
            (fun nb (f,k_args) ->
-             if k_args = [||] (* leaf node *)
+             let len = Array.length k_args in
+             if len = 0 (* leaf node *)
              then if size = 1 then nb +. 1. else nb
              else
-               if size >= 1
-               then nb +. sum_conv ~min_arg:0 (Array.to_list (Array.map aux k_args)) (size-1)
+               if size >= 1 + len
+               then nb +. sum_conv ~min_arg:1 (Array.to_list (Array.map aux k_args)) (size-1)
                else nb)
            nb (funcs k) in
        (* not yet counting Arg and Fun-s *)
