@@ -483,25 +483,18 @@ let refinements
     if pruning then Myseq.empty
     else
     let t = Model.typ m in
-    match asd#expr_opt t with
-    | false, [] -> Myseq.empty (* no expression here *)
-    | const_ok, ts1 ->
+    if not (asd#expr_opt t) then Myseq.empty
+    else
        let allowed = asd#alt_opt t in
        aux_gen ctx m varseq selected_reads
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
            let v = Data.value data in
            let s_expr = (* index expressions evaluating to v *)
-             Myseq.interleave
-               (List.map
-                  (fun t1 ->
-                    Expr.Exprset.to_seq ~max_expr_size
-                      (Expr.Index.lookup (t1, v)
-                         (Model.force_index ~make_index read)))
-                  ts1) in
-           let s_expr = (* is v_tree a constant ndtree? *)
-             if const_ok
-             then Myseq.cons (Expr.Const (t,v)) s_expr
-             else s_expr in
+             Expr.Exprset.to_seq ~max_expr_size
+               (Expr.Index.lookup (t, v)
+                  (Model.force_index ~make_index read)) in
+           let s_expr = (* constant expressions *)
+             Myseq.cons (Expr.Const (t,v)) s_expr in
            s_expr
            |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
            |> Myseq.fold_left

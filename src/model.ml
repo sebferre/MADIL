@@ -191,8 +191,8 @@ class virtual ['typ,'asd_typ,'constr,'func] asd =
     method virtual pats : 'asd_typ -> ('constr * 'asd_typ array) list (* omit derived arguments *)
     method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list
     
-    method virtual expr_opt : 'typ -> bool * 'typ list (* OK to produce constant values, and list of compatible types  *)
-    method virtual alt_opt : 'typ -> bool
+    method virtual expr_opt : 'typ -> bool (* allow expressions on this type? *)
+    method virtual alt_opt : 'typ -> bool (* allow alternatives on this type? *)
   end
 
 (* model evaluation *)
@@ -423,14 +423,9 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
     | None -> (* QUICK *)
        let nb = 0. in
        let nb = (* counting possible expressions *)
-         let const_ok, ts1 = asd#expr_opt t in
-         let ks1 =
-           ts1
-           |> List.map asd#abstract
-           |> List.sort_uniq Stdlib.compare in
-         List.fold_left (* not sure this is best to sum over all ts1 if they share a lot *)
-           (fun nb k1 -> nb +. nb_expr_ast k1 size)
-           nb ks1 in
+         if asd#expr_opt t
+         then nb +. nb_expr_ast k size
+         else nb in
        let nb = (* counting possible Any *)
          if size = size_any
          then nb +. 1.
