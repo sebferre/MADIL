@@ -521,28 +521,86 @@ and ('typ,'value,'func) arg_spec =
   | `Val of 'typ * 'value
   | `Apply of 'typ * 'func * ('typ,'value,'func) arg_spec array ]
 
+let rec eval_arg_spec ~eval_func k v_args_k es_args_k = function
+  | `Pos i ->
+     if i>=0 && i < k
+     then Result.Ok (v_args_k.(i), es_args_k.(i))
+     else failwith "Expr.index_apply_functions: invalid position in args_spec"
+  | `Val (t,v) ->
+     Result.Ok (v, Exprset.value t v)
+  | `Apply (t,f,arg_spec_ar) ->
+     let| v_ar, es_ar = eval_arg_spec_ar ~eval_func k v_args_k es_args_k arg_spec_ar in
+     let| v = eval_func f v_ar in
+     let es = Exprset.add_apply f es_ar (Exprset.empty t) in
+     Result.Ok (v,es)
+and eval_arg_spec_ar ~eval_func k v_args_k es_args_k arg_spec_ar =
+  let| ar = array_map_result (eval_arg_spec ~eval_func k v_args_k es_args_k) arg_spec_ar in
+  Result.Ok (Array.split ar)
+
+
+let index_apply_functions_1
+      ~(eval_func : 'func -> 'value array -> 'value result)
+      index
+      (get_functions : 'typ -> 'value -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
+    : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
+  let res = index in (* index as initial result *)
+  Index.fold
+    (fun (t1,v1) es1 res ->
+      get_functions t1 v1
+      |> List.fold_left
+           (fun res (t,f,args_spec) ->
+             let vfes_res =
+               let| v_args, es_args =
+                 match args_spec with
+                 | `Default -> Result.Ok ([|v1|], [|es1|])
+                 | `Custom ar -> eval_arg_spec_ar ~eval_func 1 [|v1|] [|es1|] ar in
+               let| v = eval_func f v_args in
+               Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
+             match vfes_res with
+             | Result.Ok (v,f,es_args) -> Index.bind_apply (t,v) f es_args res
+             | Result.Error _ -> res)
+           res)
+    index (* iterating on index *)
+    res
+
+let index_apply_functions_2
+      ~(eval_func : 'func -> 'value array -> 'value result)
+      index
+      (filter_1 : 'typ * 'value -> bool)
+      (get_functions : 'typ -> 'value -> 'typ -> 'value -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
+    : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
+  let res = index in (* index as initial result *)
+  Index.fold
+    (fun (t1,v1 as tv1) es1 res ->
+      if filter_1 tv1
+      then
+        Index.fold
+          (fun (t2,v2) es2 res ->
+            get_functions t1 v1 t2 v2
+            |> List.fold_left
+                 (fun res (t,f,args_spec) ->
+                   let vfes_res =
+                     let| v_args, es_args =
+                       match args_spec with
+                       | `Default -> Result.Ok ([|v1;v2|], [|es1;es2|])
+                       | `Custom ar -> eval_arg_spec_ar ~eval_func 2 [|v1;v2|] [|es1;es2|] ar in
+                     let| v = eval_func f v_args in
+                     Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
+                   match vfes_res with
+                   | Result.Ok (v,f,es_args) -> Index.bind_apply (t,v) f es_args res
+                   | Result.Error _ -> res)
+                 res)
+          index res
+      else res)
+    index (* iterating on index *)
+    res
+
 let index_apply_functions
       ~(eval_func : 'func -> 'value array -> 'value result)
       index
       (max_arity : int)
       (get_functions : 'typ array * 'value array -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
     : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
-  let rec eval_arg_spec k v_args_k es_args_k = function
-    | `Pos i ->
-       if i>=0 && i < k
-       then Result.Ok (v_args_k.(i), es_args_k.(i))
-       else failwith "Expr.index_apply_functions: invalid position in args_spec"
-    | `Val (t,v) ->
-       Result.Ok (v, Exprset.value t v)
-    | `Apply (t,f,arg_spec_ar) ->
-       let| v_ar, es_ar = eval_arg_spec_ar k v_args_k es_args_k arg_spec_ar in
-       let| v = eval_func f v_ar in
-       let es = Exprset.add_apply f es_ar (Exprset.empty t) in
-       Result.Ok (v,es)
-  and eval_arg_spec_ar k v_args_k es_args_k arg_spec_ar =
-    let| ar = array_map_result (eval_arg_spec k v_args_k es_args_k) arg_spec_ar in
-    Result.Ok (Array.split ar)
-  in
   let args_k =
     Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
       (fun k -> (* three undefined arrays for types, values, and exprsets *)
@@ -560,7 +618,7 @@ let index_apply_functions
                let| v_args, es_args =
                  match args_spec with
                  | `Default -> Result.Ok (v_args_k, es_args_k)
-                 | `Custom ar -> eval_arg_spec_ar k v_args_k es_args_k ar in
+                 | `Custom ar -> eval_arg_spec_ar ~eval_func k v_args_k es_args_k ar in
                let| v = eval_func f v_args in
                Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
              match vfes_res with
