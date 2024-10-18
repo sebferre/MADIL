@@ -302,10 +302,12 @@ let learn
           ('var,'typ,'value) Expr.bindings ->
           'value -> bool)
       ~(task_refinements :
+          include_expr:bool ->
           'task_model -> 'pairs_reads ->
           (('typ,'value,'constr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
           ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model result) Myseq.t)
       ~(task_prunings :
+          include_expr:bool ->
           'task_model -> 'reads ->
           ('refinement * 'task_model result) Myseq.t)
       ~(log_reading :
@@ -394,7 +396,7 @@ let learn
                then Some state1
                else None)
           (Common.prof "Learning.task_refinements" (fun () ->
-               task_refinements state.m state.prs state.drsi state.drso)) in
+               task_refinements ~include_expr:true state.m state.prs state.drsi state.drso)) in
       if lstate1 = [] (* no compressive refinement *)
       then (
         (* adding jump_ostates as continuations *)
@@ -481,7 +483,7 @@ let learn
              then Some state1
              else None)
         (Common.prof "Learning.task_prunings" (fun () ->
-             task_prunings state.m state.drsi)) in
+             task_prunings ~include_expr:true state.m state.drsi)) in
     let lstate1 =
       List.sort
         (fun state1 state2 ->
