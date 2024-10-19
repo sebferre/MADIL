@@ -377,7 +377,7 @@ let refinements
                  | _ -> assert false)
                 selected_reads in
             aux ctx2 m2 varseq sel2) ]        
-    | Model.Expr (k, Expr.Const (t,v)) ->
+    | Model.Expr (Expr.Const (t,v)) ->
        if pruning (* pruning constants *)
        then
          aux_gen ctx m varseq selected_reads
@@ -393,9 +393,9 @@ let refinements
          |> Myseq.filter
               (fun (p,m',varseq',supp,dl') ->
                 match m' with
-                | Model.Expr (_, Expr.Const _) -> false
+                | Model.Expr (Expr.Const _) -> false
                 | _ -> true)
-    | Model.Expr (k,e) -> Myseq.empty
+    | Model.Expr e -> Myseq.empty
     | Model.Derived t -> Myseq.empty)
   and aux_decomp ctx t m varseq selected_reads =
     let p = List.rev ctx in

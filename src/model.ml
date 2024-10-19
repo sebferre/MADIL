@@ -11,7 +11,7 @@ type ('typ,'value,'var,'constr,'func) model =
   | Any of 'typ
   | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Alt of 'var (* condition var *) * ('typ,'value,'var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
-  | Expr of 'typ * ('typ,'value,'var,'func) Expr.expr
+  | Expr of ('typ,'value,'var,'func) Expr.expr
   | Derived of 'typ (* derived value, in general from sibling pattern args, like an implicit expression *)
 
 type ('var,'constr) path = ('var,'constr) path_step list
@@ -31,8 +31,8 @@ let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) mod
   Pat (t,c,args)
 let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Alt (xc,cond,m1,m2)
-let make_expr t e = Expr (t,e)
-let make_expr_const t v = Expr (t, Expr.Const (t, v))
+let make_expr t e = Expr e
+let make_expr_const t v = Expr (Expr.Const (t, v))
 let make_derived t = Derived t
 
 let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
@@ -45,7 +45,7 @@ let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Any t -> t
   | Pat (t,c,args) -> t
   | Alt (xc,c,m1,m2) -> typ m1
-  | Expr (t,e) -> t
+  | Expr e -> Expr.typ e
   | Derived t -> t
 
 let rec fold (f : 'a -> 'model -> 'a) (acc : 'a) (m : 'model) : 'a =
@@ -58,7 +58,7 @@ let rec fold (f : 'a -> 'model -> 'a) (acc : 'a) (m : 'model) : 'a =
      let acc = fold f acc m1 in
      let acc = fold f acc m2 in
      acc
-  | Expr (t,e) -> acc
+  | Expr e -> acc
   | Derived t -> acc
 
 (* printing *)
@@ -123,9 +123,9 @@ let xp_model
                print#string " ";
                aux ~html ~prio_ctx:2 print m2))
       
-    | Expr (_, Expr.Const (_,v)) ->
+    | Expr (Expr.Const (_,v)) ->
        xp_value ~html print v
-    | Expr (_t,e) ->
+    | Expr e ->
        xp_html_elt "span" ~classe:"model-expr" ~html print
          (fun () ->
            Expr.xp_expr ~xp_value ~xp_var ~xp_func ~html print e)
@@ -214,7 +214,7 @@ let binding_vars
        let acc = aux m1 acc in
        let acc = aux m2 acc in
        Mymap.add xc typ_bool acc
-    | Expr (t,e) -> acc
+    | Expr e -> acc
     | Derived t -> acc
   in
   aux m0 Mymap.empty
@@ -299,7 +299,7 @@ let generator (* on evaluated models: no expr, no def *)
            if b
            then gen_b_d1 1.
            else gen_b_d2 1.)
-    | Expr (t,e) ->
+    | Expr e ->
        let* v = Myseq.from_result (eval_expr e bindings) in
        generator_value v info
     | Derived t ->
@@ -350,7 +350,7 @@ let parseur (* on evaluated models: no expr, no def *)
            if b
            then seq1 1.
            else seq2 1.)                
-    | Expr (t,e) ->
+    | Expr e ->
        let* v = Myseq.from_result (eval_expr e bindings) in
        parseur_value v input
     | Derived t ->
@@ -402,7 +402,7 @@ let size_model_ast (* for DL computing, QUICK *)
          (fun res arg -> res + aux arg)
          1 args
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
-    | Expr (t,e) -> Expr.size_expr_ast e
+    | Expr e -> Expr.size_expr_ast e
     | Derived t -> 0 (* implicit, no information there *)
   and aux_cond = function
     | Undet _ -> 1
@@ -474,7 +474,7 @@ let dl_model_params
        dl_constr_params t c +. dl_args_params
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
-    | Expr (t,e) -> dl_expr_params e
+    | Expr e -> dl_expr_params e
     | Derived t -> 0.
   and aux_cond = function
     | Undet prob -> Mdl.Code.uniform 10 (* bounding float precision, TODO: use better distrib *)
