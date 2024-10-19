@@ -3,7 +3,7 @@ open Madil_common
 
 type ('value,'constr) data = (* data according to model, must be self-contained for encoding *)
   | DAny of 'value * 'value (* bare value, and an enriched form of value often coming with some range constraint for DL computing *)
-  | DPat of 'value * 'constr * ('value,'constr) data array
+  | DPat of 'value * 'constr * 'value array * ('value,'constr) data array
   | DAlt of float (* prob *) * bool * ('value,'constr) data (* the bool indicates which branch was chosen *)
   | DExpr of 'value (* computed value *)
 
@@ -12,20 +12,20 @@ type ('value,'constr) data = (* data according to model, must be self-contained 
 let rec value (d : ('value,'constr) data) : 'value =
   match d with
   | DAny (v,_) -> v
-  | DPat (v,_,_) -> v
+  | DPat (v,_,_,_) -> v
   | DAlt (prob,b,d) -> value d
   | DExpr v -> v (* TODO: consider including the expression *)
 
 let make_dany (value : 'value) (value_range : 'value) : ('value,'constr) data =
   DAny (value, value_range)
-let make_dpat (value : 'value) (c : 'constr) (args : ('value,'constr) data array) : ('value,'constr) data =
-  DPat (value, c, args)
+let make_dpat (value : 'value) (c : 'constr) ?(src : 'value array = [||]) (args : ('value,'constr) data array) : ('value,'constr) data =
+  DPat (value, c, src, args)
 let make_dexpr (value : 'value) : ('value,'constr) data =
   DExpr value
           
 let xp_data
       ~(xp_value : 'value html_xp)
-      ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
+      ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp array -> unit html_xp)
     : ('value,'constr) data html_xp =
   let rec aux ~prio_ctx ~html print d =
     match d with
@@ -33,12 +33,16 @@ let xp_data
        xp_html_elt "span" ~classe:"data-any" ~html print
          (fun () ->
            xp_value ~html print v_r)
-    | DPat (_v,c,args) ->
+    | DPat (_v,c,src,args) ->
+       let xp_src =
+         Array.map
+           (fun v -> (fun ~html print () -> xp_value ~html print v))
+           src in
        let xp_args =
          Array.map
            (fun arg -> (fun ~html print () -> aux ~prio_ctx:0 ~html print arg))
            args in
-       xp_pat c xp_args ~html print ()
+       xp_pat c xp_src xp_args ~html print ()
     | DAlt (_prob,b,d12) ->
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
          (fun () ->

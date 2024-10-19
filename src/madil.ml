@@ -19,7 +19,7 @@ module type BASIC_TYPES =
 
     type constr
     val xp_any : typ -> unit html_xp
-    val xp_pat : constr -> unit html_xp array -> unit html_xp
+    val xp_pat : constr -> unit html_xp array -> unit html_xp array -> unit html_xp
     val xp_field : (constr * int) html_xp
 
     type func
@@ -142,11 +142,11 @@ module Defined_types (T : BASIC_TYPES) =
 
     class type cconstr = (* class definition of a constr *)
       object
-        method xp_pat : unit html_xp array -> unit html_xp
+        method xp_pat : unit html_xp array -> unit html_xp array -> unit html_xp
         method xp_field : int html_xp
-        method generator_pat : typ -> generator array -> generator
-        method parseur_pat : typ -> parseur array -> parseur
-        method encoding_pat : encoding array -> encoding
+        method generator_pat : typ -> value array -> generator array -> generator
+        method parseur_pat : typ -> value array -> parseur array -> parseur
+        method encoding_pat : value array -> encoding array -> encoding
         method dl_params : typ -> dl
         method refinements_pat : env_vars:binding_vars -> typ -> model array -> varseq -> value -> (model * varseq) list
         method prunings_pat : env_vars:binding_vars -> typ -> model array -> varseq -> value -> (model * varseq) list
@@ -204,17 +204,17 @@ module type DOMAIN =
 
     val generator_value : value -> generator
     val generator_any : typ -> generator
-    val generator_pat : typ -> constr -> generator array -> generator
+    val generator_pat : typ -> constr -> value array -> generator array -> generator
 
     val input_of_value : typ -> value -> input
     val parseur_value : value -> parseur
     val parseur_any : typ -> parseur
-    val parseur_pat : typ -> constr -> parseur array -> parseur
+    val parseur_pat : typ -> constr -> value array -> parseur array -> parseur
 
     (* description lengths *)
 
     val encoding_dany : value -> encoding
-    val encoding_dpat : constr -> encoding array -> encoding
+    val encoding_dpat : constr -> value array -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_expr_value : value -> encoding
     val dl_of_encoding : encoding -> dl

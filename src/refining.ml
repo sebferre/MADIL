@@ -322,7 +322,7 @@ let refinements
           aux_expr ctx m varseq selected_reads;
           aux_any_pat ctx m varseq t (refinements_any ~env_vars t) selected_reads;
           aux_decomp ctx t m varseq selected_reads]
-    | Model.Pat (t,c,args) ->
+    | Model.Pat (t,c,src,args) ->
        Myseq.interleave
          (aux_const ctx m varseq selected_reads
           :: aux_expr ctx m varseq selected_reads
@@ -334,7 +334,7 @@ let refinements
                    aux ctxi mi varseq
                      (map_reads
                         (fun read -> function
-                         | Data.DPat (_, dc, args) ->
+                         | Data.DPat (_, _c, _vsrc, args) ->
                             assert (i >= 0 && i < Array.length args);
                             args.(i)
                          | _ -> assert false)
@@ -442,7 +442,7 @@ let refinements
       (List.map
          (fun (m', varseq', selected_reads'_res) ->
     match m', selected_reads'_res with
-    | Model.Pat (_t, c, args), Result.Ok selected_reads' ->
+    | Model.Pat (_t, c, src, args), Result.Ok selected_reads' ->
        let dl_m' = dl_model ~nb_env_vars m' in
        let n = Array.length args in
        Myseq.interleave
@@ -457,7 +457,7 @@ let refinements
                  let selected_reads_i =
                    map_reads
                      (fun read -> function
-                      | Data.DPat (_,_c,dargs) ->
+                      | Data.DPat (_, _c, _src, dargs) ->
                          assert (Array.length dargs = n);
                          dargs.(i)
                       | _ -> assert false)
@@ -471,7 +471,7 @@ let refinements
                  let m' =
                    let args' = Array.copy args in
                    args'.(i) <- m'_i;
-                   Model.make_pat t c args' in
+                   Model.make_pat t c ~src args' in
                  let dl'_res = (* adding extra-cost of decomposition on model, assuming no cost on data *)
                    let| dl'_i = dl'_i_res in
                    Result.Ok (dl'_i -. dl_m +. dl_m') in
@@ -495,7 +495,7 @@ let refinements
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_const/get_rs" (fun () ->
            let v = Data.value data in
            let e = Expr.Const (t,v) in
-           let me = Model.make_expr t e in
+           let me = Model.make_expr e in
            let data' = Data.make_dexpr v in
            [(me, varseq, Result.Ok data')]))
          (fun m' -> m')
@@ -543,7 +543,7 @@ let refinements
            |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
            |> Myseq.fold_left
                 (fun refs e ->
-                  let me = Model.make_expr t e in
+                  let me = Model.make_expr e in
                   let data' = Data.make_dexpr v in
                   (me, varseq, Result.Ok data')::refs)
                 []))

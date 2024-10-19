@@ -9,7 +9,7 @@ type ('typ,'value,'var,'func) cond_model =
 type ('typ,'value,'var,'constr,'func) model =
   | Def of 'var * ('typ,'value,'var,'constr,'func) model (* a var is an id for the value at this sub-model *)
   | Any of 'typ
-  | Pat of 'typ * 'constr * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
+  | Pat of 'typ * 'constr * ('typ,'value,'var,'func) Expr.expr array * ('typ,'value,'var,'constr,'func) model array (* constr type may be different from data constr *)
   | Alt of 'var (* condition var *) * ('typ,'value,'var,'func) cond_model * ('typ,'value,'var,'constr,'func) model * ('typ,'value,'var,'constr,'func) model
   | Expr of ('typ,'value,'var,'func) Expr.expr
   | Derived of 'typ (* derived value, in general from sibling pattern args, like an implicit expression *)
@@ -27,11 +27,11 @@ let make_def (x : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'v
   Def (x,m1)
 let make_any (t : 't) : ('typ,'value,'var,'constr,'func) model =
   Any t
-let make_pat (t : 't) (c : 'constr) (args : ('typ,'value,'var,'constr,'func) model array) : ('typ,'value,'var,'constr,'func) model =
-  Pat (t,c,args)
+let make_pat (t : 't) (c : 'constr) ?(src = [||]) (args : ('typ,'value,'var,'constr,'func) model array) : ('typ,'value,'var,'constr,'func) model =
+  Pat (t,c,src,args)
 let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
   Alt (xc,cond,m1,m2)
-let make_expr t e = Expr e
+let make_expr e = Expr e
 let make_expr_const t v = Expr (Expr.Const (t, v))
 let make_derived t = Derived t
 
@@ -43,7 +43,7 @@ let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,
 let rec typ : ('typ,'value,'var,'constr,'func) model -> 'typ = function
   | Def (x,m1) -> typ m1
   | Any t -> t
-  | Pat (t,c,args) -> t
+  | Pat (t,c,src,args) -> t
   | Alt (xc,c,m1,m2) -> typ m1
   | Expr e -> Expr.typ e
   | Derived t -> t
@@ -53,7 +53,7 @@ let rec fold (f : 'a -> 'model -> 'a) (acc : 'a) (m : 'model) : 'a =
   match m with
   | Def (x,m1) -> fold f acc m1
   | Any t -> acc
-  | Pat (t,c,args) -> Array.fold_left (fold f) acc args
+  | Pat (t,c,src,args) -> Array.fold_left (fold f) acc args
   | Alt (xc,c,m1,m2) ->
      let acc = fold f acc m1 in
      let acc = fold f acc m2 in
@@ -67,7 +67,7 @@ let xp_model
       ~(xp_value : 'value html_xp)
       ~(xp_var : 'var html_xp)
       ~(xp_any : 'typ -> unit html_xp)
-      ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp)
+      ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp array -> unit html_xp)
       ~(xp_func : 'func html_xp)
     : ('typ,'value,'var,'constr,'func) model html_xp =
   let rec aux ~prio_ctx ~html print m =
@@ -81,12 +81,17 @@ let xp_model
        xp_html_elt "span" ~classe:"model-any" ~html print
          (fun () ->
            xp_any t ~html print ())
-    | Pat (_t,c,args) ->
+    | Pat (_t,c,src,args) ->
+       let xp_src =
+         Array.map
+           (fun e -> (fun ~html print () ->
+              Expr.xp_expr ~xp_value ~xp_var ~xp_func ~html print e))
+           src in
        let xp_args =
          Array.map
            (fun arg -> (fun ~html print () -> aux ~prio_ctx:0 ~html print arg))
            args in
-       xp_pat c xp_args ~html print ()
+       xp_pat c xp_src xp_args ~html print ()
 
     | Alt (xc, Undet prob, m1, m2) -> (* m1 | m2 *)
        xp_brackets_prio ~prio_ctx ~prio:2 ~html print
@@ -188,7 +193,7 @@ let xp_path
 class virtual ['typ,'asd_typ,'constr,'func] asd =
   object (self)
     method virtual abstract : 'typ -> 'asd_typ
-    method virtual pats : 'asd_typ -> ('constr * 'asd_typ array) list (* omit derived arguments *)
+    method virtual pats : 'asd_typ -> ('constr * 'asd_typ array * 'asd_typ array) list (* omit derived arguments *)
     method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list (* omit constant args (relative to make_index), repeat functions for different const-related modes *)
     
     method virtual expr_opt : 'typ -> bool (* allow expressions on this type? *)
@@ -208,7 +213,7 @@ let binding_vars
        let acc = aux m1 acc in
        Mymap.add x t acc
     | Any t -> acc
-    | Pat (t,c,args) ->
+    | Pat (t,c,src,args) ->
        Array.fold_right aux args acc
     | Alt (xc,cond,m1,m2) ->
        let acc = aux m1 acc in
@@ -233,7 +238,7 @@ let get_bindings  (* QUICK *)
        let v = Data.value d in
        Mymap.add x (t1,v) acc
     | Any t, _ -> acc
-    | Pat (t,c,args), DPat (_v, _c, dargs) ->
+    | Pat (t,c,src,args), DPat (_v, _c, _src, dargs) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
        let ref_acc = ref acc in (* missing Array.fold_right2 *)
@@ -263,7 +268,7 @@ let generator (* on evaluated models: no expr, no def *)
       ~(bool_of_value : 'value -> bool result)
       ~(generator_value : 'value -> 'gen)
       ~(generator_any : 'typ -> 'gen)
-      ~(generator_pat : 'typ -> 'constr -> (('info,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
+      ~(generator_pat : 'typ -> 'constr -> 'value array -> (('info,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> 'gen =
   fun m bindings info ->
   let rec gen m info =
@@ -272,9 +277,10 @@ let generator (* on evaluated models: no expr, no def *)
        gen m1 info
     | Any t ->
        generator_any t info
-    | Pat (t,c,args) ->
+    | Pat (t,c,src,args) ->
+       let* vsrc = Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
        let gen_args = Array.map gen args in
-       generator_pat t c gen_args info
+       generator_pat t c vsrc gen_args info
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
          let* d1, info = gen m1 info in
@@ -316,7 +322,7 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(bool_of_value : 'value -> bool result)
       ~(parseur_value : 'value -> 'parse)
       ~(parseur_any : 'typ -> 'parse)
-      ~(parseur_pat : 'typ -> 'constr -> 'parse array -> 'parse)
+      ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'parse array -> 'parse)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('input,'var,'typ,'value,'constr) parseur as 'parse) =
   fun m bindings input ->
   let rec parse m input =
@@ -325,9 +331,10 @@ let parseur (* on evaluated models: no expr, no def *)
        parse m1 input
     | Any t ->
        parseur_any t input
-    | Pat (t,c,args) ->
+    | Pat (t,c,src,args) ->
+       let* vsrc =  Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
        let parse_args = Array.map parse args in
-       parseur_pat t c parse_args input
+       parseur_pat t c vsrc parse_args input
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
          let* d1, input = parse m1 input in
@@ -362,16 +369,16 @@ let parseur (* on evaluated models: no expr, no def *)
 
 let dl_data
       ~(encoding_dany : 'value -> 'encoding)
-      ~(encoding_dpat : 'constr -> 'encoding array -> 'encoding)
+      ~(encoding_dpat : 'constr -> 'value array -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_expr_value : 'value -> 'encoding) (* DL = 0 *)
       ~(dl_of_encoding : 'encoding -> dl)
     : (('value,'constr) data as 'data) -> dl = (* QUICK *)
   let rec aux = function
     | DAny (_, v_r) -> encoding_dany v_r
-    | DPat (_, dc, dargs) ->
+    | DPat (_, c, vsrc, dargs) ->
        let encs = Array.map aux dargs in
-       encoding_dpat dc encs
+       encoding_dpat c vsrc encs
     | DAlt (prob,b,d12) ->
        let dl_choice = Mdl.Code.usage prob in
        let enc12 = aux d12 in
@@ -397,10 +404,17 @@ let size_model_ast (* for DL computing, QUICK *)
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
     | Any t -> size_any
-    | Pat (t,c,args) ->
-       Array.fold_left
-         (fun res arg -> res + aux arg)
-         1 args
+    | Pat (t,c,src,args) ->
+       let size = 1 in (* pattern *)
+       let size = (* src exprs *)
+         Array.fold_left
+           (fun res e -> res + Expr.size_expr_ast e)
+           size src in
+       let size = (* arg models *)
+         Array.fold_left
+           (fun res arg -> res + aux arg)
+           size args in
+       size
     | Alt (xc,c,m1,m2) -> size_alt + aux_cond c + aux m1 + aux m2
     | Expr e -> Expr.size_expr_ast e
     | Derived t -> 0 (* implicit, no information there *)
@@ -438,13 +452,20 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
        let nb = (* counting Pat (c,args) *)
          let constr_args = asd#pats k in
          List.fold_left
-           (fun nb (c,k_args) ->
-             let len = Array.length k_args in
+           (fun nb (c,k_src,k_args) ->
+             let len_src = Array.length k_src in
+             let len_args = Array.length k_args in
+             let len = len_src + len_args in
              if len = 0 (* leaf node *)
              then if size = 1 then nb +. 1. else nb
              else
                if size >= 1 + len
-               then nb +. sum_conv ~min_arg:1 (Array.to_list (Array.map aux k_args)) (size-1)
+               then nb +. sum_conv ~min_arg:1
+                            (Array.to_list
+                               (Array.append
+                                  (Array.map nb_expr_ast k_src)
+                                  (Array.map aux k_args)))
+                            (size-1)
                else nb)
            nb constr_args in
        Hashtbl.add tab (k,size) nb;
@@ -467,11 +488,14 @@ let dl_model_params
   let rec aux = function
     | Def (x,m1) -> aux m1 (* variable names do not matter, only variable choice in expr matters *)
     | Any t -> 0.
-    | Pat (t,c,args) ->
+    | Pat (t,c,src,args) ->
+       let dl_src_params =
+         Array.map dl_expr_params src
+         |> Array.fold_left (+.) 0. in
        let dl_args_params =
          Array.map aux args
          |> Array.fold_left (+.) 0. in
-       dl_constr_params t c +. dl_args_params
+       dl_constr_params t c +. dl_src_params +. dl_args_params
     | Alt (xc,c,m1,m2) ->
        aux_cond c +. aux m1 +. aux m2
     | Expr e -> dl_expr_params e
@@ -631,10 +655,10 @@ let refine (* replace submodel of [m] at [p] by [r] *)
     | _, Def (x,m1) ->
        let new_m1 = aux p r m1 in
        Def (x,new_m1)
-    | Field (c,i) :: p1, Pat (t,c',args) when c = c' && i < Array.length args ->
+    | Field (c,i) :: p1, Pat (t,c',src,args) when c = c' && i < Array.length args ->
        let new_args = Array.copy args in
        new_args.(i) <- aux p1 r args.(i);
-       Pat (t, c, new_args)
+       Pat (t, c, src, new_args)
     | Branch true :: p1, Alt (xc,c,m1,m2) ->
        let new_m1 = aux p1 r m1 in
        Alt (xc,c,new_m1,m2)
