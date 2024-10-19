@@ -189,7 +189,7 @@ class virtual ['typ,'asd_typ,'constr,'func] asd =
   object (self)
     method virtual abstract : 'typ -> 'asd_typ
     method virtual pats : 'asd_typ -> ('constr * 'asd_typ array) list (* omit derived arguments *)
-    method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list
+    method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list (* omit constant args (relative to make_index), repeat functions for different const-related modes *)
     
     method virtual expr_opt : 'typ -> bool (* allow expressions on this type? *)
     method virtual alt_opt : 'typ -> bool (* allow alternatives on this type? *)

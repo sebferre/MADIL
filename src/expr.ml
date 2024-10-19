@@ -651,7 +651,10 @@ let size_expr_ast (* for DL computing *)
     | Ref (t,x) -> 1
     | Apply (t,f,args) ->
        Array.fold_left
-         (fun res arg -> res + aux arg)
+         (fun res arg ->
+           match arg with
+           | Const _ -> res (* const arg considered as function param *)
+           | _ -> res + aux arg)
          1 args
     | Arg t -> 1
     | Fun (t,e1) -> 1 + aux e1
@@ -667,8 +670,9 @@ let nb_expr_ast (* for DL computing *)
     match Hashtbl.find_opt tab (k,size) with
     | Some nb -> nb
     | None -> (* QUICK *)
-       let nb = (* counting Const and Ref *)
-         if size = 1 then 2. (* Const and Ref *)
+       (* Const args considered as function params, must be taken into account by 'func' *)
+       let nb = (* counting Ref *)
+         if size = 1 then 1. (* Ref *)
          else 0. in
        let nb = (* counting Apply-s *)
          List.fold_left
@@ -683,9 +687,13 @@ let nb_expr_ast (* for DL computing *)
            nb (funcs k) in
        (* not yet counting Arg and Fun-s *)
        Hashtbl.add tab (k,size) nb;
-       nb
+       nb in
+  let main k size =
+    if size = 1
+    then 2. (* Const and Ref *)
+    else aux k size (* Apply expression, assuming no 0-ary func *)
   in
-  aux, reset
+  main, reset
 
 let dl_expr_params
       ~(dl_value : 'typ -> 'value -> dl)
