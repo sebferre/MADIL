@@ -223,10 +223,11 @@ let refinements
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ('input,'var,'typ,'value,'constr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
-      ~(decompositions : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
+      ~(decompositions : 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
-      ~(refinements_any : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
-      ~(refinements_pat : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
+      ~(refinements_any : 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
+      ~(refinements_pat : 'typ -> 'constr -> 'model array -> ('var Myseq.t as 'varseq) -> 'value -> ('model * 'varseq) list) (* refined submodel with remaining fresh vars *)
+      ~(refinements_pat_expr : env_vars:('var,'typ) Expr.binding_vars -> 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
       ~(postprocessing : 'typ -> 'model -> 'model -> supp:int -> nb:int -> alt:bool -> 'best_read list
                          -> ('model * 'best_read list) Myseq.t) (* converting refined submodel, alt mode (true if partial match), support, and best reads to a new model and corresponding new data *)
     : ('typ,'value,'var,'constr,'func) refiner =
@@ -320,13 +321,15 @@ let refinements
        Myseq.interleave
          [aux_const ctx m varseq selected_reads;
           aux_expr ctx m varseq selected_reads;
-          aux_any_pat ctx m varseq t (refinements_any ~env_vars t) selected_reads;
+          aux_any_pat ctx m varseq t (refinements_any t) selected_reads;
+          aux_any_pat ctx m varseq t (refinements_pat_expr ~env_vars t) selected_reads;
           aux_decomp ctx t m varseq selected_reads]
     | Model.Pat (t,c,src,args) ->
        Myseq.interleave
          (aux_const ctx m varseq selected_reads
           :: aux_expr ctx m varseq selected_reads
-          :: aux_any_pat ctx m varseq t (refinements_pat ~env_vars t c args) selected_reads
+          :: aux_any_pat ctx m varseq t (refinements_pat t c args) selected_reads
+          :: aux_any_pat ctx m varseq t (refinements_pat_expr ~env_vars t) selected_reads
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
@@ -344,7 +347,6 @@ let refinements
     | Model.Alt (xc,c,m1,m2) ->
        Myseq.interleave
          [ aux_const ctx m varseq selected_reads;
-
            aux_expr ctx m varseq selected_reads;
        
            (match c with
@@ -410,7 +412,7 @@ let refinements
             example)
         selected_reads in
     let refs =
-      decompositions ~env_vars t varseq vss
+      decompositions t varseq vss
       |> List.fold_left
            (fun refs (m',varseq') ->
              let selected_reads' =

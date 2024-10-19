@@ -230,15 +230,16 @@ module type DOMAIN =
 
     (* refining *)
 
-    val decompositions : env_vars:binding_vars -> typ -> varseq -> value list list -> (model * varseq) list
+    val decompositions : typ -> varseq -> value list list -> (model * varseq) list
 
-    val refinements_any : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
-    val refinements_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
+    val refinements_any : typ -> varseq -> value -> (model * varseq) list
+    val refinements_pat : typ -> constr -> model array -> varseq -> value -> (model * varseq) list
+    val refinements_pat_expr : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
     val refinements_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     val prunings_value : typ -> value -> varseq -> (model * varseq) list
-    val prunings_any : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
-    val prunings_pat : env_vars:binding_vars -> typ -> constr -> model array -> varseq -> value -> (model * varseq) list
+    val prunings_any : typ -> varseq -> value -> (model * varseq) list
+    val prunings_pat : typ -> constr -> model array -> varseq -> value -> (model * varseq) list
     val prunings_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
@@ -374,6 +375,7 @@ module Make (Domain : DOMAIN) =
         ~refinements_value:(fun t v varseq -> []) (* TODO: is a custom definition useful? *)
         ~refinements_any
         ~refinements_pat
+        ~refinements_pat_expr
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
         ~max_expr_size:(!max_expr_size)
@@ -394,10 +396,11 @@ module Make (Domain : DOMAIN) =
         ~input_of_value
         ~parse_bests
         ~make_index
-        ~decompositions:(fun ~env_vars t varseq value -> [])
+        ~decompositions:(fun t varseq value -> [])
         ~refinements_value:prunings_value
         ~refinements_any:prunings_any
         ~refinements_pat:prunings_pat
+        ~refinements_pat_expr:(fun ~env_vars t varseq value -> [])
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
         ~max_expr_size:(!max_expr_size)
