@@ -322,14 +322,14 @@ let refinements
          [aux_const ctx m varseq selected_reads;
           aux_expr ctx m varseq selected_reads;
           aux_any_pat ctx m varseq t (refinements_any t) selected_reads;
-          aux_any_pat ctx m varseq t (refinements_pat_expr ~env_vars t) selected_reads;
+          aux_pat_expr ~env_vars ctx m varseq t selected_reads;
           aux_decomp ctx t m varseq selected_reads]
     | Model.Pat (t,c,src,args) ->
        Myseq.interleave
          (aux_const ctx m varseq selected_reads
           :: aux_expr ctx m varseq selected_reads
           :: aux_any_pat ctx m varseq t (refinements_pat t c args) selected_reads
-          :: aux_any_pat ctx m varseq t (refinements_pat_expr ~env_vars t) selected_reads
+          :: aux_pat_expr ~env_vars ctx m varseq t selected_reads
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
@@ -525,22 +525,17 @@ let refinements
                 | _ -> 0
               else c)
   and aux_expr ctx m varseq selected_reads = (* QUICK *)
-    if pruning then Myseq.empty
-    else
     let t = Model.typ m in
-    if not (asd#expr_opt t) then Myseq.empty
+    if pruning || not include_expr || not (asd#expr_opt t) then Myseq.empty
     else
        let allowed = asd#alt_opt t in
        aux_gen ctx m varseq selected_reads
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
            let v = Data.value data in
            let s_expr = (* index expressions evaluating to v *)
-             if include_expr
-             then
-               Expr.Exprset.to_seq ~max_expr_size
-                 (Expr.Index.lookup (t, v)
-                    (Model.force_index ~make_index read))
-             else Myseq.empty in
+             Expr.Exprset.to_seq ~max_expr_size
+               (Expr.Index.lookup (t, v)
+                  (Model.force_index ~make_index read)) in
            s_expr
            |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
            |> Myseq.fold_left
@@ -603,6 +598,9 @@ let refinements
           (if !debug
            then Myseq.return (m', varseq', Result.Error Failed_postprocessing)
            else Myseq.empty))
+  and aux_pat_expr ~env_vars ctx m varseq t selected_reads =
+    if not include_expr then Myseq.empty
+    else aux_any_pat ctx m varseq t (refinements_pat_expr ~env_vars t) selected_reads
   and aux_alt_prune ctx m m1 m2 varseq selected_reads =
     aux_gen ctx m varseq selected_reads
       (fun (read, data : _ read) ->
