@@ -22,13 +22,21 @@ let ( let> ) x f =
 type task_input = (string * task) Focus.input (* name, data *)
 
 type learning_stage = Build | Prune
-                
+
+type include_refs = { inc_expr : bool; inc_input : bool; inc_output : bool }
+
+let all_include_refs =
+  [ { inc_input = true; inc_output = true; inc_expr = true };
+    { inc_input = true; inc_output = false; inc_expr = false };
+    { inc_input = false; inc_output = true; inc_expr = false };
+    { inc_input = false; inc_output = true; inc_expr = true } ]
+
 type arc_state =
   { name : string; (* task name *)
     task : task; (* task *)
     norm_dl_model_data : pairs_reads -> Task_model.dl_split;
     stage : learning_stage;
-    include_expr : bool;
+    include_refs : include_refs;
     refinement : refinement; (* previous refinement *)
     refinement_support : int;
     env : data; (* nil env *)
@@ -47,7 +55,7 @@ and arc_suggestion =
   | InputTask of task_input
   | ResetTask
   | ChangeStage of arc_state
-  | ChangeIncludeExpr of arc_state
+  | ChangeIncludeRefs of arc_state
   | RefinedState of arc_state * bool (* compressive *)
   | FailedRefinement of refinement * exn
 
@@ -55,7 +63,7 @@ type arc_focus = arc_state
                
 type arc_extent = arc_state
 
-let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_expr : bool) (refinement : refinement) (env : data) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
+let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (env : data) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
   try
   let| prs = read_pairs ~env model task.train in
   let| () = (* checking that the input model can parse the test inputs *)
@@ -73,7 +81,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
     { name; task;
       norm_dl_model_data;
       stage;
-      include_expr;
+      include_refs;
       refinement;
       refinement_support = Task_model.refinement_support refinement;
       env; model; info_o;
@@ -96,8 +104,11 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
 let initial_focus (name : string) (task : task) : arc_focus =
   let norm_dl_model_data = Task_model.make_norm_dl_model_data ~alpha:(!alpha) () in
   let {env; varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
+  let init_include_refs = { inc_input = true; inc_output = true; inc_expr = true} in
   let init_task_model = make_task_model varseq input_model output_model in
-  match state_of_model name task norm_dl_model_data Build true Task_model.RInit env init_task_model info_o with
+  match state_of_model name task
+          norm_dl_model_data Build init_include_refs
+          Task_model.RInit env init_task_model info_o with
   | Result.Ok s -> s
   | Result.Error exn -> raise exn
 
@@ -113,10 +124,12 @@ object
       let _, refinements, errors = (* selecting up to [refine_degree] compressive refinements, keeping other for information *)
         (try
            match focus.stage with
-           | Build -> task_refinements ~include_expr:focus.include_expr
+           | Build -> task_refinements
+                        ~include_expr:focus.include_refs.inc_expr
+                        ~include_input:focus.include_refs.inc_input
+                        ~include_output:focus.include_refs.inc_output
                         focus.model focus.prs focus.dsri focus.dsro
-           | Prune -> task_prunings ~include_expr:focus.include_expr
-                        focus.model focus.dsri
+           | Prune -> task_prunings focus.model focus.dsri
          with exn ->
            print_endline "FAILURE to compute refinements";
            print_endline (Printexc.to_string exn);
@@ -128,7 +141,7 @@ object
                else
                  match m_res with
                  | Result.Ok m ->
-                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_expr r focus.env m focus.info_o with
+                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r focus.env m focus.info_o with
                      | Result.Ok state ->
                         let compressive =
                           state.norm_lmd < focus.norm_lmd
@@ -173,16 +186,21 @@ object
              | Build -> Prune
              | Prune -> Build in
            match state_of_model focus.name focus.task focus.norm_dl_model_data
-                   new_stage focus.include_expr Task_model.RInit
+                   new_stage focus.include_refs Task_model.RInit
                    focus.env focus.model focus.info_o with
            | Result.Ok s -> [ChangeStage s]
            | Result.Error exn -> print_endline (Printexc.to_string exn); [])
-        @ (let new_include_expr = not focus.include_expr in
-           match state_of_model focus.name focus.task focus.norm_dl_model_data
-                   focus.stage new_include_expr Task_model.RInit
-                   focus.env focus.model focus.info_o with
-           | Result.Ok s -> [ChangeIncludeExpr s]
-           | Result.Error exn -> print_endline (Printexc.to_string exn); []) in
+        @ (List.fold_left
+             (fun suggs new_include_refs ->
+               if new_include_refs <> focus.include_refs
+               then
+                 match state_of_model focus.name focus.task focus.norm_dl_model_data
+                         focus.stage new_include_refs Task_model.RInit
+                         focus.env focus.model focus.info_o with
+                 | Result.Ok s -> ChangeIncludeRefs s :: suggs
+                 | Result.Error exn -> print_endline (Printexc.to_string exn); suggs
+               else suggs)
+             [] all_include_refs) in
       Jsutils.firebug "Suggestions computed";
       focus.suggestions <- suggestions
     );
@@ -201,7 +219,7 @@ object
        Some (new arc_place lis (initial_focus focus.name focus.task))
     | ChangeStage s ->
        Some (new arc_place lis s)
-    | ChangeIncludeExpr s ->
+    | ChangeIncludeRefs s ->
        Some (new arc_place lis s)
     | RefinedState (s,_) ->
        Some (new arc_place lis s)
@@ -278,9 +296,13 @@ let html_of_suggestion ~input_dico = function
      Jsutils.escapeHTML
        (Printf.sprintf "(%.3f / %.3frido) switch to %s stage " s.norm_lmd s.norm_lrido
           (match s.stage with Build -> "building" | Prune -> "pruning"))
-  | ChangeIncludeExpr s ->
-     Jsutils.escapeHTML
-       (if s.include_expr then "include expressions" else "exclude expressions")
+  | ChangeIncludeRefs s ->
+     let inc = s.include_refs in
+     let label = "suggest for:" in
+     let label = if inc.inc_input then label ^ " input" else label in
+     let label = if inc.inc_output then label ^ " output" else label in
+     let label = if inc.inc_expr then label ^ " expr" else label in
+     Jsutils.escapeHTML label
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
        (Printf.sprintf "(%.3f / %.3f)  " s.norm_lmd s.norm_lrido
