@@ -677,6 +677,45 @@ let broadcast_result (f : 'a array -> 'b result) (xs : 'a t array) : 'b t result
          0 xs in
      aux d xs (* the real broadcasting case *)
 
+let index_list_broadcast (x : 'a t) (is : int list) (depth_result : int) : 'a t option =
+  let rec aux is x =
+    match is, x with
+    | [], _ -> aux2 x
+    | i::is1, `Seq (d,pos_opt,l) ->
+       if d < depth_result
+       then None (* index too deep *)
+       else
+         let@ x1 =
+           match pos_opt, l with
+           | None, _ ->
+              let n = List.length l in
+              if i >= 0 && i < n then Some (List.nth l i)
+              else if i < 0 && i >= -n then Some (List.nth l (n+i))
+              else None
+           | Some pos, [x1] ->
+              if pos = i
+              then Some x1
+              else None
+           | _ -> assert false in
+         aux is1 x1
+    | i::is1, _ -> aux is1 x (* broadcast *)
+  and aux2 x =
+    match x with
+    | `Seq (d,pos_opt,l) ->
+       if d + 1 = depth_result then
+         Some x
+       else if d >= depth_result then
+         match l with
+         | [x1] -> aux2 x1 (* broadcast *)
+         | _ -> None (* ambiguity *)
+       else None
+    | _ ->
+       if depth_result = 0
+       then Some x
+       else None
+  in
+  aux is x
+
 
 let _ = (* UNIT TEST *)
   let x = `Seq (0, None, [`Int 1; `Int 2; `Int 3]) in

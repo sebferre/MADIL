@@ -329,6 +329,7 @@ let refinements
          (aux_const ctx m varseq selected_reads
           :: aux_expr ctx m varseq selected_reads
           :: aux_any_pat ctx m varseq t (refinements_pat t c args) selected_reads
+          (* XX :: aux_pat_expr ~env_vars ctx m varseq t selected_reads *) (* pb: can erase good motif irreversably *)
           :: Array.to_list
               (Array.mapi
                  (fun i mi ->
