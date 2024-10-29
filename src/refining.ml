@@ -214,6 +214,7 @@ let refinements
       ~(max_expr_size : int)
       ~(max_expr_refinements_per_read : int)
       ~(max_expr_refinements_per_var : int)
+      ~(max_steps : int)
       ~(max_refinements : int)
       ~(asd : ('typ,'abs_typ,'constr,'func) Model.asd)
       ~(typ_bool : 'typ)
@@ -309,21 +310,22 @@ let refinements
             let dl_new = aux_dl_new dl_m m_new best_reads in
             Myseq.return (p, m_new, varseq', supp, Result.Ok dl_new))
   in
-  let rec aux ctx m varseq selected_reads =
+  let rec aux ~steps ctx m varseq selected_reads =
   Myseq.prof "Refining.refinements/aux" (
-  if selected_reads = [] then Myseq.empty
+  if steps >= max_steps then Myseq.empty
+  else if selected_reads = [] then Myseq.empty
   else
     match m with
     | Model.Def (x,m1) ->
        let ctx = [Model.Alias (x,ctx)] in
-       aux ctx m1 varseq selected_reads
+       aux ~steps ctx m1 varseq selected_reads
     | Model.Any t ->
        Myseq.interleave
          [aux_const ctx m varseq selected_reads;
           aux_expr ctx m varseq selected_reads;
           aux_any_pat ctx m varseq t (refinements_any t) selected_reads;
           aux_pat_expr ~env_vars ctx m varseq t selected_reads;
-          aux_decomp ctx t m varseq selected_reads]
+          aux_decomp ~steps ctx t m varseq selected_reads]
     | Model.Pat (t,c,src,args) ->
        Myseq.interleave
          (aux_const ctx m varseq selected_reads
@@ -334,7 +336,7 @@ let refinements
               (Array.mapi
                  (fun i mi ->
                    let ctxi = Model.Field (c,i)::ctx in
-                   aux ctxi mi varseq
+                   aux ~steps ctxi mi varseq
                      (map_reads
                         (fun read -> function
                          | Data.DPat (_, _c, _vsrc, args) ->
@@ -366,7 +368,7 @@ let refinements
                     else None
                  | _ -> assert false)
                 selected_reads in
-            aux ctx1 m1 varseq sel1);
+            aux ~steps ctx1 m1 varseq sel1);
                         
            (let ctx2 = Model.Branch false :: ctx in
             let sel2 =
@@ -378,7 +380,7 @@ let refinements
                     else None
                  | _ -> assert false)
                 selected_reads in
-            aux ctx2 m2 varseq sel2) ]        
+            aux ~steps ctx2 m2 varseq sel2) ]        
     | Model.Expr (Expr.Const (t,v)) ->
        if pruning (* pruning constants *)
        then
@@ -399,7 +401,7 @@ let refinements
                 | _ -> true)
     | Model.Expr e -> Myseq.empty
     | Model.Derived t -> Myseq.empty)
-  and aux_decomp ctx t m varseq selected_reads =
+  and aux_decomp ~steps ctx t m varseq selected_reads =
     let p = List.rev ctx in
     let dl_m = dl_model ~nb_env_vars m in
     let nb = List.length selected_reads in
@@ -465,7 +467,7 @@ let refinements
                       | _ -> assert false)
                      selected_reads' in
                  let* p_i, m'_i, varseq', supp, dl'_i_res =
-                   aux ctx_i m_i varseq' selected_reads_i in
+                   aux ~steps:(steps+1) ctx_i m_i varseq' selected_reads_i in
                  let m'_i =
                    match arg_i with
                    | Model.Def (x,_) -> Model.Def (x,m'_i)
@@ -658,7 +660,7 @@ let refinements
         (example_reads, false))
       reads in
   let* p, r, varseq', supp, dl'_res =
-    aux Model.ctx0 m0 varseq0 selected_reads
+    aux ~steps:0 Model.ctx0 m0 varseq0 selected_reads
     |> Myseq.sort (fun (p1,r1,vs1,supp1,dl1_res) (p2,r2,vs2,supp2,dl2_res) ->
            match dl1_res, dl2_res with
            | Result.Ok dl1, Result.Ok dl2 ->

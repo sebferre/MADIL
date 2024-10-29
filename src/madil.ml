@@ -185,6 +185,7 @@ module type DOMAIN =
     val max_expr_size : int ref
     val max_expr_refinements_per_read : int ref
     val max_expr_refinements_per_var : int ref
+    val max_refinement_steps : int ref
     val max_refinements : int ref
     val jump_width : int ref
     val search_temperature : float ref
@@ -381,6 +382,7 @@ module Make (Domain : DOMAIN) =
         ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
+        ~max_steps:(!max_refinement_steps)
         ~max_refinements:(!max_refinements)
 
     let prunings =
@@ -406,6 +408,7 @@ module Make (Domain : DOMAIN) =
         ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
+        ~max_steps:(!max_refinement_steps)
         ~max_refinements:(!max_refinements)
 
     (* task models *)
