@@ -380,10 +380,10 @@ let learn
   let rec loop_refine ostate jump_ostates = (* current ostate and list of pending continuation points *)
     let state = ostate#state in
     (* recording current state as best state *)
-    if state.lrido = 0. || state.lmd < (!ostate_sol_ref)#state.lmd then (
+    if state.lrido <= 0. || state.lmd < (!ostate_sol_ref)#state.lmd then (
       ostate_sol_ref := ostate);
     log_refining state.r state.m state.prs state.lmd state.lrido;
-    if state.lrido = 0. (* end of search *)
+    if state.lrido <= 0. (* end of search *)
     then ()
     else
       let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
