@@ -19,6 +19,13 @@ let tup1 (x : 'a) = (Obj.magic [|x|] : 'a)
 
 (* list *)
 
+let rec list_take k = function
+  | [] -> []
+  | x::r ->
+     if k <= 0
+     then []
+     else x :: list_take (k-1) r
+
 let list_foldi_left (f : 'b -> int -> 'a -> 'b) (init : 'b) (l : 'a list) : 'b =
   let rec aux acc i l =
     match l with
