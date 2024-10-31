@@ -53,6 +53,7 @@ class ['state] ostate ?(from : ('state ostate * int (* rank *)) option) (state :
     
     method nsteps_sol = nsteps_sol
     method jumps_sol = jumps_sol
+    method njumps_sol = List.fold_left (+) 0 jumps_sol
     method state = state
     method parent_opt = parent_opt
     method rank = rank 
@@ -289,6 +290,310 @@ class ['state] conts_mcts ?(c : float = sqrt 2.) (root : 'state ostate) =
       selection root
   end
 
+type resource_out =
+  { timed_out : bool;
+    memed_out : bool }
+
+class ['state] search
+        ~(make_conts : 'state ostate -> 'state conts)
+        ~(refinements : 'state -> 'state list) (* must be sorted and filtered for exploration *)
+        ~(stop_criteria : 'state -> bool)
+        ~(k_state : 'state -> unit)
+        (state0 : _ state as 'state) =
+  let ostate0 = new ostate state0 in
+  let conts = make_conts ostate0 in
+  object (self)
+    val mutable started = false
+    val mutable stopped = false
+    val mutable best_ostate = ostate0
+    val mutable all_leaves = []
+    val mutable nsteps = 0
+    val mutable njumps = 0
+
+    method best_ostate = best_ostate
+    method best_leaves (k : int) : 'state ostate list =
+      let sorted_leaves = (* sort by increasing DL, then left-right order in tree *)
+        List.sort
+          (fun ostate1 ostate2 ->
+            Stdlib.compare
+              (ostate1#state.lmd, List.rev ostate1#jumps_sol)
+              (ostate2#state.lmd, List.rev ostate2#jumps_sol))
+          all_leaves in
+      list_take k sorted_leaves
+    method nsteps = nsteps
+    method njumps = njumps
+    
+    method rollout (ostate : 'state ostate) : 'state ostate =
+      let rec aux ostate jump_ostates =
+        let state = ostate#state in
+        if state.lmd < best_ostate#state.lmd then
+          best_ostate <- ostate;
+        k_state state;
+        if stop_criteria state (* end of search *)
+        then (
+          best_ostate <- ostate;
+          stopped <- true;
+          ostate)
+        else
+          let lstate1 = refinements state in
+          let lostate1 =
+            List.mapi
+              (fun rank state1 -> new ostate ~from:(ostate,rank) state1)
+              lstate1 in
+          match lostate1 with
+          | [] ->  (* no compressive refinement *)
+             (* adding jump_ostates as continuations *)
+             conts#push ostate jump_ostates;
+             ostate
+          | ostate1::others ->
+             conts#goto ostate1;
+             nsteps <- nsteps + 1;
+             let () = (* showing point of choice *)
+               if others <> [] then (
+                 print_string "CHOICE AT";
+                 ostate#print_jumps;
+                 print_newline ()
+               ) in
+             aux ostate1 (List.rev_append others jump_ostates)
+      in
+      aux ostate []
+
+    method next : 'state ostate option =
+      if stopped then
+        None
+      else if not started then (
+        started <- true;
+        let ostate = self#rollout ostate0 in
+        all_leaves <- ostate::all_leaves;
+        Some ostate)
+      else
+        (* jumping to most promising continuation *)
+        match conts#pop with
+        | None -> None (* no continuation, end of search *)
+        | Some ostate1 ->
+           njumps <- njumps + 1;
+           (* showing JUMP *)
+           print_string "JUMP TO";
+           ostate1#print_jumps;
+           print_newline ();
+           let ostate = self#rollout ostate1 in
+           all_leaves <- ostate::all_leaves;
+           Some ostate
+
+    method iter
+             ~(memout : int) ~(timeout : int)
+             (k : 'state ostate -> unit)
+           : resource_out =
+      let rec aux () =
+        match self#next with
+        | Some ostate -> k ostate; aux ()
+        | None -> ()
+      in
+      let res_opt =
+        Common.do_memout memout (* Mbytes *)
+          (fun () ->
+            Common.do_timeout_gc (float timeout) (* seconds *)
+              (fun () ->
+                aux ())) in
+      { timed_out = (res_opt = Some None);
+        memed_out = (res_opt = None) }
+  end
+
+let sort_filter_refinements ~jump_width lstate1 =
+  (* sort refinements, and keep the most compressive and alternative refinements for search *)
+  let lstate1 =
+    List.sort
+      (fun state1 state2 ->
+        Stdlib.compare (state1.lmd, state1.r) (state2.lmd, state2.r))
+      lstate1 in
+  match lstate1 with
+  | [] -> []
+  | state1::others ->
+     let _, rev_others = (* retaining only other refinements on same side and path *)
+       List.fold_left
+         (fun (rank,res) state2 ->
+           let ok =
+             rank < jump_width &&
+               (match state1.r, state2.r with
+                | RInit, RInit -> true
+                | RStep (side1,p1,sm1,_,_,_),
+                  RStep (side2,p2,sm2,_,_,_) ->
+                   side1 = side2 && p1 = p2 (* same side and path *)
+                | _ -> false )in
+           if ok
+           then rank+1, state2::res
+           else rank, res)
+         (1, []) others in
+     state1 :: List.rev rev_others
+
+let select_refinements ~refine_degree ~jump_width ~data_of_model state refs =
+  (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
+  refs
+  |> myseq_find_map_k refine_degree
+       (fun (r1,m1_res) ->
+         let@ m1 = Result.to_option m1_res in
+         match data_of_model ~pruning:false r1 m1 with
+         | None -> None (* failure to parse with model m1 *)
+         | Some state1 ->
+            if state1.lmd < state.lmd
+            then Some state1
+            else None)
+  |> sort_filter_refinements ~jump_width
+
+let refining0
+      ~refine_degree ~jump_width ~timeout_refine ~memout
+      ~data_of_model ~task_refinements ~log_refining
+      state0 =
+  let refining =
+    new search
+      ~make_conts:(new conts_mcts ~c:(sqrt 2.))
+      ~refinements:(fun state ->
+        Common.prof "Learning.task_refinements" (fun () ->
+            select_refinements ~refine_degree ~jump_width ~data_of_model state
+              (task_refinements
+                 ~include_expr:true
+                 ~include_input:true
+                 ~include_output:true
+                 state.m state.prs state.drsi state.drso)))
+      ~stop_criteria:(fun state -> state.lrido <= 0.)
+      ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
+      state0 in
+  let res_out =
+    refining#iter
+      ~memout ~timeout:timeout_refine
+      (fun ostate -> ()) in
+  let ostate_refine = refining#best_ostate in
+  let state_refine = ostate_refine#state in
+  state_refine,
+  { task_model = state_refine.m;
+    pairs_reads = state_refine.prs;
+    timed_out = res_out.timed_out;
+    memed_out = res_out.memed_out;
+    nsteps = refining#nsteps;
+    njumps = refining#njumps;
+    nsteps_sol = ostate_refine#nsteps_sol;
+    njumps_sol = ostate_refine#njumps_sol;
+  }
+
+let refining1
+      ~refine_degree ~jump_width ~timeout_refine ~memout
+      ~data_of_model ~task_refinements ~log_refining
+      state0 =
+  let search_in =
+    new search
+      ~make_conts:(new conts_mcts ~c:(sqrt 2.))
+      ~refinements:(fun state ->
+        Common.prof "Learning.task_refinements_in" (fun () ->
+            select_refinements ~refine_degree ~jump_width ~data_of_model state
+              (task_refinements
+                 ~include_expr:false
+                 ~include_input:true
+                 ~include_output:false
+                 state.m state.prs state.drsi state.drso)))
+      ~stop_criteria:(fun state -> false)
+      ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
+      state0 in
+  let make_search_out (states_in : 'state list) : 'state search =
+    new search
+      ~make_conts:(new conts_mcts ~c:(sqrt 2.))
+      ~refinements:(fun state ->
+        if state == state0 && states_in <> []
+        then
+          List.rev_map
+            (fun state -> {state with r = Task_model.RInit})
+            states_in
+        else
+          Common.prof "Learning.task_refinements_out" (fun () ->
+              select_refinements ~refine_degree ~jump_width ~data_of_model state
+                (task_refinements
+                   ~include_expr:true
+                   ~include_input:false
+                   ~include_output:true
+                   state.m state.prs state.drsi state.drso)))
+      ~stop_criteria:(fun state -> state.lrido <= 0.)
+      ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
+      state0
+  in
+  print_endline "SEARCH OUT greedy";
+  let search_out_0 = make_search_out [] in
+  match search_out_0#next with
+  | None -> assert false
+  | Some ostate_out ->
+     if ostate_out#state.lrido <= 0.
+     then (* success *)
+       let state_out = ostate_out#state in
+       let nsteps = search_out_0#nsteps in
+       state_out,
+       { task_model = state_out.m;
+         pairs_reads = state_out.prs;
+         timed_out = false;
+         memed_out = false;
+         nsteps = nsteps;
+         njumps = 0;
+         nsteps_sol = nsteps;
+         njumps_sol = 0 }
+     else (
+       print_endline "SEARCH IN OUT greedy";
+       match search_in#next with
+         | None -> assert false
+         | Some ostate_in ->
+            (* computing output model greedy *)
+            let search_out_1 = make_search_out [ostate_in#state] in
+            match search_out_1#next with
+            | None -> assert false
+            | Some ostate_out ->
+               if ostate_out#state.lrido <= 0.
+               then (* success *)
+                 let state_out = ostate_out#state in
+                 let nsteps = search_in#nsteps + search_out_1#nsteps in
+                 state_out,
+                 { task_model = state_out.m;
+                   pairs_reads = state_out.prs;
+                   timed_out = false;
+                   memed_out = false;
+                   nsteps = nsteps;
+                   njumps = 0;
+                   nsteps_sol = nsteps;
+                   njumps_sol = 0 }
+               else (
+                 let timeout_in = timeout_refine / 6 in (* TODO: add parameter? *)
+                 let timeout_out = timeout_refine - timeout_in in
+                 (* searching best input model under timeout *)
+                 print_endline "SEARCH IN mcts";
+                 let res_in =
+                   search_in#iter
+                     ~memout ~timeout:timeout_in
+                     (fun ostate -> ()) in
+                 let ostates_in = search_in#best_leaves jump_width in (* TODO: use specific parameter? *)
+                 (* searching best output model given chosen input model, under timeout *)
+                 Printf.printf "FOUND %d input models\n" (List.length ostates_in);
+                 print_endline "SEARCH OUT mcts";
+                 let search_out_2 =
+                   let states_in = List.map (fun ostate -> ostate#state) ostates_in in
+                   make_search_out states_in in
+                 let res_out =
+                   search_out_2#iter
+                     ~memout ~timeout:timeout_out
+                     (fun ostate -> ()) in
+                 let ostate_out = search_out_2#best_ostate in
+                 let state_out = ostate_out#state in
+                 let ostate_in =
+                   try
+                     let rank_in = List.hd (List.rev ostate_out#jumps_sol) in
+                     List.nth ostates_in rank_in
+                   with _ -> assert false in
+                 Printf.printf "SOL %d + %d steps\n" ostate_in#nsteps_sol ostate_out#nsteps_sol;
+                 state_out,
+                 { task_model = state_out.m;
+                   pairs_reads = state_out.prs;
+                   timed_out = res_out.timed_out; (* no stop criteria for input *)
+                   memed_out = res_in.memed_out || res_out.memed_out;
+                   nsteps = search_in#nsteps + search_out_2#nsteps;
+                   njumps = search_in#njumps + search_out_2#njumps;
+                   nsteps_sol = ostate_in#nsteps_sol + ostate_out#nsteps_sol - 1; (* -1 because first output step chooses input model *)
+                   njumps_sol = ostate_in#njumps_sol + ostate_out#njumps_sol }
+               )
+     )
 
 let learn
       ~(alpha : float)
@@ -366,115 +671,16 @@ let learn
     match data_of_model ~pruning:false r0 m0 with
     | Some state0 -> state0
     | None -> failwith "Learning.learn: invalid initial task model" in
-  let ostate0 : _ ostate = new ostate state0 in
-  let nsteps_ref = ref 0 in (* total nb steps *)
-  let njumps_ref = ref 0 in (* total nb jumps *)
-  let ostate_sol_ref = ref ostate0 in (* current solution *)
-  let conts = (* collection of search continuations, mutable *)
-    (* new conts_v0 in *)
-    new conts_mcts ~c:(sqrt 2.) ostate0 in
-(*     new conts_softmax
-      ~temp:search_temperature
-      ~make_subconts:make_conts_v1 in *)
-  (* refining phase *)
-  let rec loop_refine ostate jump_ostates = (* current ostate and list of pending continuation points *)
-    let state = ostate#state in
-    (* recording current state as best state *)
-    if state.lrido <= 0. || state.lmd < (!ostate_sol_ref)#state.lmd then (
-      ostate_sol_ref := ostate);
-    log_refining state.r state.m state.prs state.lmd state.lrido;
-    if state.lrido <= 0. (* end of search *)
-    then ()
-    else
-      let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
-        myseq_find_map_k refine_degree
-          (fun (r1,m1_res) ->
-            let@ m1 = Result.to_option m1_res in
-            match data_of_model ~pruning:false r1 m1 with
-            | None -> None (* failure to parse with model m1 *)
-            | Some state1 ->
-               if state1.lmd < state.lmd
-               then Some state1
-               else None)
-          (Common.prof "Learning.task_refinements" (fun () ->
-               task_refinements
-                 ~include_expr:true
-                 ~include_input:true
-                 ~include_output:true
-                 state.m state.prs state.drsi state.drso)) in
-      if lstate1 = [] (* no compressive refinement *)
-      then (
-        (* adding jump_ostates as continuations *)
-        conts#push ostate jump_ostates;
-        (* jumping to most promising continuation *)
-        (match conts#pop with
-         | None -> () (* no continuation *)
-         | Some ostate1 ->
-            incr njumps_ref;
-            let () = (* showing JUMP *)
-              print_string "JUMP TO";
-              ostate1#print_jumps;
-              print_newline () in
-            loop_refine ostate1 []
-      ))
-      else (
-        let lstate1 =
-          List.sort
-            (fun state1 state2 ->
-              Stdlib.compare (state1.lmd, state1.r) (state2.lmd, state2.r))
-            lstate1 in
-        match lstate1 with
-        | [] -> assert false
-        | state1::others ->
-           let ostate1 = new ostate ~from:(ostate,0) state1 in
-           conts#goto ostate1;
-           let nb_alts, jump_ostates =
-             List.fold_left (* selecting alternate refinements, at most jump_width-1 *)
-               (fun (rank,res) state2 ->
-                 let ok =
-                   rank < jump_width &&
-                     (match state1.r, state2.r with
-                      | RStep (side1,p1,sm1,_,_,_),
-                        RStep (side2,p2,sm2,_,_,_) ->
-                         side1 = side2 && p1 = p2 (* same side and path *)
-                      | _ -> assert false) in
-                 if ok
-                 then
-                   let ostate2 = new ostate ~from:(ostate,rank) state2 in
-                   rank+1, ostate2::res
-                 else rank, res)
-               (1,jump_ostates) others in
-           incr nsteps_ref;
-           let () = (* showing point of choice *)
-             if nb_alts > 1 then (
-               print_string "CHOICE AT";
-               ostate#print_jumps;
-               print_newline ()
-             ) in
-           loop_refine ostate1 jump_ostates)
-  in
-  let ostate_refine, timed_out_refine, memed_out_refine =
-    print_endline "REFINING PHASE";
-    let res_opt =
-      Common.do_memout memout (* Mbytes *)
-        (fun () ->
-          Common.do_timeout_gc (float timeout_refine)
-            (fun () ->
-              loop_refine ostate0 [])) in
-    (!ostate_sol_ref), (res_opt = Some None), (res_opt = None) in
-  let state_refine = ostate_refine#state in
-  let result_refining =
-    { task_model = state_refine.m;
-      pairs_reads = state_refine.prs;
-      timed_out = timed_out_refine;
-      memed_out = memed_out_refine;
-      nsteps = (!nsteps_ref);
-      njumps = (!njumps_ref);
-      nsteps_sol = (!ostate_sol_ref)#nsteps_sol;
-      njumps_sol = (List.fold_left (+) 0 (!ostate_sol_ref)#jumps_sol);
-    } in
-  (* pruning phase *)
+
+  print_endline "REFINING PHASE";
+  let state_refine, result_refining =
+    refining1
+      ~refine_degree ~jump_width ~timeout_refine ~memout
+      ~data_of_model ~task_refinements ~log_refining
+      state0 in
+  (* pruning phase *) (* TODO: use search to define it *)
   let state_prune_ref = ref state_refine in
+  let nsteps_prune_ref = ref 0 in
   let rec loop_prune state =
     log_refining state.r state.m state.prs state.lmd state.lrido;
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
@@ -497,7 +703,7 @@ let learn
     match lstate1 with
     | [] -> ()
     | state1::_ ->
-       incr nsteps_ref;
+       incr nsteps_prune_ref;
        state_prune_ref := state1; (* recording current state as best state *)
        loop_prune state1
   in
@@ -520,8 +726,8 @@ let learn
       pairs_reads = state_prune.prs;
       timed_out = timed_out_prune;
       memed_out = memed_out_prune;
-      nsteps = (!nsteps_ref);
-      njumps = (!njumps_ref);
+      nsteps = result_refining.nsteps + !nsteps_prune_ref;
+      njumps = result_refining.njumps;
       nsteps_sol = result_refining.nsteps_sol;
       njumps_sol = result_refining.njumps_sol;
     } in
