@@ -215,7 +215,8 @@ let print_learned_model
           ~memout:(!memout)
           ~timeout_refine:(!timeout_refine)
           ~timeout_prune:(!timeout_prune)
-          ~jump_width:(!jump_width)
+          ~refinement_branching:(!refinement_branching)
+          ~input_branching:(!input_branching)
           ~refine_degree:(!max_refinements)
           ~search_temperature:(!search_temperature)
           ~env ~init_task_model

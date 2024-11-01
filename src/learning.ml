@@ -311,15 +311,7 @@ class ['state] search
     val mutable njumps = 0
 
     method best_ostate = best_ostate
-    method best_leaves (k : int) : 'state ostate list =
-      let sorted_leaves = (* sort by increasing DL, then left-right order in tree *)
-        List.sort
-          (fun ostate1 ostate2 ->
-            Stdlib.compare
-              (ostate1#state.lmd, List.rev ostate1#jumps_sol)
-              (ostate2#state.lmd, List.rev ostate2#jumps_sol))
-          all_leaves in
-      list_take k sorted_leaves
+    method all_leaves = all_leaves
     method nsteps = nsteps
     method njumps = njumps
     
@@ -399,7 +391,7 @@ class ['state] search
         memed_out = (res_opt = None) }
   end
 
-let sort_filter_refinements ~jump_width lstate1 =
+let sort_filter_refinements ~refinement_branching lstate1 =
   (* sort refinements, and keep the most compressive and alternative refinements for search *)
   let lstate1 =
     List.sort
@@ -413,7 +405,7 @@ let sort_filter_refinements ~jump_width lstate1 =
        List.fold_left
          (fun (rank,res) state2 ->
            let ok =
-             rank < jump_width &&
+             rank < refinement_branching &&
                (match state1.r, state2.r with
                 | RInit, RInit -> true
                 | RStep (side1,p1,sm1,_,_,_),
@@ -426,7 +418,7 @@ let sort_filter_refinements ~jump_width lstate1 =
          (1, []) others in
      state1 :: List.rev rev_others
 
-let select_refinements ~refine_degree ~jump_width ~data_of_model state refs =
+let select_refinements ~refine_degree ~refinement_branching ~data_of_model state refs =
   (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
   refs
   |> myseq_find_map_k refine_degree
@@ -438,10 +430,10 @@ let select_refinements ~refine_degree ~jump_width ~data_of_model state refs =
             if state1.lmd < state.lmd
             then Some state1
             else None)
-  |> sort_filter_refinements ~jump_width
+  |> sort_filter_refinements ~refinement_branching
 
 let refining0
-      ~refine_degree ~jump_width ~timeout_refine ~memout
+      ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 =
   let refining =
@@ -449,7 +441,7 @@ let refining0
       ~make_conts:(new conts_mcts ~c:(sqrt 2.))
       ~refinements:(fun state ->
         Common.prof "Learning.task_refinements" (fun () ->
-            select_refinements ~refine_degree ~jump_width ~data_of_model state
+            select_refinements ~refine_degree ~refinement_branching ~data_of_model state
               (task_refinements
                  ~include_expr:true
                  ~include_input:true
@@ -475,8 +467,62 @@ let refining0
     njumps_sol = ostate_refine#njumps_sol;
   }
 
+let sort_filter_inputs ~input_branching all_leaves : 'state ostate list =
+  (* returns k search tree leaves combining compression and diversity of paths *)
+  (* best leaf, then best leaf of each 1-prefix, then best leaf of each 2-prefix, etc. *)
+  let leaves =
+    List.map
+      (fun ostate -> (ostate#state.lmd, List.rev ostate#jumps_sol, ostate))
+      all_leaves in
+  let sorted_leaves = (* sort by increasing DL *)
+    leaves
+    |> List.sort Stdlib.compare in
+  let rec aux (partition : (dl * int list * 'state ostate) list list) (rev_res : 'state ostate list) =
+    let heads, tails =
+      List.fold_left
+        (fun (heads,tails) part ->
+          match part with
+          | [] -> assert false
+          | [h] -> h::heads, tails (* part becomes empty *)
+          | h::t -> h::heads, t::tails)
+        ([],[]) partition in
+    let sorted_heads = List.sort Stdlib.compare heads in
+    let rev_res = (* new result *)
+      List.fold_left
+        (fun rev_res (_,_,ostate) -> ostate::rev_res)
+        rev_res sorted_heads in
+    if tails = []
+    then List.rev rev_res
+    else
+      let refined_partition =
+        List.fold_left
+          (fun res part ->
+            let subrevparts =
+              Common.group_by (* WARNING: reverse order in subparts *)
+                (fun (_,jumps,_) -> match jumps with [] -> None | rank::_ -> Some rank)
+                part in
+            List.fold_left
+              (fun res (key,rev_subpart) ->
+                assert (rev_subpart <> []);
+                let subpart = (* removing jumps head for next stages *)
+                  List.rev_map (* re-establish original order *)
+                    (fun (dl,jumps,ostate as x) ->
+                      match jumps with
+                      | [] -> x
+                      | _::jumps1 -> (dl,jumps1,ostate))
+                    rev_subpart in
+                assert (subpart = List.sort Stdlib.compare subpart); (* REM *)
+                subpart :: res)
+              res subrevparts)
+          [] tails in
+      aux refined_partition rev_res
+  in
+  if sorted_leaves = []
+  then []
+  else list_take input_branching (aux [sorted_leaves] [])
+
 let refining1
-      ~refine_degree ~jump_width ~timeout_refine ~memout
+      ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 =
   let search_in =
@@ -484,7 +530,7 @@ let refining1
       ~make_conts:(new conts_mcts ~c:(sqrt 2.))
       ~refinements:(fun state ->
         Common.prof "Learning.task_refinements_in" (fun () ->
-            select_refinements ~refine_degree ~jump_width ~data_of_model state
+            select_refinements ~refine_degree ~refinement_branching ~data_of_model state
               (task_refinements
                  ~include_expr:false
                  ~include_input:true
@@ -499,12 +545,12 @@ let refining1
       ~refinements:(fun state ->
         if state == state0 && states_in <> []
         then
-          List.rev_map
+          List.map
             (fun state -> {state with r = Task_model.RInit})
             states_in
         else
           Common.prof "Learning.task_refinements_out" (fun () ->
-              select_refinements ~refine_degree ~jump_width ~data_of_model state
+              select_refinements ~refine_degree ~refinement_branching ~data_of_model state
                 (task_refinements
                    ~include_expr:true
                    ~include_input:false
@@ -564,12 +610,23 @@ let refining1
                    search_in#iter
                      ~memout ~timeout:timeout_in
                      (fun ostate -> ()) in
-                 let ostates_in = search_in#best_leaves jump_width in (* TODO: use specific parameter? *)
+                 let ostates_in =
+                   let all_leaves = search_in#all_leaves in
+                   let selected_leaves =
+                     sort_filter_inputs ~input_branching search_in#all_leaves in
+                   Printf.printf "SEARCH selected %d/%d input models at those paths\n"
+                     (List.length selected_leaves)
+                     (List.length all_leaves);
+                   List.iteri (fun i ostate ->
+                       Printf.printf "%2d: dl=%.9f at " i ostate#state.lmd;
+                       ostate#print_jumps;
+                       print_newline ()
+                     ) selected_leaves;
+                   selected_leaves in
                  (* searching best output model given chosen input model, under timeout *)
-                 Printf.printf "FOUND %d input models\n" (List.length ostates_in);
                  print_endline "SEARCH OUT mcts";
                  let search_out_2 =
-                   let states_in = List.map (fun ostate -> ostate#state) ostates_in in
+                   let states_in = List.map (fun ostate1 -> ostate1#state) ostates_in in
                    make_search_out states_in in
                  let res_out =
                    search_out_2#iter
@@ -582,7 +639,12 @@ let refining1
                      let rank_in = List.hd (List.rev ostate_out#jumps_sol) in
                      List.nth ostates_in rank_in
                    with _ -> assert false in
-                 Printf.printf "SOL %d + %d steps\n" ostate_in#nsteps_sol ostate_out#nsteps_sol;
+                 let () = (* showing solution information *)
+                   Printf.printf "SOL %d + %d steps\n" ostate_in#nsteps_sol ostate_out#nsteps_sol;
+                   Printf.printf "IN  dl=%.3f at path " ostate_in#state.lmd;
+                   ostate_in#print_jumps; print_newline ();
+                   Printf.printf "OUT dl=%.3f at path " ostate_out#state.lmd;
+                   ostate_out#print_jumps; print_newline () in
                  state_out,
                  { task_model = state_out.m;
                    pairs_reads = state_out.prs;
@@ -625,7 +687,7 @@ let learn
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> dl -> unit)
 
       ~memout ~timeout_refine ~timeout_prune
-      ~(jump_width : int) ~(refine_degree : int)
+      ~(refinement_branching : int) ~(input_branching : int) ~(refine_degree : int)
       ~(search_temperature : float)
       ~env (* environment data to the input model *)
       ~init_task_model
@@ -675,7 +737,7 @@ let learn
   print_endline "REFINING PHASE";
   let state_refine, result_refining =
     refining1
-      ~refine_degree ~jump_width ~timeout_refine ~memout
+      ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 in
   (* pruning phase *) (* TODO: use search to define it *)
