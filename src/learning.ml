@@ -374,19 +374,23 @@ class ['state] search
 
     method iter
              ~(memout : int) ~(timeout : int)
+             ?(limit = max_int)
              (k : 'state ostate -> unit)
            : resource_out =
-      let rec aux () =
-        match self#next with
-        | Some ostate -> k ostate; aux ()
-        | None -> ()
+      let rec aux limit =
+        if limit <= 0
+        then ()
+        else
+          match self#next with
+          | Some ostate -> k ostate; aux (limit-1)
+          | None -> ()
       in
       let res_opt =
         Common.do_memout memout (* Mbytes *)
           (fun () ->
             Common.do_timeout_gc (float timeout) (* seconds *)
               (fun () ->
-                aux ())) in
+                aux limit)) in
       { timed_out = (res_opt = Some None);
         memed_out = (res_opt = None) }
   end
@@ -525,7 +529,7 @@ let refining1
       ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 =
-  let search_in =
+  let make_search_in () =
     new search
       ~make_conts:(new conts_mcts ~c:(sqrt 2.))
       ~refinements:(fun state ->
@@ -562,100 +566,115 @@ let refining1
   in
   print_endline "SEARCH OUT greedy";
   let search_out_0 = make_search_out [] in
-  match search_out_0#next with
-  | None -> assert false
-  | Some ostate_out ->
-     if ostate_out#state.lrido <= 0.
-     then (* success *)
-       let state_out = ostate_out#state in
-       let nsteps = search_out_0#nsteps in
-       state_out,
-       { task_model = state_out.m;
-         pairs_reads = state_out.prs;
-         timed_out = false;
-         memed_out = false;
-         nsteps = nsteps;
-         njumps = 0;
-         nsteps_sol = nsteps;
-         njumps_sol = 0 }
-     else (
-       print_endline "SEARCH IN OUT greedy";
-       match search_in#next with
-         | None -> assert false
-         | Some ostate_in ->
-            (* computing output model greedy *)
-            let search_out_1 = make_search_out [ostate_in#state] in
-            match search_out_1#next with
-            | None -> assert false
-            | Some ostate_out ->
-               if ostate_out#state.lrido <= 0.
-               then (* success *)
-                 let state_out = ostate_out#state in
-                 let nsteps = search_in#nsteps + search_out_1#nsteps in
-                 state_out,
-                 { task_model = state_out.m;
-                   pairs_reads = state_out.prs;
-                   timed_out = false;
-                   memed_out = false;
-                   nsteps = nsteps;
-                   njumps = 0;
-                   nsteps_sol = nsteps;
-                   njumps_sol = 0 }
-               else (
-                 let timeout_in = timeout_refine / 6 in (* TODO: add parameter? *)
-                 let timeout_out = timeout_refine - timeout_in in
-                 (* searching best input model under timeout *)
-                 print_endline "SEARCH IN mcts";
-                 let res_in =
-                   search_in#iter
-                     ~memout ~timeout:timeout_in
-                     (fun ostate -> ()) in
-                 let ostates_in =
-                   let all_leaves = search_in#all_leaves in
-                   let selected_leaves =
-                     sort_filter_inputs ~input_branching search_in#all_leaves in
-                   Printf.printf "SEARCH selected %d/%d input models at those paths\n"
-                     (List.length selected_leaves)
-                     (List.length all_leaves);
-                   List.iteri (fun i ostate ->
-                       Printf.printf "%2d: dl=%.9f at " i ostate#state.lmd;
-                       ostate#print_jumps;
-                       print_newline ()
-                     ) selected_leaves;
-                   selected_leaves in
-                 (* searching best output model given chosen input model, under timeout *)
-                 print_endline "SEARCH OUT mcts";
-                 let search_out_2 =
-                   let states_in = List.map (fun ostate1 -> ostate1#state) ostates_in in
-                   make_search_out states_in in
-                 let res_out =
-                   search_out_2#iter
-                     ~memout ~timeout:timeout_out
-                     (fun ostate -> ()) in
-                 let ostate_out = search_out_2#best_ostate in
-                 let state_out = ostate_out#state in
-                 let ostate_in =
-                   try
-                     let rank_in = List.hd (List.rev ostate_out#jumps_sol) in
-                     List.nth ostates_in rank_in
-                   with _ -> assert false in
-                 let () = (* showing solution information *)
-                   Printf.printf "SOL %d + %d steps\n" ostate_in#nsteps_sol ostate_out#nsteps_sol;
-                   Printf.printf "IN  dl=%.3f at path " ostate_in#state.lmd;
-                   ostate_in#print_jumps; print_newline ();
-                   Printf.printf "OUT dl=%.3f at path " ostate_out#state.lmd;
-                   ostate_out#print_jumps; print_newline () in
-                 state_out,
-                 { task_model = state_out.m;
-                   pairs_reads = state_out.prs;
-                   timed_out = res_out.timed_out; (* no stop criteria for input *)
-                   memed_out = res_in.memed_out || res_out.memed_out;
-                   nsteps = search_in#nsteps + search_out_2#nsteps;
-                   njumps = search_in#njumps + search_out_2#njumps;
-                   nsteps_sol = ostate_in#nsteps_sol + ostate_out#nsteps_sol - 1; (* -1 because first output step chooses input model *)
-                   njumps_sol = ostate_in#njumps_sol + ostate_out#njumps_sol }
-               )
-     )
+  let _res_out =
+    search_out_0#iter
+      ~memout ~timeout:10
+      ~limit:1
+      (fun ostate -> ()) in
+  let ostate_out = search_out_0#best_ostate in
+  if ostate_out#state.lrido <= 0.
+  then (* success *)
+    let state_out = ostate_out#state in
+    let nsteps = search_out_0#nsteps in
+    state_out,
+    { task_model = state_out.m;
+      pairs_reads = state_out.prs;
+      timed_out = false;
+      memed_out = false;
+      nsteps = nsteps;
+      njumps = 0;
+      nsteps_sol = nsteps;
+      njumps_sol = 0 }
+  else (
+    print_endline "SEARCH IN OUT greedy";
+    let search_in_1 = make_search_in () in
+    let res_in =
+      search_in_1#iter
+        ~memout ~timeout:10
+        ~limit:1
+        (fun ostate -> ()) in
+    let ostate_in = search_in_1#best_ostate in
+    (* computing output model greedy *)
+    let search_out_1 = make_search_out [ostate_in#state] in
+    let _res_out =
+      search_out_1#iter
+        ~memout ~timeout:10
+        ~limit:1
+        (fun ostate -> ()) in
+    let ostate_out = search_out_1#best_ostate in
+    if ostate_out#state.lrido <= 0.
+    then (* success *)
+      let state_out = ostate_out#state in
+      let nsteps = search_in_1#nsteps + search_out_1#nsteps in
+      state_out,
+      { task_model = state_out.m;
+        pairs_reads = state_out.prs;
+        timed_out = false;
+        memed_out = false;
+        nsteps = nsteps;
+        njumps = 0;
+        nsteps_sol = nsteps;
+        njumps_sol = 0 }
+    else (
+      let timeout_refine = timeout_refine - 30 in
+      let timeout_in = timeout_refine / 6 in (* TODO: add parameter? *)
+      let timeout_out = timeout_refine - timeout_in in
+      (* searching best input model under timeout *)
+      print_endline "SEARCH IN mcts";
+      let search_in_2 =
+        if res_in.memed_out || res_in.timed_out
+        then make_search_in ()
+        else search_in_1 in
+      let res_in =
+        search_in_2#iter
+          ~memout ~timeout:timeout_in
+          (fun ostate -> ()) in
+      let ostates_in =
+        let all_leaves = search_in_2#all_leaves in
+        let selected_leaves =
+          sort_filter_inputs ~input_branching all_leaves in
+        Printf.printf "SEARCH selected %d/%d input models at those paths\n"
+          (List.length selected_leaves)
+          (List.length all_leaves);
+        List.iteri (fun i ostate ->
+            Printf.printf "%2d: dl=%.9f at " i ostate#state.lmd;
+            ostate#print_jumps;
+            print_newline ()
+          ) selected_leaves;
+        selected_leaves in
+      (* searching best output model given chosen input model, under timeout *)
+      print_endline "SEARCH OUT mcts";
+      let search_out_2 =
+        let states_in = List.map (fun ostate1 -> ostate1#state) ostates_in in
+        make_search_out states_in in
+      let res_out =
+        search_out_2#iter
+          ~memout ~timeout:timeout_out
+          (fun ostate -> ()) in
+      let ostate_out = search_out_2#best_ostate in
+      let state_out = ostate_out#state in
+      let ostate_in =
+        try
+          let rank_in = List.hd (List.rev ostate_out#jumps_sol) in
+          List.nth ostates_in rank_in
+        with _ -> assert false in
+      let () = (* showing solution information *)
+        Printf.printf "SOL %d + %d steps\n" ostate_in#nsteps_sol ostate_out#nsteps_sol;
+        Printf.printf "IN  dl=%.3f at path " ostate_in#state.lmd;
+        ostate_in#print_jumps; print_newline ();
+        Printf.printf "OUT dl=%.3f at path " ostate_out#state.lmd;
+        ostate_out#print_jumps; print_newline () in
+      state_out,
+      { task_model = state_out.m;
+        pairs_reads = state_out.prs;
+        timed_out = res_out.timed_out; (* no stop criteria for input *)
+        memed_out = res_in.memed_out || res_out.memed_out;
+        nsteps = search_in_2#nsteps + search_out_2#nsteps;
+        njumps = search_in_2#njumps + search_out_2#njumps;
+        nsteps_sol = ostate_in#nsteps_sol + ostate_out#nsteps_sol - 1; (* -1 because first output step chooses input model *)
+        njumps_sol = ostate_in#njumps_sol + ostate_out#njumps_sol }
+    )
+  )
 
 let learn
       ~(alpha : float)
