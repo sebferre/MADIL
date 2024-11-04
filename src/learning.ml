@@ -755,7 +755,7 @@ let learn
 
   print_endline "REFINING PHASE";
   let state_refine, result_refining =
-    refining1
+    refining0
       ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 in
