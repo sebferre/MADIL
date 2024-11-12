@@ -343,27 +343,38 @@ let test2_map_tup_myseq ~depth (x : 'a) : 'b Myseq.t =
 let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 : 'a t) (x2 : 'b t) : ('c t * 'd t) Myseq.t =
   (* delta_depth = depth(c or d) - dpeth(b) *)
   match x1, x2 with
+  | `Seq (_,i1_opt,[]), `Seq (d2,None,l2) ->
+     assert (i1_opt = None);
+     if l2 = []
+     then
+       let d = d2 + delta_depth in
+       Myseq.return (`Seq (d, None, []), `Seq (d, None, []))       
+     else Myseq.empty
   | `Seq (_,i1_opt,l1), `Seq (d2,None,l2) ->
      assert (i1_opt = None);
      let n1 = List.length l1 in
      let n2 = List.length l2 in
-     if n1 >= n2
-     then
-       let l1 = if n1 = n2 then l1 else Common.sub_list l1 0 n2 in
-       let d = d2 + delta_depth in
-       let* ly = Myseq.product_fair (List.map2 (match_myseq delta_depth f) l1 l2) in
-       let ly1, ly2 = List.split ly in
-       Myseq.return (`Seq (d, None, ly1), `Seq (d, None, ly2))
-     else Myseq.empty
+     let n1, l1 =
+       if n1 >= n2
+       then n1, l1
+       else (* assuming periodic sequence from l1 *)
+         let k = (n2 - 1) / n1 + 1 in
+         n1 * k, List.concat (List.init k (fun _ -> l1)) in
+     let l1 = if n1 = n2 then l1 else Common.sub_list l1 0 n2 in
+     let d = d2 + delta_depth in
+     let* ly = Myseq.product_fair (List.map2 (match_myseq delta_depth f) l1 l2) in
+     let ly1, ly2 = List.split ly in
+     Myseq.return (`Seq (d, None, ly1), `Seq (d, None, ly2))
+  | `Seq (_,i1_opt,[]), `Seq (d2,Some i2,[z2]) ->
+     assert (i1_opt = None);
+     Myseq.empty
   | `Seq (_,i1_opt,l1), `Seq (d2,Some i2,[z2]) ->
      assert (i1_opt = None);
-     if i2 >= 0 && i2 < List.length l1
-     then
-       let d = d2 + delta_depth in
-       let z1 = List.nth l1 i2 in
-       let* y1, y2 = match_myseq delta_depth f z1 z2 in
-       Myseq.return (`Seq (d, Some i2, [y1]), `Seq (d, Some i2, [y2]))
-     else Myseq.empty
+     let n1 = List.length l1 in
+     let d = d2 + delta_depth in
+     let z1 = List.nth l1 (i2 mod n1) in (* assuming periodic sequence from l1 *)
+     let* y1, y2 = match_myseq delta_depth f z1 z2 in
+     Myseq.return (`Seq (d, Some i2, [y1]), `Seq (d, Some i2, [y2]))
   | _, `Seq (d2,None,l2) -> (* broadcast x1 *)
      let d = d2 + delta_depth in
      let* ly = Myseq.product_fair (List.map (match_myseq delta_depth f x1) l2) in
