@@ -189,6 +189,7 @@ module type DOMAIN =
     val max_refinements : int ref
     val refinement_branching : int ref
     val input_branching : int ref
+    val solution_pool : int ref
     val search_temperature : float ref
 
     include TYPES

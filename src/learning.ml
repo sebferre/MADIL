@@ -297,14 +297,12 @@ type resource_out =
 class ['state] search
         ~(make_conts : 'state ostate -> 'state conts)
         ~(refinements : 'state -> 'state list) (* must be sorted and filtered for exploration *)
-        ~(stop_criteria : 'state -> bool)
         ~(k_state : 'state -> unit)
         (state0 : _ state as 'state) =
   let ostate0 = new ostate state0 in
   let conts = make_conts ostate0 in
   object (self)
     val mutable started = false
-    val mutable stopped = false
     val mutable best_ostate = ostate0
     val mutable all_leaves = []
     val mutable nsteps = 0
@@ -318,13 +316,13 @@ class ['state] search
     method rollout (ostate : 'state ostate) : 'state ostate =
       let rec aux ostate jump_ostates =
         let state = ostate#state in
-        if state.lmd < best_ostate#state.lmd then
+        let best_state = best_ostate#state in
+        if state.lrido < best_state.lrido
+           || state.lrido = best_state.lrido && state.lmd < best_state.lmd then
           best_ostate <- ostate;
         k_state state;
-        if stop_criteria state (* end of search *)
-        then (
-          best_ostate <- ostate;
-          stopped <- true;
+        if state.lrido <= 0. then ( (* no further compression needed *)
+          conts#push ostate jump_ostates;
           ostate)
         else
           let lstate1 = refinements state in
@@ -351,9 +349,7 @@ class ['state] search
       aux ostate []
 
     method next : 'state ostate option =
-      if stopped then
-        None
-      else if not started then (
+      if not started then (
         started <- true;
         let ostate = self#rollout ostate0 in
         all_leaves <- ostate::all_leaves;
@@ -374,23 +370,19 @@ class ['state] search
 
     method iter
              ~(memout : int) ~(timeout : int)
-             ?(limit = max_int)
-             (k : 'state ostate -> unit)
+             (k : 'state ostate -> bool) (* return true to continue, false to stop iteration *)
            : resource_out =
-      let rec aux limit =
-        if limit <= 0
-        then ()
-        else
-          match self#next with
-          | Some ostate -> k ostate; aux (limit-1)
-          | None -> ()
+      let rec aux () =
+        match self#next with
+        | Some ostate -> if k ostate then aux () else ()
+        | None -> ()
       in
       let res_opt =
         Common.do_memout memout (* Mbytes *)
           (fun () ->
             Common.do_timeout_gc (float timeout) (* seconds *)
               (fun () ->
-                aux limit)) in
+                aux ())) in
       { timed_out = (res_opt = Some None);
         memed_out = (res_opt = None) }
   end
@@ -437,7 +429,8 @@ let select_refinements ~refine_degree ~refinement_branching ~data_of_model state
   |> sort_filter_refinements ~refinement_branching
 
 let refining0
-      ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
+      ~refine_degree ~refinement_branching ~input_branching ~solution_pool
+      ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 =
   let refining =
@@ -451,13 +444,16 @@ let refining0
                  ~include_input:true
                  ~include_output:true
                  state.m state.prs state.drsi state.drso)))
-      ~stop_criteria:(fun state -> state.lrido <= 0.)
       ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
       state0 in
   let res_out =
+    let cpt = ref solution_pool in
     refining#iter
       ~memout ~timeout:timeout_refine
-      (fun ostate -> ()) in
+      (fun ostate ->
+        if ostate#state.lrido <= 0.
+        then (decr cpt; !cpt > 0)
+        else true) in
   let ostate_refine = refining#best_ostate in
   let state_refine = ostate_refine#state in
   state_refine,
@@ -526,7 +522,8 @@ let sort_filter_inputs ~input_branching all_leaves : 'state ostate list =
   else list_take input_branching (aux [sorted_leaves] [])
 
 let refining1
-      ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
+      ~refine_degree ~refinement_branching ~input_branching ~solution_pool
+      ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 =
   let make_search_in () =
@@ -540,7 +537,6 @@ let refining1
                  ~include_input:true
                  ~include_output:false
                  state.m state.prs state.drsi state.drso)))
-      ~stop_criteria:(fun state -> false)
       ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
       state0 in
   let make_search_out (states_in : 'state list) : 'state search =
@@ -560,7 +556,6 @@ let refining1
                    ~include_input:false
                    ~include_output:true
                    state.m state.prs state.drsi state.drso)))
-      ~stop_criteria:(fun state -> state.lrido <= 0.)
       ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
       state0
   in
@@ -569,8 +564,7 @@ let refining1
   let _res_out =
     search_out_0#iter
       ~memout ~timeout:10
-      ~limit:1
-      (fun ostate -> ()) in
+      (fun ostate -> false) in
   let ostate_out = search_out_0#best_ostate in
   if ostate_out#state.lrido <= 0.
   then (* success *)
@@ -591,16 +585,14 @@ let refining1
     let res_in =
       search_in_1#iter
         ~memout ~timeout:10
-        ~limit:1
-        (fun ostate -> ()) in
+        (fun ostate -> false) in
     let ostate_in = search_in_1#best_ostate in
     (* computing output model greedy *)
     let search_out_1 = make_search_out [ostate_in#state] in
     let _res_out =
       search_out_1#iter
         ~memout ~timeout:10
-        ~limit:1
-        (fun ostate -> ()) in
+        (fun ostate -> false) in
     let ostate_out = search_out_1#best_ostate in
     if ostate_out#state.lrido <= 0.
     then (* success *)
@@ -628,7 +620,7 @@ let refining1
       let res_in =
         search_in_2#iter
           ~memout ~timeout:timeout_in
-          (fun ostate -> ()) in
+          (fun ostate -> true) in
       let ostates_in =
         let all_leaves = search_in_2#all_leaves in
         let selected_leaves =
@@ -650,7 +642,7 @@ let refining1
       let res_out =
         search_out_2#iter
           ~memout ~timeout:timeout_out
-          (fun ostate -> ()) in
+          (fun ostate -> ostate#state.lrido > 0.) in
       let ostate_out = search_out_2#best_ostate in
       let state_out = ostate_out#state in
       let ostate_in =
@@ -706,7 +698,8 @@ let learn
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> dl -> unit)
 
       ~memout ~timeout_refine ~timeout_prune
-      ~(refinement_branching : int) ~(input_branching : int) ~(refine_degree : int)
+      ~(refinement_branching : int) ~(input_branching : int)
+      ~(refine_degree : int) ~(solution_pool : int)
       ~(search_temperature : float)
       ~env (* environment data to the input model *)
       ~init_task_model
@@ -756,7 +749,8 @@ let learn
   print_endline "REFINING PHASE";
   let state_refine, result_refining =
     refining0
-      ~refine_degree ~refinement_branching ~input_branching ~timeout_refine ~memout
+      ~refine_degree ~refinement_branching ~input_branching ~solution_pool
+      ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~log_refining
       state0 in
   (* pruning phase *) (* TODO: use search to define it *)

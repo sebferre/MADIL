@@ -218,6 +218,7 @@ let print_learned_model
           ~refinement_branching:(!refinement_branching)
           ~input_branching:(!input_branching)
           ~refine_degree:(!max_refinements)
+          ~solution_pool:(!solution_pool)
           ~search_temperature:(!search_temperature)
           ~env ~init_task_model
           task.train
