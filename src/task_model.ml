@@ -210,7 +210,15 @@ let apply
       List.stable_sort
         (fun (_,_,dl1) (_,_,dl2) -> dl_compare dl1 dl2)
         l_di_do_dl in
-    Result.Ok l_di_do_dl)
+    let _, rev_l_di_do_dl = (* removing duplicate generated values *)
+      List.fold_left
+        (fun (seen,res) (di,do_,dl as x) ->
+          let vo = Data.value do_ in
+          if List.mem vo seen
+          then (seen, res)
+          else (vo::seen, x::res))
+        ([],[]) l_di_do_dl in
+    Result.Ok (List.rev rev_l_di_do_dl))
 
 
 (* refinements *)
