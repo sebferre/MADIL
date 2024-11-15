@@ -47,8 +47,8 @@ type arc_state =
     dsro : reads; (* output reads *)
     dls : Task_model.dl_split; (* DL components *)
     norm_dls : Task_model.dl_split; (* normalized DL components *)
-    norm_lmd : Mdl.bits; (* global normalized DL, with ldi=lri in pruning mode *)
-    norm_lrido : Mdl.bits; (* input rank + output data *)
+    norm_ldescr : Mdl.bits; (* description-oriented DL *)
+    norm_lpred : Mdl.bits; (* prediction-oriented DL *)
     mutable suggestions : arc_suggestion list;
   }
 and arc_suggestion =
@@ -88,11 +88,11 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       prs; dsri; dsro;
       dls;
       norm_dls;
-      norm_lmd=
+      norm_ldescr =
         (match stage with
-         | Build -> norm_dls.md.io
-         | Prune -> norm_dls.m.io +. norm_dls.r.i +. norm_dls.d.o);
-      norm_lrido = norm_dls.r.i +. norm_dls.d.o;
+         | Build -> norm_dls.descr
+         | Prune -> norm_dls.m.io +. norm_dls.pred);
+      norm_lpred = norm_dls.pred;
       suggestions = [] }
   with exn ->
     print_endline "FAILURE to compute new state for some refinement";
@@ -144,10 +144,10 @@ object
                     (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r focus.env m focus.info_o with
                      | Result.Ok state ->
                         let compressive =
-                          state.norm_lmd < focus.norm_lmd
+                          state.norm_ldescr < focus.norm_ldescr
                           && (if focus.stage = Prune && state.stage = Prune
                               then (* in pruning stage, L(input rank + output data|M) must not increase *)
-                                state.norm_lrido <= focus.norm_lrido
+                                state.norm_lpred <= focus.norm_lpred
                               else true) in
                         (if compressive then quota_compressive - 1 else quota_compressive),
                         (compressive,state)::refinements,
@@ -170,8 +170,8 @@ object
                  | Build -> s2.refinement_support, s1.refinement_support
                  | Prune -> s1.refinement_support, s2.refinement_support in*)
                Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
-                 (compr2, (*sup1,*) s1.norm_lmd, s1.refinement)
-                 (compr1, (*sup2,*) s2.norm_lmd, s2.refinement)) in
+                 (compr2, (*sup1,*) s1.norm_ldescr, s1.refinement)
+                 (compr1, (*sup2,*) s2.norm_ldescr, s2.refinement)) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask
@@ -266,7 +266,7 @@ let xml_of_focus focus =
                      (match focus.stage with
                       | Build -> "building stage"
                       | Prune -> "pruning stage"))];
-      [Syntax.Kwd (Printf.sprintf "DL = %f / %frido" focus.norm_lmd focus.norm_lrido)];
+      [Syntax.Kwd (Printf.sprintf "DL = %f / %frido" focus.norm_ldescr focus.norm_lpred)];
       [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi / %.3fri + %.3fdo / %.3fro) = %.3fi + %.3fo" l.md.io l.m.io l.d.io l.m.i l.m.o l.d.i l.r.i l.d.o l.r.o l.md.i l.md.o)];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.input_model)];
       [Syntax.Kwd " ⬇ "];
@@ -294,7 +294,7 @@ let html_of_suggestion ~input_dico = function
      "reset current task"
   | ChangeStage s ->
      Jsutils.escapeHTML
-       (Printf.sprintf "(%.3f / %.3frido) switch to %s stage " s.norm_lmd s.norm_lrido
+       (Printf.sprintf "(%.3f / %.3frido) switch to %s stage " s.norm_ldescr s.norm_lpred
           (match s.stage with Build -> "building" | Prune -> "pruning"))
   | ChangeIncludeRefs s ->
      let inc = s.include_refs in
@@ -305,7 +305,7 @@ let html_of_suggestion ~input_dico = function
      Jsutils.escapeHTML label
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
-       (Printf.sprintf "(%.3f / %.3f)  " s.norm_lmd s.norm_lrido
+       (Printf.sprintf "(%.3f / %.3f)  " s.norm_ldescr s.norm_lpred
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
   | FailedRefinement (r,err) ->
      Html.span ~classe:"failed-refinement"
@@ -390,13 +390,16 @@ let w_results : (col, unit, cell) Widget_table.widget =
 let render_place place k =
   let get_pred ~test m vi vo =
     let focus = place#focus in
-    try
-      match apply ~env:focus.env m vi focus.info_o with
-      | Result.Ok [] -> Error "No valid prediction"
-      | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
-      | Result.Error exn -> Error (Printexc.to_string exn)
-    with exn ->
-      Error ("Unexpected error: " ^ Printexc.to_string exn)
+    if focus.dls.d.o <= 0.
+    then
+      try
+        match apply ~env:focus.env m vi focus.info_o with
+        | Result.Ok [] -> Error "No valid prediction"
+        | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
+        | Result.Error exn -> Error (Printexc.to_string exn)
+      with exn ->
+        Error ("Unexpected error: " ^ Printexc.to_string exn)
+    else Error "Not yet definite"
   in
  Jsutils.jquery "#lis-suggestions" (fun elt_lis ->
   let> _ = Jsutils.toggle_class elt_lis "computing" in (* turn on *)

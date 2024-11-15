@@ -391,7 +391,8 @@ let dl_data
 
 let dl_parse_rank (rank : int) : dl =
   (* penalty DL for parse rank, starting at 0 *)
-  Mdl.Code.universal_int_star rank -. 1.
+  float rank (* exponential decay of probability *)
+  (* Mdl.Code.universal_int_star rank -. 1. *)
   
 (* model encoding *)
 
@@ -609,8 +610,7 @@ let read
   let input = input_of_value t v in
   let* best_parses = Myseq.from_result (parse_bests m bindings input) in
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
-  let dl_rank = dl_parse_rank rank in
-  let dl = dl +. dl_rank in (* to penalize later parses, in case of equivalent parses *)
+  let dl_rank = dl_parse_rank rank in (* to penalize later parses, in case of equivalent parses, only for prediction *)
   Myseq.return { env; bindings; lazy_index=None; data; dl_rank; dl })
 
 let does_parse_value

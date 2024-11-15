@@ -127,6 +127,8 @@ type dl_split =
     r : dl_io; (* rank *)
     d : dl_io; (* data, including rank *)
     md : dl_io; (* model+data *)
+    descr : dl; (* for description *)
+    pred : dl; (* for prediction *)
   }
 
 let dl_model_data
@@ -149,7 +151,10 @@ let dl_model_data
   { m = {i=lmi; o=lmo; io=lmi +. lmo};
     r = {i=lri; o=lro; io=lri +. lro};
     d = {i=ldi; o=ldo; io=ldi +. ldo};
-    md = {i=lmdi; o=lmdo; io=lmdi +. lmdo} }
+    md = {i=lmdi; o=lmdo; io=lmdi +. lmdo};
+    descr = lmdi +. lmdo;
+    pred = lri +. lro +. ldo;
+  }
 
 let make_norm_dl_model_data
       ~(alpha : float)
@@ -167,7 +172,10 @@ let make_norm_dl_model_data
   { m = {i=nlmi; o=nlmo; io=nlmi +. nlmo};
     r = {i=nlri; o=nlro; io=nlri +. nlro};
     d = {i=nldi; o=nldo; io=nldi +. nldo};
-    md = {i=nlmdi; o=nlmdo; io=nlmdi +. nlmdo} }
+    md = {i=nlmdi; o=nlmdo; io=nlmdi +. nlmdo};
+    descr = nlmdi +. nlmdo;
+    pred = nlri +. nlro +. nldo;
+  }
 
 
 (* applying a task model to an input *)

@@ -25,8 +25,8 @@ type ('typ,'value,'var,'constr,'func) state =
     drsi : ('typ,'value,'constr,'var,'func) Task_model.reads; (* input reads *)
     drso : ('typ,'value,'constr,'var,'func) Task_model.reads; (* output reads *)
     dl_split : dl_split; (* all DLs *)
-    lmd : dl; (* whole normalized DL, with ldi=lri in pruning mode *)
-    lrido : dl; (* input rank + output data normalized DL *)
+    ldescr : dl; (* whole DL, without ldi in pruning mode *)
+    lpred : dl; (* input rank + output rank + output data DL *)
   }
 
 (* encapsulation of state and search path information *)
@@ -124,11 +124,11 @@ class ['state] conts_v1 =
 let make_conts_v1 () = (new conts_v1 :> 'state conts)
 
 class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state conts) =
-  (* choosing a final based on softmax of the reached DL (lmd), tuned by temperature,
+  (* choosing a final based on softmax of the reached DL (ldescr), tuned by temperature,
      then choosing a related cont according to a specified conts (make_subconts) *) 
   object
     inherit ['state] conts
-    val mutable final_conts : (float (* exp(lmd) *) * 'state ostate, 'state conts) Mymap.t = Mymap.empty
+    val mutable final_conts : (float (* exp(ldescr) *) * 'state ostate, 'state conts) Mymap.t = Mymap.empty
     val mutable sum_exp : float = 0.
 
     method is_empty = Mymap.is_empty final_conts
@@ -136,7 +136,7 @@ class ['state] conts_softmax ~(temp : float) ~(make_subconts : unit -> 'state co
     method goto ostate = ()
     
     method push final_ostate jump_ostates =
-      let exp = 2. ** (-. final_ostate#state.lmd /. temp) in (* lower DL, higher weight *)
+      let exp = 2. ** (-. final_ostate#state.ldescr /. temp) in (* lower DL, higher weight *)
       let k = (-. exp, final_ostate) in (* negative for sorting by decreasing weight, final_ostate to distinguish same-exp finals *)
       let subconts =
         match Mymap.find_opt k final_conts with
@@ -193,7 +193,7 @@ let init_info () : 'node mcts_info =
 
 class ['state] conts_mcts ?(c : float = sqrt 2.) (root : 'state ostate) =
   let value_of_ostate (ostate : 'node) : float =
-    1. -. ostate#state.lmd /. 2. (* lmd normalized to [0,1] *)
+    1. -. ostate#state.ldescr /. 2. (* ldescr normalized to [0,1] *)
   in
   object (self)
     inherit ['state] conts
@@ -317,11 +317,11 @@ class ['state] search
       let rec aux ostate jump_ostates =
         let state = ostate#state in
         let best_state = best_ostate#state in
-        if state.lrido < best_state.lrido
-           || state.lrido = best_state.lrido && state.lmd < best_state.lmd then
+        if state.lpred < best_state.lpred
+           || state.lpred = best_state.lpred && state.ldescr < best_state.ldescr then
           best_ostate <- ostate;
         k_state state;
-        if state.lrido <= 0. then ( (* no further compression needed *)
+        if state.lpred <= 0. then ( (* no further compression needed *)
           conts#push ostate jump_ostates;
           ostate)
         else
@@ -392,7 +392,7 @@ let sort_filter_refinements ~refinement_branching lstate1 =
   let lstate1 =
     List.sort
       (fun state1 state2 ->
-        Stdlib.compare (state1.lmd, state1.r) (state2.lmd, state2.r))
+        Stdlib.compare (state1.ldescr, state1.r) (state2.ldescr, state2.r))
       lstate1 in
   match lstate1 with
   | [] -> []
@@ -423,7 +423,7 @@ let select_refinements ~refine_degree ~refinement_branching ~data_of_model state
          match data_of_model ~pruning:false r1 m1 with
          | None -> None (* failure to parse with model m1 *)
          | Some state1 ->
-            if state1.lmd < state.lmd
+            if state1.ldescr < state.ldescr
             then Some state1
             else None)
   |> sort_filter_refinements ~refinement_branching
@@ -444,14 +444,14 @@ let refining0
                  ~include_input:true
                  ~include_output:true
                  state.m state.prs state.drsi state.drso)))
-      ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
+      ~k_state:(fun state -> log_refining state.r state.m state.prs state.ldescr state.lpred)
       state0 in
   let res_out =
     let cpt = ref solution_pool in
     refining#iter
       ~memout ~timeout:timeout_refine
       (fun ostate ->
-        if ostate#state.lrido <= 0.
+        if ostate#state.lpred <= 0.
         then (decr cpt; !cpt > 0)
         else true) in
   let ostate_refine = refining#best_ostate in
@@ -472,7 +472,7 @@ let sort_filter_inputs ~input_branching all_leaves : 'state ostate list =
   (* best leaf, then best leaf of each 1-prefix, then best leaf of each 2-prefix, etc. *)
   let leaves =
     List.map
-      (fun ostate -> (ostate#state.lmd, List.rev ostate#jumps_sol, ostate))
+      (fun ostate -> (ostate#state.ldescr, List.rev ostate#jumps_sol, ostate))
       all_leaves in
   let sorted_leaves = (* sort by increasing DL *)
     leaves
@@ -537,7 +537,7 @@ let refining1
                  ~include_input:true
                  ~include_output:false
                  state.m state.prs state.drsi state.drso)))
-      ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
+      ~k_state:(fun state -> log_refining state.r state.m state.prs state.ldescr state.lpred)
       state0 in
   let make_search_out (states_in : 'state list) : 'state search =
     new search
@@ -556,7 +556,7 @@ let refining1
                    ~include_input:false
                    ~include_output:true
                    state.m state.prs state.drsi state.drso)))
-      ~k_state:(fun state -> log_refining state.r state.m state.prs state.lmd state.lrido)
+      ~k_state:(fun state -> log_refining state.r state.m state.prs state.ldescr state.lpred)
       state0
   in
   print_endline "SEARCH OUT greedy";
@@ -566,7 +566,7 @@ let refining1
       ~memout ~timeout:10
       (fun ostate -> false) in
   let ostate_out = search_out_0#best_ostate in
-  if ostate_out#state.lrido <= 0.
+  if ostate_out#state.lpred <= 0.
   then (* success *)
     let state_out = ostate_out#state in
     let nsteps = search_out_0#nsteps in
@@ -594,7 +594,7 @@ let refining1
         ~memout ~timeout:10
         (fun ostate -> false) in
     let ostate_out = search_out_1#best_ostate in
-    if ostate_out#state.lrido <= 0.
+    if ostate_out#state.lpred <= 0.
     then (* success *)
       let state_out = ostate_out#state in
       let nsteps = search_in_1#nsteps + search_out_1#nsteps in
@@ -629,7 +629,7 @@ let refining1
           (List.length selected_leaves)
           (List.length all_leaves);
         List.iteri (fun i ostate ->
-            Printf.printf "%2d: dl=%.9f at " i ostate#state.lmd;
+            Printf.printf "%2d: dl=%.9f at " i ostate#state.ldescr;
             ostate#print_jumps;
             print_newline ()
           ) selected_leaves;
@@ -642,7 +642,7 @@ let refining1
       let res_out =
         search_out_2#iter
           ~memout ~timeout:timeout_out
-          (fun ostate -> ostate#state.lrido > 0.) in
+          (fun ostate -> ostate#state.lpred > 0.) in
       let ostate_out = search_out_2#best_ostate in
       let state_out = ostate_out#state in
       let ostate_in =
@@ -652,9 +652,9 @@ let refining1
         with _ -> assert false in
       let () = (* showing solution information *)
         Printf.printf "SOL %d + %d steps\n" ostate_in#nsteps_sol ostate_out#nsteps_sol;
-        Printf.printf "IN  dl=%.3f at path " ostate_in#state.lmd;
+        Printf.printf "IN  dl=%.3f at path " ostate_in#state.ldescr;
         ostate_in#print_jumps; print_newline ();
-        Printf.printf "OUT dl=%.3f at path " ostate_out#state.lmd;
+        Printf.printf "OUT dl=%.3f at path " ostate_out#state.ldescr;
         ostate_out#print_jumps; print_newline () in
       state_out,
       { task_model = state_out.m;
@@ -721,12 +721,12 @@ let learn
           let l = norm_dl_model_data prs in
           let drsi, drso = split_pairs_read prs in
           Some {r; m; prs; drsi; drso; dl_split=l;
-                lmd = (if pruning then l.m.io +. l.r.i +. l.d.o else l.md.io);
-                lrido = l.r.i +. l.d.o }
+                ldescr = (if pruning then l.m.io +. l.pred else l.descr);
+                lpred = l.pred }
         else None in
       let status =
         match state_opt with
-        | Some state -> `Success (state.prs, state.drsi, state.drso, state.dl_split, state.lmd)
+        | Some state -> `Success (state.prs, state.drsi, state.drso, state.dl_split, state.ldescr)
         | None -> `Failure in
       log_reading r m ~status;
       state_opt
@@ -757,7 +757,7 @@ let learn
   let state_prune_ref = ref state_refine in
   let nsteps_prune_ref = ref 0 in
   let rec loop_prune state =
-    log_refining state.r state.m state.prs state.lmd state.lrido;
+    log_refining state.r state.m state.prs state.ldescr state.lpred;
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
       myseq_find_map_k refine_degree
         (fun (r1,m1_res) ->
@@ -765,7 +765,7 @@ let learn
           match data_of_model ~pruning:true r1 m1 with
           | None -> None (* failure to parse with model m1 *)
           | Some state1 ->
-             if state1.lmd < state.lmd && state1.lrido <= state.lrido (* must not degrade parse ranks and output data *)
+             if state1.ldescr < state.ldescr && state1.lpred <= state.lpred (* must not degrade parse ranks and output data *)
              then Some state1
              else None)
         (Common.prof "Learning.task_prunings" (fun () ->
@@ -773,7 +773,7 @@ let learn
     let lstate1 =
       List.sort
         (fun state1 state2 ->
-          Stdlib.compare (state1.lmd, state1.r) (state2.lmd, state2.r))
+          Stdlib.compare (state1.ldescr, state1.r) (state2.ldescr, state2.r))
         lstate1 in
     match lstate1 with
     | [] -> ()
