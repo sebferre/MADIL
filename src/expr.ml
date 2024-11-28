@@ -99,6 +99,7 @@ module type EXPRSET =
     val add_const : 'value -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
     val add_ref : 'var -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
     val add_apply : 'func -> ('typ,'value,'var,'func) t array -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
+    val union : ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) t
   end
 
 (* DEPRECATED
@@ -343,6 +344,7 @@ module Exprset_new : EXPRSET =
             es.applies }
 
     let rec union es1 es2 = (* not used, not tested *)
+      Common.prof "Expr.Exprset.union" (fun () ->
       assert (es1.typ = es2.typ);
       { typ = es1.typ;
         consts = Bintree.union es1.consts es2.consts;
@@ -362,7 +364,7 @@ module Exprset_new : EXPRSET =
            | None, None -> None
            | None, Some es2 -> Some es2
            | Some es1, None -> Some es1
-           | Some es1, Some es2 -> Some (union es1 es2)) } 
+           | Some es1, Some es2 -> Some (union es1 es2)) })
                   
     let rec inter es1 es2 = (* not used, not tested *)
       assert (es1.typ = es2.typ);
@@ -451,67 +453,7 @@ module Exprset = Exprset_new
         
   end*)
 
-(* indexes : idea inspired from FlashMeta *)
-
-module Index =
-  struct
-    type ('typ,'value,'var,'func) t = ('typ * 'value, ('typ,'value,'var,'func) Exprset.t) Mymap.t
-
-    let xp
-          ~(xp_typ : 'typ html_xp)
-          ~(xp_value : 'value html_xp)
-          ~(xp_var : 'var html_xp)
-          ~(xp_func : 'func html_xp)
-        : ?on_typ:('typ -> bool) -> ('typ,'value,'var,'func) t html_xp =
-      let xp_exprset = Exprset.xp ~xp_value ~xp_var ~xp_func in
-      fun ?(on_typ : 'typ -> bool = fun _ -> true)
-          ~html print index ->
-      print#string "INDEX";
-      xp_newline ~html print ();
-      Mymap.iter
-        (fun (t,v) es ->
-          if on_typ t then (
-            xp_typ ~html print t;
-            print#string " ";
-            xp_value ~html print v;
-            print#string " = ";
-            xp_exprset ~html print es;
-            xp_newline ~html print ()
-        ))
-        index
-
-    let empty = Mymap.empty
-                
-    let bind_ref (tv : 'typ * 'value) (x : 'var) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t =
-      Mymap.update tv
-        (function
-         | None -> Some (Exprset.add_ref x (Exprset.empty (fst tv)))
-         | Some es -> Some (Exprset.add_ref x es))
-        index
-      
-    let bind_apply (tv : 'typ * 'value) (f : 'func) (es_args : ('typ,'value,'var,'func) Exprset.t array) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) t = (* QUICK *)
-      Mymap.update tv
-        (function
-         | None -> Some (Exprset.add_apply f es_args (Exprset.empty (fst tv)))
-         | Some es -> Some (Exprset.add_apply f es_args es))
-        index
-      
-    let find_opt = Mymap.find_opt
-
-    let fold = Mymap.fold
-
-    let iter = Mymap.iter
-                
-    let lookup (tv : 'typ * 'value) (index : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) Exprset.t =
-      match find_opt tv index with
-      | None -> Exprset.empty (fst tv)
-      | Some exprs -> exprs
-  end
-           
-let index_add_bindings index (bindings : ('var,'typ,'value) bindings) : ('typ,'value,'var,'func) Index.t =
-  Mymap.fold
-    (fun x tv res -> Index.bind_ref tv x res)
-    bindings index
+(* func args specs *)
 
 type ('typ,'value,'func) args_spec =
   [ `Default
@@ -521,7 +463,9 @@ and ('typ,'value,'func) arg_spec =
   | `Val of 'typ * 'value
   | `Apply of 'typ * 'func * ('typ,'value,'func) arg_spec array ]
 
-let rec eval_arg_spec ~eval_func k v_args_k es_args_k = function
+let rec eval_arg_spec ~eval_func k v_args_k es_args_k =
+  (* arity, arg values, arg exprsets *)
+  function
   | `Pos i ->
      if i>=0 && i < k
      then Result.Ok (v_args_k.(i), es_args_k.(i))
@@ -538,17 +482,87 @@ and eval_arg_spec_ar ~eval_func k v_args_k es_args_k arg_spec_ar =
   Result.Ok (Array.split ar)
 
 
+(* indexes : idea inspired from FlashMeta *)
+
+class virtual ['typ,'value,'var,'func] index =
+  object
+    method virtual xp : xp_typ:'typ html_xp ->
+                        xp_value:'value html_xp ->
+                        xp_var:'var html_xp ->
+                        xp_func:'func html_xp ->
+                        ?on_typ:('typ -> bool) ->
+                        unit html_xp
+    method virtual lookup : 'typ * 'value -> ('typ,'value,'var,'func) Exprset.t    
+  end
+
+class ['typ,'value,'var,'func] index_bind =
+  object
+    inherit ['typ,'value,'var,'func] index
+    
+    val mutable index : ('typ * 'value, ('typ,'value,'var,'func) Exprset.t) Mymap.t = Mymap.empty
+
+    method bind_ref tv x =
+      index <-
+        Mymap.update tv
+          (function
+           | None -> Some (Exprset.add_ref x (Exprset.empty (fst tv)))
+           | Some es -> Some (Exprset.add_ref x es))
+          index
+      
+    method bind_apply tv f es_args = (* QUICK *)
+      index <-
+        Mymap.update tv
+          (function
+           | None -> Some (Exprset.add_apply f es_args (Exprset.empty (fst tv)))
+           | Some es -> Some (Exprset.add_apply f es_args es))
+          index
+      
+    method xp ~xp_typ ~xp_value ~xp_var ~xp_func =
+      let xp_exprset = Exprset.xp ~xp_value ~xp_var ~xp_func in
+      fun ?(on_typ : 'typ -> bool = fun _ -> true)
+          ~html print () ->
+      print#string "INDEX";
+      xp_newline ~html print ();
+      Mymap.iter
+        (fun (t,v) es ->
+          if on_typ t then (
+            xp_typ ~html print t;
+            print#string " ";
+            xp_value ~html print v;
+            print#string " = ";
+            xp_exprset ~html print es;
+            xp_newline ~html print ()
+        ))
+        index
+
+    method lookup tv =
+      match Mymap.find_opt tv index with
+      | None -> Exprset.empty (fst tv)
+      | Some exprs -> exprs
+
+    method fold : 'acc. ('tv -> 'es -> 'acc -> 'acc) -> 'acc -> 'acc =
+      fun f acc ->
+      Mymap.fold f index acc
+
+    method iter (f : 'tv -> 'es -> unit) = Mymap.iter f index
+
+  end
+
+let index_add_bindings index (bindings : ('var,'typ,'value) bindings) : unit =
+  Mymap.iter
+    (fun x tv -> index#bind_ref tv x)
+    bindings
+
 let index_apply_functions_1
       ~(eval_func : 'func -> 'value array -> 'value result)
       index
       (get_functions : 'typ -> 'value -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
-    : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
-  let res = index in (* index as initial result *)
-  Index.fold
-    (fun (t1,v1) es1 res ->
+    : unit = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
+  index#iter
+    (fun (t1,v1) es1 ->
       get_functions t1 v1
-      |> List.fold_left
-           (fun res (t,f,args_spec) ->
+      |> List.iter
+           (fun (t,f,args_spec) ->
              let vfes_res =
                let| v_args, es_args =
                  match args_spec with
@@ -557,28 +571,25 @@ let index_apply_functions_1
                let| v = eval_func f v_args in
                Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
              match vfes_res with
-             | Result.Ok (v,f,es_args) -> Index.bind_apply (t,v) f es_args res
-             | Result.Error _ -> res)
-           res)
-    index (* iterating on index *)
-    res
+             | Result.Ok (v,f,es_args) -> index#bind_apply (t,v) f es_args
+             | Result.Error _ -> ())
+    )
 
 let index_apply_functions_2
       ~(eval_func : 'func -> 'value array -> 'value result)
       index
       (filter_1 : 'typ * 'value -> bool)
       (get_functions : 'typ -> 'value -> 'typ -> 'value -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
-    : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
-  let res = index in (* index as initial result *)
-  Index.fold
-    (fun (t1,v1 as tv1) es1 res ->
+    : unit = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
+  index#iter
+    (fun (t1,v1 as tv1) es1 ->
       if filter_1 tv1
       then
-        Index.fold
-          (fun (t2,v2) es2 res ->
+        index#iter
+          (fun (t2,v2) es2 ->
             get_functions t1 v1 t2 v2
-            |> List.fold_left
-                 (fun res (t,f,args_spec) ->
+            |> List.iter
+                 (fun (t,f,args_spec) ->
                    let vfes_res =
                      let| v_args, es_args =
                        match args_spec with
@@ -587,33 +598,30 @@ let index_apply_functions_2
                      let| v = eval_func f v_args in
                      Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
                    match vfes_res with
-                   | Result.Ok (v,f,es_args) -> Index.bind_apply (t,v) f es_args res
-                   | Result.Error _ -> res)
-                 res)
-          index res
-      else res)
-    index (* iterating on index *)
-    res
+                   | Result.Ok (v,f,es_args) -> index#bind_apply (t,v) f es_args
+                   | Result.Error _ -> ())
+          )
+      else ())
 
 let index_apply_functions
       ~(eval_func : 'func -> 'value array -> 'value result)
       index
       (max_arity : int)
       (get_functions : 'typ array * 'value array -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
-    : ('typ,'value,'var,'func) Index.t = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
+    : unit = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   let args_k =
     Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
       (fun k -> (* three undefined arrays for types, values, and exprsets *)
         Array.make k (Obj.magic () : 'typ),
         Array.make k (Obj.magic () : 'value),
         Array.make k (Obj.magic () : ('typ,'value,'var,'func) Exprset.t)) in
-  let rec aux k res =
-    let res = (* generating and applying functions for arity k *)
+  let rec aux k =
+    let () = (* generating and applying functions for arity k *)
       let t_args_k, v_args_k, es_args_k = args_k.(k) in
       let es_args_k = Array.copy es_args_k in (* because it is inserted into the index *)
       get_functions (t_args_k, v_args_k)
-      |> List.fold_left
-           (fun res (t,f,args_spec) ->
+      |> List.iter
+           (fun (t,f,args_spec) ->
              let vfes_res =
                let| v_args, es_args =
                  match args_spec with
@@ -622,24 +630,48 @@ let index_apply_functions
                let| v = eval_func f v_args in
                Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
              match vfes_res with
-             | Result.Ok (v,f,es_args) -> Index.bind_apply (t,v) f es_args res
-             | Result.Error _ -> res)
-           res in
+             | Result.Ok (v,f,es_args) -> index#bind_apply (t,v) f es_args
+             | Result.Error _ -> ())
+    in
     if k >= max_arity
-    then res
+    then ()
     else
-      Index.fold
-        (fun (t,v) es res ->
-          for l = k+1 to max_arity do (* comleting the arrays at position k *)
+      index#iter
+        (fun (t,v) es ->
+          for l = k+1 to max_arity do (* completing the arrays at position k *)
             let ts, vs, ess = args_k.(l) in
             ts.(k) <- t;
             vs.(k) <- v;
             ess.(k) <- es
           done;
-          aux (k+1) res)
-        index res
+          aux (k+1))
   in
-  aux 0 index
+  aux 0
+
+
+class ['typ,'value,'var,'func] index_union =
+  object
+    inherit ['typ,'value,'var,'func] index
+
+    val mutable indexes : ('typ,'value,'var,'func) index list = []
+
+    method add_index (index : ('typ,'value,'var,'func) index) : unit =
+      indexes <- index::indexes
+
+    method xp ~xp_typ ~xp_value ~xp_var ~xp_func
+             ?on_typ ~html print () =
+      List.iteri
+        (fun i index ->
+          print#string "INDEX "; print#int i; xp_newline ~html print ();
+          index#xp ~xp_typ ~xp_value ~xp_var ~xp_func ?on_typ ~html print ())
+        indexes
+
+    method lookup tv =
+      List.fold_left
+        (fun res index -> Exprset.union res (index#lookup tv))
+        (Exprset.empty (fst tv)) indexes
+
+  end
 
 
 (* expr encoding *)

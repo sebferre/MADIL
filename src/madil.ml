@@ -74,7 +74,7 @@ module type TYPES =
     type generator = (generator_info,var,typ,value,constr) Model.generator
     type parseur = (input,var,typ,value,constr) Model.parseur
 
-    type expr_index = (typ,value,var,func) Expr.Index.t
+    type expr_index = (typ,value,var,func) Expr.index
     val xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp
 
     type best_reads = (typ,value,constr,var,func) Refining.best_read list
@@ -135,8 +135,10 @@ module Defined_types (T : BASIC_TYPES) =
     type generator = (generator_info,var,typ,value,constr) Model.generator
     type parseur = (input,var,typ,value,constr) Model.parseur
 
-    type expr_index = (typ,value,var,func) Expr.Index.t
-    let xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp = Expr.Index.xp ~xp_typ ~xp_value ~xp_var ~xp_func
+    type expr_index = (typ,value,var,func) Expr.index
+    let xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp =
+      fun ?on_typ ~html print index ->
+      index#xp ~xp_typ ~xp_value ~xp_var ~xp_func ~html print ()
 
     type best_reads = (typ,value,constr,var,func) Refining.best_read list
 

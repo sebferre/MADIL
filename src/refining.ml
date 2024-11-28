@@ -223,7 +223,7 @@ let refinements
       ~(dl_data : (('value,'constr) Data.data as 'data) -> dl)
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : 'model -> ('input,'var,'typ,'value,'constr) Model.parse_bests)
-      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)      
+      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.index)      
       ~(decompositions : 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
       ~(refinements_value : 'typ -> 'value -> 'varseq -> ('model * 'varseq) list)
       ~(refinements_any : 'typ -> 'varseq -> 'value -> ('model * 'varseq) list)
@@ -535,9 +535,9 @@ let refinements
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
            let v = Data.value data in
            let s_expr = (* index expressions evaluating to v *)
-             Expr.Exprset.to_seq ~max_expr_size
-               (Expr.Index.lookup (t, v)
-                  (Model.force_index ~make_index read)) in
+             let index = Model.force_index ~make_index read in
+             let es = index#lookup (t,v) in
+             Expr.Exprset.to_seq ~max_expr_size es in
            s_expr
            |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
            |> Myseq.fold_left
@@ -628,9 +628,8 @@ let refinements
         match data with
         | Data.DAlt (_prob, b, d12) ->
            let vc = value_of_bool b in
-           let es : _ Expr.Exprset.t =
-             Expr.Index.lookup (typ_bool, vc)
-               (Model.force_index ~make_index read) in
+           let index = Model.force_index ~make_index read in
+           let es : _ Expr.Exprset.t = index#lookup (typ_bool, vc) in
            let new_data = Data.DAlt (1.,b,d12) in
            Myseq.fold_left
              (fun rs e -> (e, varseq, Result.Ok new_data) :: rs)

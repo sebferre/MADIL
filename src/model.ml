@@ -537,15 +537,15 @@ let dl
 type ('typ,'value,'constr,'var,'func) read =
   { env : ('value,'constr) data;
     bindings : ('var,'typ,'value) Expr.bindings;
-    mutable lazy_index : ('typ,'value,'var,'func) Expr.Index.t option; (* not using Lazy.t because breaks comparisons and hash *)
+    mutable lazy_index : ('typ,'value,'var,'func) Expr.index option; (* not using Lazy.t because breaks comparisons and hash *)
     data : ('value,'constr) data;
     dl_rank : dl;
     dl : dl } (* including rank *)
 
 let force_index
-      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.Index.t)
+      ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.index)
       (read : ('typ,'value,'constr,'var,'func) read)
-    : ('typ,'value,'var,'func) Expr.Index.t =
+    : ('typ,'value,'var,'func) Expr.index =
   match read.lazy_index with
   | Some index -> index
   | None ->
