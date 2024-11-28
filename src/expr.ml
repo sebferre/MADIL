@@ -61,7 +61,25 @@ let xp_bindings
       xp_value ~html print v;
       xp_newline ~html print ())
     bindings
-  
+
+let size_expr_ast (* used for DL computing, check consistency *)
+    : ('typ,'value,'var,'func) expr -> int =
+  let rec aux = function
+    | Const (t,v) -> 1
+    | Ref (t,x) -> 1
+    | Apply (t,f,args) ->
+       Array.fold_left
+         (fun res arg ->
+           match arg with
+           | Const _ -> res (* const arg considered as function param *)
+           | _ -> res + aux arg)
+         1 args
+    | Arg t -> 1
+    | Fun (t,e1) -> 1 + aux e1
+  in
+  aux
+
+
 (* expression evaluation *)
 
 let eval
@@ -206,7 +224,9 @@ module Exprset_new : EXPRSET =
         args : bool;
         funs : ('typ,'value,'var,'func) t option }
       
-    let rec to_seq es : ('typ,'value,'var,'func) expr Myseq.t =
+    let rec to_seq ~(max_expr_size : int) es : ('typ,'value,'var,'func) expr Myseq.t =
+      if max_expr_size <= 0 then Myseq.empty
+      else
       let t = es.typ in
       Myseq.concat
         [ (let* v = Myseq.from_bintree es.consts in
@@ -222,7 +242,8 @@ module Exprset_new : EXPRSET =
              (List.map
                 (fun (f, es_args_set) ->
                   let* es_args = Myseq.from_bintree es_args_set in
-                  let seq_args = Array.map to_seq es_args in
+                  let k = Array.length es_args in
+                  let seq_args = Array.map (to_seq ~max_expr_size:(max_expr_size - k)) es_args in
                   let* l_args = Myseq.product_fair (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
                   let args = Array.of_list l_args in
                   Myseq.return (Apply (t,f,args)))
@@ -232,6 +253,7 @@ module Exprset_new : EXPRSET =
            let* e = to_seq es1 in
            Myseq.return (Fun (t_arg,e) *) (* needs to decompose t as (t_arg -> es1.typ) *) 
         ]
+      |> Myseq.filter (fun e -> size_expr_ast e <= max_expr_size)
 
     let rec to_seq_for_size es n =
       assert (n >= 0);
@@ -248,7 +270,7 @@ module Exprset_new : EXPRSET =
             
             (if es.args then Myseq.return (Arg t)
              else Myseq.empty) ]
-      else
+      else (* n > 1 *)
         let t = es.typ in
         Myseq.interleave
           (List.map
@@ -500,6 +522,7 @@ class ['typ,'value,'var,'func] index_bind =
     inherit ['typ,'value,'var,'func] index
     
     val mutable index : ('typ * 'value, ('typ,'value,'var,'func) Exprset.t) Mymap.t = Mymap.empty
+    (* Hashtbl less efficient and unsafe (iter + updates) *)
 
     method bind_ref tv x =
       index <-
@@ -535,7 +558,7 @@ class ['typ,'value,'var,'func] index_bind =
         ))
         index
 
-    method lookup tv =
+    method lookup tv = (* QUICK *)
       match Mymap.find_opt tv index with
       | None -> Exprset.empty (fst tv)
       | Some exprs -> exprs
@@ -675,23 +698,6 @@ class ['typ,'value,'var,'func] index_union =
 
 
 (* expr encoding *)
-
-let size_expr_ast (* for DL computing *)
-    : ('typ,'value,'var,'func) expr -> int =
-  let rec aux = function
-    | Const (t,v) -> 1
-    | Ref (t,x) -> 1
-    | Apply (t,f,args) ->
-       Array.fold_left
-         (fun res arg ->
-           match arg with
-           | Const _ -> res (* const arg considered as function param *)
-           | _ -> res + aux arg)
-         1 args
-    | Arg t -> 1
-    | Fun (t,e1) -> 1 + aux e1
-  in
-  aux
 
 let nb_expr_ast (* for DL computing *)
       ~(funcs : 'asd_typ -> ('func * 'asd_typ array) list)

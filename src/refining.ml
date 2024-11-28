@@ -538,6 +538,7 @@ let refinements
              let index = Model.force_index ~make_index read in
              let es = index#lookup (t,v) in
              Expr.Exprset.to_seq ~max_expr_size es in
+           Common.prof "Refining.refinements/aux_expr/get_rs/enum" (fun () ->
            s_expr
            |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
            |> Myseq.fold_left
@@ -545,7 +546,7 @@ let refinements
                   let me = Model.make_expr e in
                   let data' = Data.make_dexpr v in
                   (me, varseq, Result.Ok data')::refs)
-                []))
+                [])))
          (fun m' -> m')
          (fun m' varseq' ~supp ~nb ~alt best_reads ->
            Myseq.if_not_empty_else

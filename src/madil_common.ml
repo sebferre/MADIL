@@ -373,13 +373,17 @@ let distribute (n : int) (lf : (int -> 'a Myseq.t) array) : 'a array Myseq.t =
     | f1::lf' ->
        let* n1 = Myseq.range 1 (n-k+1) in (* leave at least cost 1 for each other elt *)
        let n' = n - n1 in
-       let* x1 = f1 n1 in
-       let* lx' = aux (k-1) lf' n' in
+       let seq_x1 = f1 n1 in
+       let seq_lx' = aux (k-1) lf' n' in
+       let* x1 = seq_x1 in
+       let* lx' = seq_lx' in
        Myseq.return (x1::lx')
   in
   let k = Array.length lf in
-  let* lx = aux k (Array.to_list lf) n in
-  Myseq.return (Array.of_list lx)
+  if n < k then Myseq.empty
+  else
+    let* lx = aux k (Array.to_list lf) n in
+    Myseq.return (Array.of_list lx)
 
 (* mdl *)
                    
