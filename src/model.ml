@@ -24,16 +24,16 @@ let p0 : ('var,'constr) path = [] (* the empty path = This *)
 let ctx0 : ('var,'constr) path = [] (* a context is a reverse path *)
 
 let make_def (x : 'var) (m1 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
-  Def (x,m1)
+  Def (x,m1) [@@inline]
 let make_any (t : 't) : ('typ,'value,'var,'constr,'func) model =
-  Any t
+  Any t [@@inline]
 let make_pat (t : 't) (c : 'constr) ?(src = [||]) (args : ('typ,'value,'var,'constr,'func) model array) : ('typ,'value,'var,'constr,'func) model =
-  Pat (t,c,src,args)
+  Pat (t,c,src,args) [@@inline]
 let make_alt (xc : 'var) (cond : ('typ,'value,'var,'func) cond_model) (m1 : ('typ,'value,'var,'constr,'func) model) (m2 : ('typ,'value,'var,'constr,'func) model) : ('typ,'value,'var,'constr,'func) model =
-  Alt (xc,cond,m1,m2)
-let make_expr e = Expr e
-let make_expr_const t v = Expr (Expr.Const (t, v))
-let make_derived t = Derived t
+  Alt (xc,cond,m1,m2) [@@inline]
+let make_expr e = Expr e [@@inline]
+let make_expr_const t v = Expr (Expr.Const (t, v)) [@@inline]
+let make_derived t = Derived t [@@inline]
 
 let undef : ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
   function

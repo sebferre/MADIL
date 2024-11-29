@@ -17,12 +17,12 @@ let rec value (d : ('value,'constr) data) : 'value =
   | DExpr v -> v (* TODO: consider including the expression *)
 
 let make_dany (value : 'value) (value_range : 'value) : ('value,'constr) data =
-  DAny (value, value_range)
+  DAny (value, value_range) [@@inline]
 let make_dpat (value : 'value) (c : 'constr) ?(src : 'value array = [||]) (args : ('value,'constr) data array) : ('value,'constr) data =
-  DPat (value, c, src, args)
+  DPat (value, c, src, args) [@@inline]
 let make_dexpr (value : 'value) : ('value,'constr) data =
-  DExpr value
-          
+  DExpr value [@@inline]
+ 
 let xp_data
       ~(xp_value : 'value html_xp)
       ~(xp_pat : 'constr -> unit html_xp array -> unit html_xp array -> unit html_xp)
