@@ -671,7 +671,6 @@ let refining1
 let learn
       ~(alpha : float)
       ~(read_pairs :
-          env:'data ->
           (('t,'value,'var,'constr,'func) Task_model.task_model as 'task_model) ->
           'value Task.pair list ->
           (('typ,'value,'constr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
@@ -701,7 +700,6 @@ let learn
       ~(refinement_branching : int) ~(input_branching : int)
       ~(refine_degree : int) ~(solution_pool : int)
       ~(search_temperature : float)
-      ~env (* environment data to the input model *)
       ~init_task_model
       (train_pairs : 'value Task.pair list)
       (test_inputs : 'value list)
@@ -711,7 +709,7 @@ let learn
   let data_of_model ~pruning r m =
     try
       let state_opt =
-        let@ prs = Result.to_option (read_pairs ~env m train_pairs) in
+        let@ prs = Result.to_option (read_pairs m train_pairs) in
         if (* checking that the input model can parse the test inputs *)
           let mi = m.Task_model.input_model in
           List.for_all

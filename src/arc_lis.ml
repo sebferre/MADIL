@@ -39,7 +39,6 @@ type arc_state =
     include_refs : include_refs;
     refinement : refinement; (* previous refinement *)
     refinement_support : int;
-    env : data; (* nil env *)
     model : task_model; (* current model *)
     info_o : generator_info; (* for output generation *)
     prs : pairs_reads; (* pair reads *)
@@ -63,9 +62,9 @@ type arc_focus = arc_state
                
 type arc_extent = arc_state
 
-let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (env : data) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
+let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (model : task_model) (info_o : generator_info) : (arc_state, exn) Result.t =
   try
-  let| prs = read_pairs ~env model task.train in
+  let| prs = read_pairs model task.train in
   let| () = (* checking that the input model can parse the test inputs *)
     let mi = model.Task_model.input_model in
     if
@@ -84,7 +83,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       include_refs;
       refinement;
       refinement_support = Task_model.refinement_support refinement;
-      env; model; info_o;
+      model; info_o;
       prs; dsri; dsro;
       dls;
       norm_dls;
@@ -103,12 +102,12 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
                
 let initial_focus (name : string) (task : task) : arc_focus =
   let norm_dl_model_data = Task_model.make_norm_dl_model_data ~alpha:(!alpha) () in
-  let {env; varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
+  let {varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
   let init_include_refs = { inc_input = true; inc_output = true; inc_expr = true} in
   let init_task_model = make_task_model varseq input_model output_model in
   match state_of_model name task
           norm_dl_model_data Build init_include_refs
-          Task_model.RInit env init_task_model info_o with
+          Task_model.RInit init_task_model info_o with
   | Result.Ok s -> s
   | Result.Error exn -> raise exn
 
@@ -141,7 +140,7 @@ object
                else
                  match m_res with
                  | Result.Ok m ->
-                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r focus.env m focus.info_o with
+                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r m focus.info_o with
                      | Result.Ok state ->
                         let compressive =
                           state.norm_ldescr < focus.norm_ldescr
@@ -187,7 +186,7 @@ object
              | Prune -> Build in
            match state_of_model focus.name focus.task focus.norm_dl_model_data
                    new_stage focus.include_refs Task_model.RInit
-                   focus.env focus.model focus.info_o with
+                   focus.model focus.info_o with
            | Result.Ok s -> [ChangeStage s]
            | Result.Error exn -> print_endline (Printexc.to_string exn); [])
         @ (List.fold_left
@@ -196,7 +195,7 @@ object
                then
                  match state_of_model focus.name focus.task focus.norm_dl_model_data
                          focus.stage new_include_refs Task_model.RInit
-                         focus.env focus.model focus.info_o with
+                         focus.model focus.info_o with
                  | Result.Ok s -> ChangeIncludeRefs s :: suggs
                  | Result.Error exn -> print_endline (Printexc.to_string exn); suggs
                else suggs)
@@ -393,7 +392,7 @@ let render_place place k =
     if focus.dls.d.o <= 0.
     then
       try
-        match apply ~env:focus.env m vi focus.info_o with
+        match apply m vi focus.info_o with
         | Result.Ok [] -> Error "No valid prediction"
         | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
         | Result.Error exn -> Error (Printexc.to_string exn)

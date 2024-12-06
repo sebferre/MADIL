@@ -535,8 +535,7 @@ let dl
 (* reading *)
 
 type ('typ,'value,'constr,'var,'func) read =
-  { env : ('value,'constr) data;
-    bindings : ('var,'typ,'value) Expr.bindings;
+  { bindings : ('var,'typ,'value) Expr.bindings;
     mutable lazy_index : ('typ,'value,'var,'func) Expr.index option; (* not using Lazy.t because breaks comparisons and hash *)
     data : ('value,'constr) data;
     dl_rank : dl;
@@ -600,7 +599,6 @@ let read
       ~(input_of_value : 'typ -> 'value -> 'input)
       ~(parse_bests : ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'constr) parse_bests)
 
-      ~(env : ('value,'constr) data)
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m : ('typ,'value,'var,'constr,'func) model)
       (v : 'value)
@@ -611,7 +609,7 @@ let read
   let* best_parses = Myseq.from_result (parse_bests m bindings input) in
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
   let dl_rank = dl_parse_rank rank in (* to penalize later parses, in case of equivalent parses, only for prediction *)
-  Myseq.return { env; bindings; lazy_index=None; data; dl_rank; dl })
+  Myseq.return { bindings; lazy_index=None; data; dl_rank; dl })
 
 let does_parse_value
       ~(input_of_value : 'typ -> 'value -> 'input)

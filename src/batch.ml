@@ -26,10 +26,8 @@ let print_dl_md psr = (* model+data DL *)
   Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" l.m.io l.d.io l.md.io;
   l.r.i +. l.d.o
 
-let print_dl_task_model ~env name task model =
-  read_pairs
-    ~env
-    model task.Task.train
+let print_dl_task_model name task model =
+  read_pairs model task.Task.train
   |> Result.fold
        ~ok:(fun psr -> ignore (print_dl_md psr))
        ~error:(fun exn -> raise exn)
@@ -77,18 +75,17 @@ let print_measures name list_ms =
         sum_ms;
       print_newline ())
 
-let apply_model ~env m v_i info_o =
+let apply_model m v_i info_o =
   try
     let res_opt =
       Common.do_timeout_gc (float !timeout_predict) (fun () ->
-          apply ~env m v_i info_o) in
+          apply m v_i info_o) in
     match res_opt with
     | Some res -> res
     | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
   with exn -> Result.Error exn
   
 let score_learned_model
-      ~env (* input env data *)
       ~info_o (* generation output info *)      
       name
       (m : task_model)
@@ -108,8 +105,8 @@ let score_learned_model
              let reads_pair = try List.nth psr.reads (i-1) with _ -> assert false in
              Common.sub_list reads_pair 0 1
              |> List.iter (fun (gri, gro, _) ->
-                    let {Model.env=envi; data=gdi; dl=dli} = gri in
-                    let {Model.env=envo; data=gdo; dl=dlo} = gro in
+                    let {Model.data=gdi; dl=dli} = gri in
+                    let {Model.data=gdo; dl=dlo} = gro in
                     print_newline ();
                     pp_data gdi; Printf.printf "   (%.1f bits)\n" dli;
                     pp_data gdo; Printf.printf "   (%.1f bits)\n" dlo)
@@ -127,7 +124,7 @@ let score_learned_model
                let input_reads, _ =
                  Myseq.take (!max_nb_reads)
                    (read
-                      ~env ~bindings:Expr.bindings0
+                      ~bindings:Expr.bindings0
                       m.Task_model.input_model input) in
                if input_reads = []
                then Result.Error Not_found
@@ -144,7 +141,7 @@ let score_learned_model
           ));
         print_endline "\n> Output prediction from input (up to 3 trials):";
         let score, rank, label, _failed_derived_grids =
-	  match apply_model ~env m input info_o with
+	  match apply_model m input info_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
                (fun (score,rank,label,failed_derived_grids) (gdi, gdo, dl) ->
@@ -204,7 +201,7 @@ let score_learned_model
   micro, macro, mrr
        
 let print_learned_model
-      ~env ~init_task_model ~info_o
+      ~init_task_model ~info_o
       (name : string) (task : task)
     : measures =
   let pp_task_model = Xprint.to_stdout (xp_task_model ~html:false) in
@@ -220,7 +217,7 @@ let print_learned_model
           ~refine_degree:(!max_refinements)
           ~solution_pool:(!solution_pool)
           ~search_temperature:(!search_temperature)
-          ~env ~init_task_model
+          ~init_task_model
           task.train
           (task.test |> List.map (fun pair -> pair.Task.input)))
   in
@@ -259,12 +256,12 @@ let print_learned_model
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~env ~info_o
+         ~info_o
          name learned_task_model (`TRAIN res.result_pruning.pairs_reads) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~env ~info_o
+         ~info_o
          name learned_task_model (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -294,14 +291,14 @@ let task_of_name dir name =
 let process_task
       name task
       list_ms =
-      let {env; varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
+      let {varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
       let init_task_model = make_task_model varseq input_model output_model in
       print_endline "\n# evaluating init_task_model";
-      print_dl_task_model ~env name task init_task_model;
+      print_dl_task_model name task init_task_model;
       print_endline "\n# learning a model for train pairs";
       let ms =
         print_learned_model
-          ~env ~info_o
+          ~info_o
           ~init_task_model name task in
       list_ms := ms :: !list_ms
 

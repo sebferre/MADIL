@@ -86,8 +86,7 @@ module type TYPES =
       | `Error of exn ]
 
     type init_config =
-      { env : data;
-        varseq : varseq;
+      { varseq : varseq;
         input_model : model;
         output_model : model;
         output_generator_info : generator_info }
@@ -168,8 +167,7 @@ module Defined_types (T : BASIC_TYPES) =
       | `Error of exn ]
 
     type init_config =
-      { env : data;
-        varseq : varseq;
+      { varseq : varseq;
         input_model : model;
         output_model : model;
         output_generator_info : generator_info }

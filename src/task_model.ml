@@ -54,12 +54,10 @@ type ('typ,'value,'constr,'var,'func) pairs_reads =
 let read_pairs
       ~(max_nb_reads : int)
       ~(dl_task_model : (('typ,'value,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
-      ~(read : env:(('value,'constr) data as 'data) ->
-               bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
+      ~(read : bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
       
-      ~(env : 'data)
       (m : 'task_model)
       (pairs : 'value Task.pair list)
     : ('typ,'value,'constr,'var,'func) pairs_reads result =
@@ -73,14 +71,12 @@ let read_pairs
              myseq_bind_sample_fair
                ~size1:max_nb_reads ~size2:max_nb_reads
                (read
-                  ~env
                   ~bindings:Expr.bindings0
                   m.input_model input)
                (fun ri ->
                  let bindings = get_bindings m.input_model ri.data in
                  let* ro =
                    read
-                     ~env:ri.data
                      ~bindings
                      m.output_model output in
                  Myseq.return (ri, ro, ri.dl +. ro.dl)) in
@@ -183,14 +179,13 @@ let make_norm_dl_model_data
 let apply
       ~(max_nb_reads : int)
       ~(max_nb_writes : int)
-      ~(read : env:(('value,'constr) data as 'data) ->
-               bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
+      ~(read : bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value ->
                ('typ,'value,'constr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 'model -> 'info -> ('data * dl) Myseq.t)
-      ~(env : 'data)
+
       (m : ('typ,'value,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
     : ('data * 'data * dl) list result =
   Common.prof "Task_model.apply" (fun () ->
@@ -198,7 +193,7 @@ let apply
     myseq_bind_sample_fair
       ~size1:max_nb_reads ~size2:max_nb_writes
       (read
-         ~env ~bindings:Expr.bindings0
+         ~bindings:Expr.bindings0
          m.input_model v_i)
       (fun read_i ->
         let data_i = read_i.data in
