@@ -491,7 +491,8 @@ let refinements
        else Myseq.empty)
          refs)
   and aux_const ctx m varseq selected_reads = (* QUICK *)
-    if pruning then Myseq.empty
+    let t = Model.typ m in
+    if pruning || not (asd#expr_opt t) then Myseq.empty
     else
        let t = Model.typ m in
        let allowed = asd#alt_opt t in
