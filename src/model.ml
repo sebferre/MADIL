@@ -397,7 +397,7 @@ let dl_parse_rank (rank : int) : dl =
 (* model encoding *)
 
 let size_any = 1
-let size_alt = 2
+let size_alt = 1
   
 let size_model_ast (* for DL computing, QUICK *)
       ~(asd : ('typ,'asd_typ,'constr,'func) asd)
@@ -421,7 +421,7 @@ let size_model_ast (* for DL computing, QUICK *)
     | Derived t -> 0 (* implicit, no information there *)
   and aux_cond = function
     | Undet _ -> 1
-    | BoolExpr e -> 1 + Expr.size_expr_ast e
+    | BoolExpr e -> Expr.size_expr_ast e
   in
   aux m
 
@@ -472,9 +472,10 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
        Hashtbl.add tab (k,size) nb;
        nb
   and aux_cond (size : int) : float =
+    let nb = nb_expr_ast (asd#abstract typ_bool) size in (* BoolExpr *)
     if size = 1
-    then 1. (* Undet *)
-    else nb_expr_ast (asd#abstract typ_bool) (size - 1) (* BoolExpr *)
+    then nb +. 1.
+    else nb
   in
   aux, reset
 
