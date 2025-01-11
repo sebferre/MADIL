@@ -277,10 +277,11 @@ let refinements
           let input = input_of_value (Model.typ m) v in
           match parse_best m read.Model.bindings input with
           | Result.Ok data -> data
-          | _ -> (* should not happen *)
+          | Result.Error exn -> (* should not happen *)
              print_endline "ERROR failed local parsing with current model";
              print_string "local model: "; pp_endline xp_model m;
              print_string "parsed value: "; pp_endline xp_value v;
+             print_endline (Printexc.to_string exn);
              data)
         selected_reads) in
     let r_best_reads = inter_union_reads read_refs selected_reads in

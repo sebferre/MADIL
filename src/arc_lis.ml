@@ -389,7 +389,7 @@ let w_results : (col, unit, cell) Widget_table.widget =
 let render_place place k =
   let get_pred ~test m vi vo =
     let focus = place#focus in
-    if focus.dls.d.o <= 0.
+    if true (* focus.dls.d.o <= 0. *)
     then
       try
         match apply m vi focus.info_o with
