@@ -261,7 +261,7 @@ let get_bindings  (* QUICK *)
 
 (* model-based generation *)
 
-type ('info,'var,'typ,'value,'constr) generator = 'info -> (('value,'constr) data * 'info) Myseq.t
+type ('info,'var,'typ,'value,'constr) generator = 'info -> ('value,'constr) data Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
@@ -283,13 +283,13 @@ let generator (* on evaluated models: no expr, no def *)
        generator_pat t c vsrc gen_args info
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
-         let* d1, info = gen m1 info in
+         let* d1 = gen m1 info in
          let d = DAlt (prob,true,d1) in
-         Myseq.return (d, info) in
+         Myseq.return d in
        let gen_b_d2 prob =
-         let* d2, info = gen m2 info in
+         let* d2 = gen m2 info in
          let d = DAlt (prob,false,d2) in
-         Myseq.return (d, info) in
+         Myseq.return d in
        (match c with
         | Undet prob ->
            if prob >= 0.5 (* TODO: weight interleave according to prob *)
@@ -312,10 +312,10 @@ let generator (* on evaluated models: no expr, no def *)
        failwith "Derived arguments must not be generated but computed" (* must be computed, not generated *)
   in
   gen m info
-     
+
 (* model-based parsing *)
 
-type ('input,'var,'typ,'value,'constr) parseur = 'input -> (('value,'constr) data * 'input) Myseq.t
+type ('input,'var,'typ,'value,'constr) parseur = 'input -> ('value,'constr) data Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
@@ -337,13 +337,13 @@ let parseur (* on evaluated models: no expr, no def *)
        parseur_pat t c vsrc parse_args input
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
-         let* d1, input = parse m1 input in
+         let* d1 = parse m1 input in
          let d = DAlt (prob,true,d1) in
-         Myseq.return (d, input) in
+         Myseq.return d in
        let seq2 prob =
-         let* d2, input = parse m2 input in
+         let* d2 = parse m2 input in
          let d = DAlt (prob,false,d2) in
-         Myseq.return (d, input) in
+         Myseq.return d in
        (match c with
         | Undet prob ->
            if prob >= 0.5 (* TODO: weight interleave according to prob *)
@@ -576,7 +576,7 @@ let parse_bests
   fun bindings input ->
   Common.prof "Model.parse_bests" (fun () ->
   let parses =
-    let* data, _ = parseur m bindings input in
+    let* data = parseur m bindings input in
     let dl = (* QUICK *)
       dl_round (dl_data data) in
       (* rounding before sorting to absorb float error accumulation *)
@@ -638,7 +638,7 @@ let write
       (info : 'info)
     : (('value,'constr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
-  let* data, _ = generator m bindings info in
+  let* data = generator m bindings info in
   let dl = dl_data data in (* encoding of what is not specified by the evaluated model *)
   Myseq.return (data, dl))
 

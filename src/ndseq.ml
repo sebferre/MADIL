@@ -340,7 +340,7 @@ let test2_map_tup_myseq ~depth (x : 'a) : 'b Myseq.t =
     (tup1 x)
 
 
-let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 : 'a t) (x2 : 'b t) : ('c t * 'd t) Myseq.t =
+let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> 'c Myseq.t) (x1 : 'a t) (x2 : 'b t) : 'c t Myseq.t =
   (* delta_depth = depth(c or d) - dpeth(b) *)
   match x1, x2 with
   | `Seq (_,i1_opt,[]), `Seq (d2,None,l2) ->
@@ -348,7 +348,7 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 
      if l2 = []
      then
        let d = d2 + delta_depth in
-       Myseq.return (`Seq (d, None, []), `Seq (d, None, []))       
+       Myseq.return (`Seq (d, None, []))
      else Myseq.empty
   | `Seq (_,i1_opt,l1), `Seq (d2,None,l2) ->
      assert (i1_opt = None);
@@ -363,8 +363,7 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 
      let l1 = if n1 = n2 then l1 else Common.sub_list l1 0 n2 in
      let d = d2 + delta_depth in
      let* ly = Myseq.product_fair (List.map2 (match_myseq delta_depth f) l1 l2) in
-     let ly1, ly2 = List.split ly in
-     Myseq.return (`Seq (d, None, ly1), `Seq (d, None, ly2))
+     Myseq.return (`Seq (d, None, ly))
   | `Seq (_,i1_opt,[]), `Seq (d2,Some i2,[z2]) ->
      assert (i1_opt = None);
      Myseq.empty
@@ -373,17 +372,16 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> ('c * 'd) Myseq.t) (x1 
      let n1 = List.length l1 in
      let d = d2 + delta_depth in
      let z1 = List.nth l1 (i2 mod n1) in (* assuming periodic sequence from l1 *)
-     let* y1, y2 = match_myseq delta_depth f z1 z2 in
-     Myseq.return (`Seq (d, Some i2, [y1]), `Seq (d, Some i2, [y2]))
+     let* y = match_myseq delta_depth f z1 z2 in
+     Myseq.return (`Seq (d, Some i2, [y]))
   | _, `Seq (d2,None,l2) -> (* broadcast x1 *)
      let d = d2 + delta_depth in
      let* ly = Myseq.product_fair (List.map (match_myseq delta_depth f x1) l2) in
-     let ly1, ly2 = List.split ly in
-     Myseq.return (`Seq (d, None, ly1), `Seq (d, None, ly2))
+     Myseq.return (`Seq (d, None, ly))
   | _, `Seq (d2, Some i2, [z2]) -> (* broadcast x1 *)
      let d = d2 + delta_depth in
-     let* y1, y2 = match_myseq delta_depth f x1 z2 in
-     Myseq.return (`Seq (d, Some i2, [y1]), `Seq (d, Some i2, [y2]))
+     let* y = match_myseq delta_depth f x1 z2 in
+     Myseq.return (`Seq (d, Some i2, [y]))
   | `Seq _, _ | _, `Seq _ -> Myseq.empty
   | _ -> f x1 x2
 
@@ -414,12 +412,11 @@ let rec unnest_path (path : int list) (x : 'a t) : 'a t =
      else invalid_arg "Ndseq.unnest_path: inconsistent position"
   | _ -> invalid_arg "Ndseq.unnest_path: inconsistent path"
 
-let parseur_item (p : 'a t -> ('data * 'a t) Myseq.t) (rev_path : int list) (input_item : 'a) : ('value * 'a) Myseq.t =
+let parseur_item (p : 'a t -> 'data Myseq.t) (rev_path : int list) (input_item : 'a) : 'value Myseq.t =
   let path, input = nest_path rev_path input_item in
-  let* data, input = p input in
+  let* data = p input in
   let v_item = unnest_path path (Data.value data) in
-  let input_item = unnest_path path input in
-  Myseq.return (v_item, input_item)
+  Myseq.return v_item
 
 
 let is_complete ~depth (x : 'a t) : bool =
