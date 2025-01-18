@@ -43,11 +43,11 @@ let size_task_model_ast
 
 (* pair reading and encoding *)
   
-type ('typ,'value,'constr,'var,'func) pairs_reads =
+type ('typ,'value,'distrib,'constr,'var,'func) pairs_reads =
   (* result of reading a list of pairs of grids *)
   { dl_mi : dl; (* input model DL *)
     dl_mo : dl; (* output model DL *)
-    inputs_reads : (('typ,'value,'constr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
+    inputs_reads : (('typ,'value,'distrib,'constr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
     reads : ('read * 'read * dl) list list; (* outer list over examples, inner list over parses, sorted in increasing DL *)
   }
 
@@ -60,7 +60,7 @@ let read_pairs
       
       (m : 'task_model)
       (pairs : 'value Task.pair list)
-    : ('typ,'value,'constr,'var,'func) pairs_reads result =
+    : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
   let dl_mi, dl_mo = Common.prof "Task_model.read_pairs/dl_task_model" (fun () -> dl_task_model m) in
   let| inputs_reads_reads =
@@ -91,13 +91,13 @@ let read_pairs
   let inputs_reads, reads = List.split inputs_reads_reads in
   Result.Ok {dl_mi; dl_mo; inputs_reads; reads})
 
-type ('typ,'value,'constr,'var,'func) reads =
+type ('typ,'value,'distrib,'constr,'var,'func) reads =
   { dl_m : dl; (* DL of the model *)
-    reads : ('typ,'value,'constr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
+    reads : ('typ,'value,'distrib,'constr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
   }
   
 let split_pairs_read
-      (prs : ('typ,'value,'constr,'var,'func) pairs_reads) : ('typ,'value,'constr,'var,'func) reads double =
+      (prs : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads) : ('typ,'value,'distrib,'constr,'var,'func) reads double =
   let project_reads proj =
     List.map
       (fun pair_reads ->
@@ -129,7 +129,7 @@ type dl_split =
 
 let dl_model_data
       ~(alpha : float)
-      (psr : ('typ,'value,'constr,'var,'func) pairs_reads) : dl_split = (* QUICK *)
+      (psr : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads) : dl_split = (* QUICK *)
   let lmi = psr.dl_mi in
   let lmo = psr.dl_mo in
   let lri, lro, ldi, ldo =
@@ -154,7 +154,7 @@ let dl_model_data
 
 let make_norm_dl_model_data
       ~(alpha : float)
-      () : ('typ,'value,'constr,'var,'func) pairs_reads -> dl_split =
+      () : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads -> dl_split =
   let lmdi0 = ref (-1.) in
   let lmdo0 = ref (-1.) in
   fun psr ->
@@ -181,12 +181,12 @@ let apply
       ~(max_nb_writes : int)
       ~(read : bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value ->
-               ('typ,'value,'constr,'var,'func) read Myseq.t)
+               ('typ,'value,'distrib,'constr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
-                'model -> 'info -> ('data * dl) Myseq.t)
+                'model -> 'distrib -> ('data * dl) Myseq.t)
 
-      (m : ('typ,'value,'var,'constr,'func) task_model) (v_i : 'value) (info_o : 'info)
+      (m : ('typ,'value,'var,'constr,'func) task_model) (v_i : 'value) (r_o : 'distrib)
     : ('data * 'data * dl) list result =
   Common.prof "Task_model.apply" (fun () ->
   let some_parse, _lri, l_di_do_dl =
@@ -201,7 +201,7 @@ let apply
         let* data_o, dl_o = 
           write
             ~bindings
-            m.output_model info_o in
+            m.output_model r_o in
         let dl = read_i.dl +. dl_o in
         Myseq.return (data_i, data_o, dl)) in
   if l_di_do_dl = []

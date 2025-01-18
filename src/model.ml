@@ -228,7 +228,7 @@ let get_bindings  (* QUICK *)
       ~(typ_bool : 'typ)
       ~(value_of_bool : bool -> 'value)
       (m0 : ('typ,'value,'var,'constr,'func) model as 'model)
-      (d0 : ('value,'constr) data as 'data)
+      (d0 : ('value,'distrib,'constr) data as 'data)
     : ('var,'typ,'value) Expr.bindings =
   let rec aux m (d : 'data) acc =
     match m, d with
@@ -261,33 +261,33 @@ let get_bindings  (* QUICK *)
 
 (* model-based generation *)
 
-type ('info,'var,'typ,'value,'constr) generator = 'info -> ('value,'constr) data Myseq.t
+type ('distrib,'var,'typ,'value,'constr) generator = 'distrib -> ('value,'distrib,'constr) data Myseq.t
 
 let generator (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(bool_of_value : 'value -> bool result)
       ~(generator_value : 'value -> 'gen)
       ~(generator_any : 'typ -> 'gen)
-      ~(generator_pat : 'typ -> 'constr -> 'value array -> (('info,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
+      ~(generator_pat : 'typ -> 'constr -> 'value array -> (('distrib,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> 'gen =
-  fun m bindings info ->
-  let rec gen m info =
+  fun m bindings r ->
+  let rec gen m r =
     match m with
     | Def (x,m1) ->
-       gen m1 info
+       gen m1 r
     | Any t ->
-       generator_any t info
+       generator_any t r
     | Pat (t,c,src,args) ->
        let* vsrc = Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
        let gen_args = Array.map gen args in
-       generator_pat t c vsrc gen_args info
+       generator_pat t c vsrc gen_args r
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
-         let* d1 = gen m1 info in
+         let* d1 = gen m1 r in
          let d = DAlt (prob,true,d1) in
          Myseq.return d in
        let gen_b_d2 prob =
-         let* d2 = gen m2 info in
+         let* d2 = gen m2 r in
          let d = DAlt (prob,false,d2) in
          Myseq.return d in
        (match c with
@@ -307,15 +307,15 @@ let generator (* on evaluated models: no expr, no def *)
            else gen_b_d2 1.)
     | Expr e ->
        let* v = Myseq.from_result (eval_expr e bindings) in
-       generator_value v info
+       generator_value v r
     | Derived t ->
        failwith "Derived arguments must not be generated but computed" (* must be computed, not generated *)
   in
-  gen m info
+  gen m r
 
 (* model-based parsing *)
 
-type ('input,'var,'typ,'value,'constr) parseur = 'input -> ('value,'constr) data Myseq.t
+type ('distrib,'var,'typ,'value,'constr) parseur = 'value -> 'distrib -> ('value,'distrib,'constr) data Myseq.t
 
 let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
@@ -323,25 +323,25 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(parseur_value : 'value -> 'parse)
       ~(parseur_any : 'typ -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'parse array -> 'parse)
-    : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('input,'var,'typ,'value,'constr) parseur as 'parse) =
-  fun m bindings input ->
-  let rec parse m input =
+    : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('distrib,'var,'typ,'value,'constr) parseur as 'parse) =
+  fun m bindings v r ->
+  let rec parse m v r =
     match m with
     | Def (x,m1) ->
-       parse m1 input
+       parse m1 v r
     | Any t ->
-       parseur_any t input
+       parseur_any t v r
     | Pat (t,c,src,args) ->
        let* vsrc =  Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
        let parse_args = Array.map parse args in
-       parseur_pat t c vsrc parse_args input
+       parseur_pat t c vsrc parse_args v r
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
-         let* d1 = parse m1 input in
+         let* d1 = parse m1 v r in
          let d = DAlt (prob,true,d1) in
          Myseq.return d in
        let seq2 prob =
-         let* d2 = parse m2 input in
+         let* d2 = parse m2 v r in
          let d = DAlt (prob,false,d2) in
          Myseq.return d in
        (match c with
@@ -358,24 +358,24 @@ let parseur (* on evaluated models: no expr, no def *)
            then seq1 1.
            else seq2 1.)                
     | Expr e ->
-       let* v = Myseq.from_result (eval_expr e bindings) in
-       parseur_value v input
+       let* ve = Myseq.from_result (eval_expr e bindings) in
+       parseur_value ve v r
     | Derived t ->
        failwith "Derived arguments must not be parsed but computed" 
   in
-  parse m input
+  parse m v r
 
 (* model-based encoding of data *)
 
 let dl_data
-      ~(encoding_dany : 'value -> 'encoding)
+      ~(encoding_dany : 'value -> 'distrib -> 'encoding)
       ~(encoding_dpat : 'constr -> 'value array -> 'encoding array -> 'encoding)
       ~(encoding_alt : dl (* DL of branch choice *) -> 'encoding -> 'encoding (* with added DL choice *))
       ~(encoding_expr_value : 'value -> 'encoding) (* DL = 0 *)
       ~(dl_of_encoding : 'encoding -> dl)
-    : (('value,'constr) data as 'data) -> dl = (* QUICK *)
+    : (('value,'distrib,'constr) data as 'data) -> dl = (* QUICK *)
   let rec aux = function
-    | DAny (_, v_r) -> encoding_dany v_r
+    | DAny (v, r) -> encoding_dany v r
     | DPat (_, c, vsrc, dargs) ->
        let encs = Array.map aux dargs in
        encoding_dpat c vsrc encs
@@ -535,16 +535,16 @@ let dl
        
 (* reading *)
 
-type ('typ,'value,'constr,'var,'func) read =
+type ('typ,'value,'distrib,'constr,'var,'func) read =
   { bindings : ('var,'typ,'value) Expr.bindings;
     mutable lazy_index : ('typ,'value,'var,'func) Expr.index option; (* not using Lazy.t because breaks comparisons and hash *)
-    data : ('value,'constr) data;
+    data : ('value,'distrib,'constr) data;
     dl_rank : dl;
     dl : dl } (* including rank *)
 
 let force_index
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.index)
-      (read : ('typ,'value,'constr,'var,'func) read)
+      (read : ('typ,'value,'distrib,'constr,'var,'func) read)
     : ('typ,'value,'var,'func) Expr.index =
   match read.lazy_index with
   | Some index -> index
@@ -564,19 +564,19 @@ let force_index
 
 exception Parse_failure
 
-type ('input,'var,'typ,'value,'constr) parse_bests = ('var,'typ,'value) Expr.bindings -> 'input -> (('value,'constr) data * dl) list result
+type ('distrib,'var,'typ,'value,'constr) parse_bests = ('var,'typ,'value) Expr.bindings -> 'value -> 'distrib -> (('value,'distrib,'constr) data * dl) list result
         
 let parse_bests
       ~(max_nb_parse : int)
-      ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('input,'var,'typ,'value,'constr) parseur)
-      ~(dl_data : ('value,'constr) data -> dl)
+      ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('distrib,'var,'typ,'value,'constr) parseur)
+      ~(dl_data : ('value,'distrib,'constr) data -> dl)
 
       (m : ('typ,'value,'var,'constr,'func) model)
-    : ('input,'var,'typ,'value,'constr) parse_bests =
-  fun bindings input ->
+    : ('distrib,'var,'typ,'value,'constr) parse_bests =
+  fun bindings v r ->
   Common.prof "Model.parse_bests" (fun () ->
   let parses =
-    let* data = parseur m bindings input in
+    let* data = parseur m bindings v r in
     let dl = (* QUICK *)
       dl_round (dl_data data) in
       (* rounding before sorting to absorb float error accumulation *)
@@ -597,48 +597,48 @@ let parse_bests
   (* TODO: take into account max_parse_dl_factor? *)
 
 let read
-      ~(input_of_value : 'typ -> 'value -> 'input)
-      ~(parse_bests : ('typ,'value,'var,'constr,'func) model -> ('input,'var,'typ,'value,'constr) parse_bests)
+      ~(distrib_of_value : 'typ -> 'value -> 'distrib)
+      ~(parse_bests : ('typ,'value,'var,'constr,'func) model -> ('distrib,'var,'typ,'value,'constr) parse_bests)
 
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m : ('typ,'value,'var,'constr,'func) model)
       (v : 'value)
-    : ('typ,'value,'constr,'var,'func) read Myseq.t =
+    : ('typ,'value,'distrib,'constr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
   let t = typ m in
-  let input = input_of_value t v in
-  let* best_parses = Myseq.from_result (parse_bests m bindings input) in
+  let r = distrib_of_value t v in
+  let* best_parses = Myseq.from_result (parse_bests m bindings v r) in
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
   let dl_rank = dl_parse_rank rank in (* to penalize later parses, in case of equivalent parses, only for prediction *)
   Myseq.return { bindings; lazy_index=None; data; dl_rank; dl })
 
 let does_parse_value
-      ~(input_of_value : 'typ -> 'value -> 'input)
-      ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('input,'var,'typ,'value,'constr) parseur)
+      ~(distrib_of_value : 'typ -> 'value -> 'distrib)
+      ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('distrib,'var,'typ,'value,'constr) parseur)
 
       (m : ('typ,'value,'var,'constr,'func) model)
       (bindings : ('var,'typ,'value) Expr.bindings)
-      (value : 'value)
+      (v : 'value)
     : bool =
   Common.prof "Model.does_parse" (fun () ->
   let t = typ m in
-  let input = input_of_value t value in
-  not (Myseq.is_empty (parseur m bindings input)))
+  let r = distrib_of_value t v in
+  not (Myseq.is_empty (parseur m bindings v r)))
 
 (* writing *)
 
 exception Generate_failure
   
 let write
-      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('info,'var,'typ,'value,'constr) generator)
-      ~(dl_data : ('value,'constr) data -> dl)
+      ~(generator : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('distrib,'var,'typ,'value,'constr) generator)
+      ~(dl_data : ('value,'distrib,'constr) data -> dl)
       
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m : ('typ,'value,'var,'constr,'func) model)
-      (info : 'info)
-    : (('value,'constr) data * dl) Myseq.t =
+      (r : 'distrib)
+    : (('value,'distrib,'constr) data * dl) Myseq.t =
   Myseq.prof "Model.write" (
-  let* data = generator m bindings info in
+  let* data = generator m bindings r in
   let dl = dl_data data in (* encoding of what is not specified by the evaluated model *)
   Myseq.return (data, dl))
 

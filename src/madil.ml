@@ -5,15 +5,18 @@ module type BASIC_TYPES =
   sig
     (* basic types and language definitions *)
     
+    type typ
+    val typ_bool : typ
+    val xp_typ : typ html_xp
+
     type value
     val xp_value : value html_xp
     val value_of_json : Yojson.Safe.t -> value
     val json_of_value : value -> Yojson.Safe.t
 
-    type typ
-    val typ_bool : typ
-    val xp_typ : typ html_xp
-
+    type distrib
+    val xp_distrib : distrib html_xp
+    
     type var
     val xp_var : var html_xp
 
@@ -27,8 +30,6 @@ module type BASIC_TYPES =
 
     val asd : (typ,typ,constr,func) Model.asd
 
-    type generator_info
-    type input
     type encoding
               
   end
@@ -42,7 +43,7 @@ module type TYPES =
     type task_pair = value Task.pair
     type task = value Task.task
               
-    type data = (value,constr) Data.data
+    type data = (value,distrib,constr) Data.data
     val xp_data : data html_xp
               
     type path = (var,constr) Model.path
@@ -67,17 +68,17 @@ module type TYPES =
     type refinement = (typ,value,var,constr,func) Task_model.refinement
     val xp_refinement : refinement html_xp
 
-    type read = (typ,value,constr,var,func) Model.read
-    type reads = (typ,value,constr,var,func) Task_model.reads
-    type pairs_reads = (typ,value,constr,var,func) Task_model.pairs_reads
+    type read = (typ,value,distrib,constr,var,func) Model.read
+    type reads = (typ,value,distrib,constr,var,func) Task_model.reads
+    type pairs_reads = (typ,value,distrib,constr,var,func) Task_model.pairs_reads
 
-    type generator = (generator_info,var,typ,value,constr) Model.generator
-    type parseur = (input,var,typ,value,constr) Model.parseur
+    type generator = (distrib,var,typ,value,constr) Model.generator
+    type parseur = (distrib,var,typ,value,constr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.index
     val xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp
 
-    type best_reads = (typ,value,constr,var,func) Refining.best_read list
+    type best_reads = (typ,value,distrib,constr,var,func) Refining.best_read list
 
     type status = (* reading status during learning *)
       [ `Success of (pairs_reads * reads * reads * Task_model.dl_split * dl)
@@ -89,7 +90,7 @@ module type TYPES =
       { varseq : varseq;
         input_model : model;
         output_model : model;
-        output_generator_info : generator_info }
+        output_generator_distrib : distrib }
 
   end
 
@@ -102,8 +103,8 @@ module Defined_types (T : BASIC_TYPES) =
     type task_pair = value Task.pair
     type task = value Task.task
               
-    type data = (value,constr) Data.data
-    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_pat
+    type data = (value,distrib,constr) Data.data
+    let xp_data : data html_xp = Data.xp_data ~xp_value ~xp_distrib ~xp_pat
                                
     type path = (var,constr) Model.path
     let xp_path : path html_xp = Model.xp_path ~xp_var ~xp_field
@@ -127,19 +128,19 @@ module Defined_types (T : BASIC_TYPES) =
     type refinement = (typ,value,var,constr,func) Task_model.refinement
     let xp_refinement : refinement html_xp = Task_model.xp_refinement ~xp_path ~xp_model
 
-    type read = (typ,value,constr,var,func) Model.read
-    type reads = (typ,value,constr,var,func) Task_model.reads
-    type pairs_reads = (typ,value,constr,var,func) Task_model.pairs_reads
+    type read = (typ,value,distrib,constr,var,func) Model.read
+    type reads = (typ,value,distrib,constr,var,func) Task_model.reads
+    type pairs_reads = (typ,value,distrib,constr,var,func) Task_model.pairs_reads
                      
-    type generator = (generator_info,var,typ,value,constr) Model.generator
-    type parseur = (input,var,typ,value,constr) Model.parseur
+    type generator = (distrib,var,typ,value,constr) Model.generator
+    type parseur = (distrib,var,typ,value,constr) Model.parseur
 
     type expr_index = (typ,value,var,func) Expr.index
     let xp_expr_index : ?on_typ:(typ -> bool) -> expr_index html_xp =
       fun ?on_typ ~html print index ->
       index#xp ~xp_typ ~xp_value ~xp_var ~xp_func ~html print ()
 
-    type best_reads = (typ,value,constr,var,func) Refining.best_read list
+    type best_reads = (typ,value,distrib,constr,var,func) Refining.best_read list
 
     class type cconstr = (* class definition of a constr *)
       object
@@ -170,7 +171,7 @@ module Defined_types (T : BASIC_TYPES) =
       { varseq : varseq;
         input_model : model;
         output_model : model;
-        output_generator_info : generator_info }
+        output_generator_distrib : distrib }
                      
   end
   
@@ -209,14 +210,14 @@ module type DOMAIN =
     val generator_any : typ -> generator
     val generator_pat : typ -> constr -> value array -> generator array -> generator
 
-    val input_of_value : typ -> value -> input
+    val distrib_of_value : typ -> value -> distrib
     val parseur_value : value -> parseur
     val parseur_any : typ -> parseur
     val parseur_pat : typ -> constr -> value array -> parseur array -> parseur
 
     (* description lengths *)
 
-    val encoding_dany : value -> encoding
+    val encoding_dany : value -> distrib -> encoding
     val encoding_dpat : constr -> value array -> encoding array -> encoding
     val encoding_alt : dl (* choice *) -> encoding -> encoding
     val encoding_expr_value : value -> encoding
@@ -346,12 +347,12 @@ module Make (Domain : DOMAIN) =
 
     let does_parse_value =
       Model.does_parse_value
-        ~input_of_value
+        ~distrib_of_value
         ~parseur
     
     let read =
       Model.read
-        ~input_of_value
+        ~distrib_of_value
         ~parse_bests
 
     let write =
@@ -371,7 +372,7 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~input_of_value
+        ~distrib_of_value
         ~parse_bests
         ~make_index
         ~decompositions
@@ -397,7 +398,7 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~input_of_value
+        ~distrib_of_value
         ~parse_bests
         ~make_index
         ~decompositions:(fun t varseq value -> [])

@@ -45,6 +45,14 @@ let fold_left (f : 'b -> 'a -> 'b) (init : 'b) (x : 'a t) : 'b =
   in
   aux init x
 
+let fold_left2 (f : 'c -> 'a -> 'b -> 'c) (init : 'c) (x : 'a t) (y : 'b t) : 'c =
+  let rec aux acc x y =
+    match x, y with
+    | `Seq (_, _, lx), `Seq (_, _, ly) -> List.fold_left2 aux acc lx ly
+    | x, y -> f acc x y
+  in
+  aux init x y
+
 let foldi_left (f : 'b -> int list (* revpath *) -> 'a -> 'b) (init : 'b) (x : 'a t) : 'b =
   let rec aux acc revpath = function
     | `Seq (_, _, l) ->
@@ -418,6 +426,12 @@ let parseur_item (p : 'a t -> 'data Myseq.t) (rev_path : int list) (input_item :
   let v_item = unnest_path path (Data.value data) in
   Myseq.return v_item
 
+let parseur_item2 (p : 'a t -> 'b t -> 'data Myseq.t) (rev_path : int list) (v_item : 'a) (r_item : 'b) : 'value Myseq.t =
+  let path, v = nest_path rev_path v_item in
+  let _path, r = nest_path rev_path r_item in
+  let* data = p v r in
+  let v_item = unnest_path path (Data.value data) in
+  Myseq.return v_item
 
 let is_complete ~depth (x : 'a t) : bool =
   for_all ~depth
@@ -491,6 +505,16 @@ let tail ~(depth : int) (x : 'a t) : 'a t option =
          | _ -> None)
      | _ -> raise Invalid_depth)
     x
+
+let head_tail ~(depth : int) (x : 'a t) : ('a * 'a t) Myseq.t =
+  map_tup_myseq ~depth (-1,0)
+    (function
+     | `Seq (d,i_opt,l) ->
+        (match i_opt, l with
+         | None, x0::l1 -> Myseq.return (x0, `Seq (d,None,l1))
+         | _ -> Myseq.empty)
+     | _ -> raise Invalid_depth)
+    (tup1 x)
 
 let cons ~(depth : int) (hd : 'a t) (tl : 'a t) : 'a t =
   map2 ~depth (+1)

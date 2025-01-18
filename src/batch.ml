@@ -75,18 +75,18 @@ let print_measures name list_ms =
         sum_ms;
       print_newline ())
 
-let apply_model m v_i info_o =
+let apply_model m v_i r_o =
   try
     let res_opt =
       Common.do_timeout_gc (float !timeout_predict) (fun () ->
-          apply m v_i info_o) in
+          apply m v_i r_o) in
     match res_opt with
     | Some res -> res
     | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
   with exn -> Result.Error exn
   
 let score_learned_model
-      ~info_o (* generation output info *)      
+      ~r_o (* generation output info *)      
       name
       (m : task_model)
       (train_test : [ `TRAIN of pairs_reads
@@ -141,7 +141,7 @@ let score_learned_model
           ));
         print_endline "\n> Output prediction from input (up to 3 trials):";
         let score, rank, label, _failed_derived_grids =
-	  match apply_model m input info_o with
+	  match apply_model m input r_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
                (fun (score,rank,label,failed_derived_grids) (gdi, gdo, dl) ->
@@ -201,7 +201,7 @@ let score_learned_model
   micro, macro, mrr
        
 let print_learned_model
-      ~init_task_model ~info_o
+      ~init_task_model ~r_o
       (name : string) (task : task)
     : measures =
   let pp_task_model = Xprint.to_stdout (xp_task_model ~html:false) in
@@ -256,12 +256,12 @@ let print_learned_model
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~info_o
+         ~r_o
          name learned_task_model (`TRAIN res.result_pruning.pairs_reads) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~info_o
+         ~r_o
          name learned_task_model (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -291,14 +291,14 @@ let task_of_name dir name =
 let process_task
       name task
       list_ms =
-      let {varseq; input_model; output_model; output_generator_info=info_o} = get_init_config name task in
+      let {varseq; input_model; output_model; output_generator_distrib=r_o} = get_init_config name task in
       let init_task_model = make_task_model varseq input_model output_model in
       print_endline "\n# evaluating init_task_model";
       print_dl_task_model name task init_task_model;
       print_endline "\n# learning a model for train pairs";
       let ms =
         print_learned_model
-          ~info_o
+          ~r_o
           ~init_task_model name task in
       list_ms := ms :: !list_ms
 
