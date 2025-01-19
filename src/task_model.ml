@@ -55,11 +55,13 @@ let read_pairs
       ~(max_nb_reads : int)
       ~(dl_task_model : (('typ,'value,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
       ~(read : bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
-               (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'read Myseq.t (*list result*))
+               (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'distrib -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
       
       (m : 'task_model)
       (pairs : 'value Task.pair list)
+      (distrib_i : 'distrib)
+      (distrib_o : 'distrib)
     : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
   let dl_mi, dl_mo = Common.prof "Task_model.read_pairs/dl_task_model" (fun () -> dl_task_model m) in
@@ -72,13 +74,13 @@ let read_pairs
                ~size1:max_nb_reads ~size2:max_nb_reads
                (read
                   ~bindings:Expr.bindings0
-                  m.input_model input)
+                  m.input_model input distrib_i)
                (fun ri ->
                  let bindings = get_bindings m.input_model ri.data in
                  let* ro =
                    read
                      ~bindings
-                     m.output_model output in
+                     m.output_model output distrib_o in
                  Myseq.return (ri, ro, ri.dl +. ro.dl)) in
            if input_reads = [] (* implies pair_reads = [] *)
            then Result.Error Model.Parse_failure (* TODO: distinguish source *)
@@ -180,13 +182,16 @@ let apply
       ~(max_nb_reads : int)
       ~(max_nb_writes : int)
       ~(read : bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
-               (('typ,'value,'var,'constr,'func) model as 'model) -> 'value ->
+               (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'distrib ->
                ('typ,'value,'distrib,'constr,'var,'func) read Myseq.t)
       ~(get_bindings : 'model -> 'data -> 'bindings)
       ~(write : bindings:'bindings ->
                 'model -> 'distrib -> ('data * dl) Myseq.t)
 
-      (m : ('typ,'value,'var,'constr,'func) task_model) (v_i : 'value) (r_o : 'distrib)
+      (m : ('typ,'value,'var,'constr,'func) task_model)
+      (v_i : 'value)
+      (r_i : 'distrib)
+      (r_o : 'distrib)
     : ('data * 'data * dl) list result =
   Common.prof "Task_model.apply" (fun () ->
   let some_parse, _lri, l_di_do_dl =
@@ -194,7 +199,7 @@ let apply
       ~size1:max_nb_reads ~size2:max_nb_writes
       (read
          ~bindings:Expr.bindings0
-         m.input_model v_i)
+         m.input_model v_i r_i)
       (fun read_i ->
         let data_i = read_i.data in
         let bindings = get_bindings m.input_model data_i in

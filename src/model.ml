@@ -238,7 +238,7 @@ let get_bindings  (* QUICK *)
        let v = Data.value d in
        Mymap.add x (t1,v) acc
     | Any t, _ -> acc
-    | Pat (t,c,src,args), DPat (_v, _c, _src, dargs) ->
+    | Pat (t,c,src,args), DPat (_v, _r, _c, _src, dargs) ->
        let n = Array.length args in
        assert (Array.length dargs = n);
        let ref_acc = ref acc in (* missing Array.fold_right2 *)
@@ -376,14 +376,14 @@ let dl_data
     : (('value,'distrib,'constr) data as 'data) -> dl = (* QUICK *)
   let rec aux = function
     | DAny (v, r) -> encoding_dany v r
-    | DPat (_, c, vsrc, dargs) ->
+    | DPat (_, _, c, vsrc, dargs) ->
        let encs = Array.map aux dargs in
        encoding_dpat c vsrc encs
     | DAlt (prob,b,d12) ->
        let dl_choice = Mdl.Code.usage prob in
        let enc12 = aux d12 in
        encoding_alt dl_choice enc12
-    | DExpr v -> encoding_expr_value v
+    | DExpr (v, _) -> encoding_expr_value v
   in
   fun d ->
   let enc = aux d in
@@ -597,32 +597,28 @@ let parse_bests
   (* TODO: take into account max_parse_dl_factor? *)
 
 let read
-      ~(distrib_of_value : 'typ -> 'value -> 'distrib)
       ~(parse_bests : ('typ,'value,'var,'constr,'func) model -> ('distrib,'var,'typ,'value,'constr) parse_bests)
 
       ~(bindings : ('var,'typ,'value) Expr.bindings)
       (m : ('typ,'value,'var,'constr,'func) model)
       (v : 'value)
+      (r : 'distrib)
     : ('typ,'value,'distrib,'constr,'var,'func) read Myseq.t =
   Myseq.prof "Model.read" (
-  let t = typ m in
-  let r = distrib_of_value t v in
   let* best_parses = Myseq.from_result (parse_bests m bindings v r) in
   let* rank, (data, dl) = Myseq.with_position (Myseq.from_list best_parses) in
   let dl_rank = dl_parse_rank rank in (* to penalize later parses, in case of equivalent parses, only for prediction *)
   Myseq.return { bindings; lazy_index=None; data; dl_rank; dl })
 
 let does_parse_value
-      ~(distrib_of_value : 'typ -> 'value -> 'distrib)
       ~(parseur : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> ('distrib,'var,'typ,'value,'constr) parseur)
 
       (m : ('typ,'value,'var,'constr,'func) model)
       (bindings : ('var,'typ,'value) Expr.bindings)
       (v : 'value)
+      (r : 'distrib)
     : bool =
   Common.prof "Model.does_parse" (fun () ->
-  let t = typ m in
-  let r = distrib_of_value t v in
   not (Myseq.is_empty (parseur m bindings v r)))
 
 (* writing *)

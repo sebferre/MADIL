@@ -90,7 +90,8 @@ module type TYPES =
       { varseq : varseq;
         input_model : model;
         output_model : model;
-        output_generator_distrib : distrib }
+        input_distrib : distrib;
+        output_distrib : distrib }
 
   end
 
@@ -171,7 +172,8 @@ module Defined_types (T : BASIC_TYPES) =
       { varseq : varseq;
         input_model : model;
         output_model : model;
-        output_generator_distrib : distrib }
+        input_distrib : distrib;
+        output_distrib : distrib }
                      
   end
   
@@ -210,7 +212,6 @@ module type DOMAIN =
     val generator_any : typ -> generator
     val generator_pat : typ -> constr -> value array -> generator array -> generator
 
-    val distrib_of_value : typ -> value -> distrib
     val parseur_value : value -> parseur
     val parseur_any : typ -> parseur
     val parseur_pat : typ -> constr -> value array -> parseur array -> parseur
@@ -347,12 +348,10 @@ module Make (Domain : DOMAIN) =
 
     let does_parse_value =
       Model.does_parse_value
-        ~distrib_of_value
         ~parseur
     
     let read =
       Model.read
-        ~distrib_of_value
         ~parse_bests
 
     let write =
@@ -372,7 +371,6 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~distrib_of_value
         ~parse_bests
         ~make_index
         ~decompositions
@@ -398,7 +396,6 @@ module Make (Domain : DOMAIN) =
         ~value_of_bool
         ~dl_model
         ~dl_data
-        ~distrib_of_value
         ~parse_bests
         ~make_index
         ~decompositions:(fun t varseq value -> [])

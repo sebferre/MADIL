@@ -3,25 +3,32 @@ open Madil_common
 
 type ('value,'distrib,'constr) data = (* data according to model, must be self-contained for encoding *)
   | DAny of 'value * 'distrib (* bare value, and an enriched form of value often coming with some range constraint for DL computing *)
-  | DPat of 'value * 'constr * 'value array * ('value,'distrib,'constr) data array
+  | DPat of 'value * 'distrib * 'constr * 'value array * ('value,'distrib,'constr) data array
   | DAlt of float (* prob *) * bool * ('value,'distrib,'constr) data (* the bool indicates which branch was chosen *)
-  | DExpr of 'value (* computed value *)
+  | DExpr of 'value * 'distrib (* computed value *) (* TODO: consider including the expression *)
 
 (* TODO: consider adding DNil as nil data, for use as nil env *)
 
 let rec value (d : ('value,'distrib,'constr) data) : 'value =
   match d with
   | DAny (v,_) -> v
-  | DPat (v,_,_,_) -> v
+  | DPat (v,_,_,_,_) -> v
   | DAlt (prob,b,d) -> value d
-  | DExpr v -> v (* TODO: consider including the expression *)
+  | DExpr (v,_) -> v
+
+let rec value_distrib (d : ('value,'distrib,'constr) data) : 'value * 'distrib =
+  match d with
+  | DAny (v,r) -> v, r
+  | DPat (v,r,_,_,_) -> v, r
+  | DAlt (prob,b,d) -> value_distrib d
+  | DExpr (v,r) -> v, r
 
 let make_dany (value : 'value) (distrib : 'distrib) : ('value,'distrib,'constr) data =
   DAny (value, distrib) [@@inline]
-let make_dpat (value : 'value) (c : 'constr) ?(src : 'value array = [||]) (args : ('value,'distrib,'constr) data array) : ('value,'distrib,'constr) data =
-  DPat (value, c, src, args) [@@inline]
-let make_dexpr (value : 'value) : ('value,'distrib,'constr) data =
-  DExpr value [@@inline]
+let make_dpat (value : 'value) (distrib : 'distrib) (c : 'constr) ?(src : 'value array = [||]) (args : ('value,'distrib,'constr) data array) : ('value,'distrib,'constr) data =
+  DPat (value, distrib, c, src, args) [@@inline]
+let make_dexpr (value : 'value) (distrib : 'distrib) : ('value,'distrib,'constr) data =
+  DExpr (value,distrib) [@@inline]
  
 let xp_data
       ~(xp_value : 'value html_xp)
@@ -36,7 +43,7 @@ let xp_data
            xp_value ~html print v;
            print#string " ~ ";
            xp_distrib ~html print r)
-    | DPat (v,c,src,args) ->
+    | DPat (v,r,c,src,args) ->
        let xp_src =
          Array.map
            (fun v -> (fun ~html print () -> xp_value ~html print v))
@@ -53,7 +60,7 @@ let xp_data
              (fun () ->
                print#string (if b then "T " else "F ");
                aux ~prio_ctx:2 ~html print d12))
-    | DExpr v ->
+    | DExpr (v,r) ->
        xp_html_elt "span" ~classe:"data-expr" ~html print
          (fun () ->
            xp_tuple1 ~delims:("{","}") xp_value ~html print v)

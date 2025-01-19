@@ -40,7 +40,8 @@ type arc_state =
     refinement : refinement; (* previous refinement *)
     refinement_support : int;
     model : task_model; (* current model *)
-    r_o : distrib; (* for output generation *)
+    r_i : distrib; (* input distrib *)
+    r_o : distrib; (* output distrib *)
     prs : pairs_reads; (* pair reads *)
     dsri : reads; (* input reads *)
     dsro : reads; (* output reads *)
@@ -62,14 +63,14 @@ type arc_focus = arc_state
                
 type arc_extent = arc_state
 
-let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (model : task_model) (r_o : distrib) : (arc_state, exn) Result.t =
+let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (model : task_model) (r_i : distrib) (r_o : distrib) : (arc_state, exn) Result.t =
   try
-  let| prs = read_pairs model task.train in
+  let| prs = read_pairs model task.train r_i r_o in
   let| () = (* checking that the input model can parse the test inputs *)
     let mi = model.Task_model.input_model in
     if
       List.for_all
-        (fun vi -> does_parse_value mi Expr.bindings0 vi)
+        (fun vi -> does_parse_value mi Expr.bindings0 vi r_i)
         (List.map (fun pair -> pair.Task.input) task.test)
     then Result.Ok ()
     else Result.Error Model.Parse_failure in
@@ -83,7 +84,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       include_refs;
       refinement;
       refinement_support = Task_model.refinement_support refinement;
-      model; r_o;
+      model; r_i; r_o;
       prs; dsri; dsro;
       dls;
       norm_dls;
@@ -102,12 +103,13 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
                
 let initial_focus (name : string) (task : task) : arc_focus =
   let norm_dl_model_data = Task_model.make_norm_dl_model_data ~alpha:(!alpha) () in
-  let {varseq; input_model; output_model; output_generator_distrib=r_o} = get_init_config name task in
+  let {varseq; input_model; output_model;
+       input_distrib=r_i; output_distrib=r_o} = get_init_config name task in
   let init_include_refs = { inc_input = true; inc_output = true; inc_expr = true} in
   let init_task_model = make_task_model varseq input_model output_model in
   match state_of_model name task
           norm_dl_model_data Build init_include_refs
-          Task_model.RInit init_task_model r_o with
+          Task_model.RInit init_task_model r_i r_o with
   | Result.Ok s -> s
   | Result.Error exn -> raise exn
 
@@ -140,7 +142,7 @@ object
                else
                  match m_res with
                  | Result.Ok m ->
-                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r m focus.r_o with
+                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r m focus.r_i focus.r_o with
                      | Result.Ok state ->
                         let compressive =
                           state.norm_ldescr < focus.norm_ldescr
@@ -186,7 +188,7 @@ object
              | Prune -> Build in
            match state_of_model focus.name focus.task focus.norm_dl_model_data
                    new_stage focus.include_refs Task_model.RInit
-                   focus.model focus.r_o with
+                   focus.model focus.r_i focus.r_o with
            | Result.Ok s -> [ChangeStage s]
            | Result.Error exn -> print_endline (Printexc.to_string exn); [])
         @ (List.fold_left
@@ -195,7 +197,7 @@ object
                then
                  match state_of_model focus.name focus.task focus.norm_dl_model_data
                          focus.stage new_include_refs Task_model.RInit
-                         focus.model focus.r_o with
+                         focus.model focus.r_i focus.r_o with
                  | Result.Ok s -> ChangeIncludeRefs s :: suggs
                  | Result.Error exn -> print_endline (Printexc.to_string exn); suggs
                else suggs)
@@ -392,7 +394,7 @@ let render_place place k =
     if true (* focus.dls.d.o <= 0. *)
     then
       try
-        match apply m vi focus.r_o with
+        match apply m vi focus.r_i focus.r_o with
         | Result.Ok [] -> Error "No valid prediction"
         | Result.Ok l_di_do_dl -> Pred (vo, l_di_do_dl)
         | Result.Error exn -> Error (Printexc.to_string exn)

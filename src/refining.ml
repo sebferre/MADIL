@@ -221,7 +221,6 @@ let refinements
       ~(value_of_bool : bool -> 'value)
       ~(dl_model : nb_env_vars:int -> (('typ,'value,'var,'constr,'func) Model.model as 'model) -> dl)
       ~(dl_data : (('value,'distrib,'constr) Data.data as 'data) -> dl)
-      ~(distrib_of_value : 'typ -> 'value -> 'distrib)
       ~(parse_bests : 'model -> ('distrib,'var,'typ,'value,'constr) Model.parse_bests)
       ~(make_index : ('var,'typ,'value) Expr.bindings -> ('typ,'value,'var,'func) Expr.index)      
       ~(decompositions : 'typ -> 'varseq -> 'value list list -> ('model * 'varseq) list)
@@ -273,8 +272,7 @@ let refinements
       Common.prof "Refining.refinements/aux_gen/reparsing" (fun () ->
       map_reads
         (fun read data ->
-          let v = Data.value data in
-          let r = distrib_of_value (Model.typ m) v in
+          let v, r = Data.value_distrib data in
           match parse_best m read.Model.bindings v r with
           | Result.Ok data -> data
           | Result.Error exn -> (* should not happen *)
@@ -340,7 +338,7 @@ let refinements
                    aux ~steps ctxi mi varseq
                      (map_reads
                         (fun read -> function
-                         | Data.DPat (_, _c, _vsrc, args) ->
+                         | Data.DPat (_v, _r, _c, _vsrc, args) ->
                             assert (i >= 0 && i < Array.length args);
                             args.(i)
                          | _ -> assert false)
@@ -421,8 +419,7 @@ let refinements
              let selected_reads' =
                filter_map_reads
                  (fun read data ->
-                   let v = Data.value data in
-                   let r = distrib_of_value t v in
+                   let v, r = Data.value_distrib data in
                    (*let data_res = parse_best m read.Model.bindings input in*)
                    let data'_res = parse_best m' read.Model.bindings v r in
                    (* (match data_res, data'_res with (* checking data DL invariance *)
@@ -462,7 +459,7 @@ let refinements
                  let selected_reads_i =
                    map_reads
                      (fun read -> function
-                      | Data.DPat (_, _c, _src, dargs) ->
+                      | Data.DPat (_v, _r, _c, _src, dargs) ->
                          assert (Array.length dargs = n);
                          dargs.(i)
                       | _ -> assert false)
@@ -498,11 +495,12 @@ let refinements
        let t = Model.typ m in
        let allowed = asd#alt_opt t in
        aux_gen ctx m varseq selected_reads
-         (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_const/get_rs" (fun () ->
-           let v = Data.value data in
+         (fun (read, data : _ read) ->
+           Common.prof "Refining.refinements/aux_const/get_rs" (fun () ->
+           let v, r = Data.value_distrib data in
            let e = Expr.Const (t,v) in
            let me = Model.make_expr e in
-           let data' = Data.make_dexpr v in
+           let data' = Data.make_dexpr v r in
            [(me, varseq, Result.Ok data')]))
          (fun m' -> m')
          (fun m' varseq' ~supp ~nb ~alt best_reads ->
@@ -535,7 +533,7 @@ let refinements
        let allowed = asd#alt_opt t in
        aux_gen ctx m varseq selected_reads
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
-           let v = Data.value data in
+           let v, r = Data.value_distrib data in
            let s_expr = (* index expressions evaluating to v *)
              let index = Model.force_index ~make_index read in
              let es = index#lookup (t,v) in
@@ -546,7 +544,7 @@ let refinements
            |> Myseq.fold_left
                 (fun refs e ->
                   let me = Model.make_expr e in
-                  let data' = Data.make_dexpr v in
+                  let data' = Data.make_dexpr v r in
                   (me, varseq, Result.Ok data')::refs)
                 [])))
          (fun m' -> m')
@@ -578,8 +576,7 @@ let refinements
     let allowed = asd#alt_opt t in
     aux_gen ctx m varseq selected_reads
       (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_any/get_rs" (fun () ->
-        let v = Data.value data in
-        let r = distrib_of_value t v in
+        let v, r = Data.value_distrib data in
         get_refs varseq v
         |> List.fold_left
              (fun refs (m',varseq') ->

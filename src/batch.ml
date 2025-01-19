@@ -26,8 +26,8 @@ let print_dl_md psr = (* model+data DL *)
   Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" l.m.io l.d.io l.md.io;
   l.r.i +. l.d.o
 
-let print_dl_task_model name task model =
-  read_pairs model task.Task.train
+let print_dl_task_model ~r_i ~r_o name task model =
+  read_pairs model task.Task.train r_i r_o
   |> Result.fold
        ~ok:(fun psr -> ignore (print_dl_md psr))
        ~error:(fun exn -> raise exn)
@@ -75,18 +75,18 @@ let print_measures name list_ms =
         sum_ms;
       print_newline ())
 
-let apply_model m v_i r_o =
+let apply_model m v_i r_i r_o =
   try
     let res_opt =
       Common.do_timeout_gc (float !timeout_predict) (fun () ->
-          apply m v_i r_o) in
+          apply m v_i r_i r_o) in
     match res_opt with
     | Some res -> res
     | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
   with exn -> Result.Error exn
   
 let score_learned_model
-      ~r_o (* generation output info *)      
+      ~r_i ~r_o (* generation output info *)      
       name
       (m : task_model)
       (train_test : [ `TRAIN of pairs_reads
@@ -125,7 +125,7 @@ let score_learned_model
                  Myseq.take (!max_nb_reads)
                    (read
                       ~bindings:Expr.bindings0
-                      m.Task_model.input_model input) in
+                      m.Task_model.input_model input r_i) in
                if input_reads = []
                then Result.Error Not_found
                else Result.Ok input_reads in
@@ -141,7 +141,7 @@ let score_learned_model
           ));
         print_endline "\n> Output prediction from input (up to 3 trials):";
         let score, rank, label, _failed_derived_grids =
-	  match apply_model m input r_o with
+	  match apply_model m input r_i r_o with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
                (fun (score,rank,label,failed_derived_grids) (gdi, gdo, dl) ->
@@ -201,7 +201,7 @@ let score_learned_model
   micro, macro, mrr
        
 let print_learned_model
-      ~init_task_model ~r_o
+      ~init_task_model ~r_i ~r_o
       (name : string) (task : task)
     : measures =
   let pp_task_model = Xprint.to_stdout (xp_task_model ~html:false) in
@@ -219,7 +219,8 @@ let print_learned_model
           ~search_temperature:(!search_temperature)
           ~init_task_model
           task.train
-          (task.test |> List.map (fun pair -> pair.Task.input)))
+          (task.test |> List.map (fun pair -> pair.Task.input))
+          r_i r_o)
   in
   match res with
   | Common.Exn exn ->
@@ -256,12 +257,12 @@ let print_learned_model
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~r_o
+         ~r_i ~r_o
          name learned_task_model (`TRAIN res.result_pruning.pairs_reads) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~r_o
+         ~r_i ~r_o
          name learned_task_model (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -291,16 +292,17 @@ let task_of_name dir name =
 let process_task
       name task
       list_ms =
-      let {varseq; input_model; output_model; output_generator_distrib=r_o} = get_init_config name task in
-      let init_task_model = make_task_model varseq input_model output_model in
-      print_endline "\n# evaluating init_task_model";
-      print_dl_task_model name task init_task_model;
-      print_endline "\n# learning a model for train pairs";
-      let ms =
-        print_learned_model
-          ~r_o
-          ~init_task_model name task in
-      list_ms := ms :: !list_ms
+  let {varseq; input_model; output_model;
+       input_distrib=r_i; output_distrib=r_o} = get_init_config name task in
+  let init_task_model = make_task_model varseq input_model output_model in
+  print_endline "\n# evaluating init_task_model";
+  print_dl_task_model ~r_i ~r_o name task init_task_model;
+  print_endline "\n# learning a model for train pairs";
+  let ms =
+    print_learned_model
+      ~r_i ~r_o
+      ~init_task_model name task in
+  list_ms := ms :: !list_ms
 
 let summarize_tasks list_ms =
   (* stats over all tasks *)
