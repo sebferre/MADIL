@@ -24,11 +24,13 @@ exception Invalid_depth (* undefined depth in structure *)
 
 let rec depth : 'a t -> int = function
   | `Seq (d, _, l) ->
+     assert (d >= 0);
      assert (List.for_all (fun x -> depth x = d) l);
      1 + d
   | _ -> 0
 
 let seq (d : int) (items : 'a list) : 'a t =
+  assert (d >= 0);
   assert (List.for_all (fun item -> depth item = d) items);
   `Seq (d, None, items)
 
@@ -71,7 +73,9 @@ let rec map ?(depth = -1) (delta_depth : int) (f : 'a -> 'b) (x : 'a t) : 'b t =
     match x with
     | `Seq (d,i_opt,l) ->
        let ly = List.map (map ~depth:(depth-1) delta_depth f) l in
-       `Seq (d + delta_depth, i_opt, ly)
+       let dy = d + delta_depth in
+       assert (dy >= 0);
+       `Seq (dy, i_opt, ly)
     | _ -> f x
 
 let const (c : 'b) (x : 'a t) : 'b t =
@@ -84,7 +88,9 @@ let rec map_option ?(depth = -1) (delta_depth : int) (f : 'a -> 'b option) (x : 
     match x with
     | `Seq (d,i_opt,l) ->
        let@ ly = list_mapi_option (fun i -> map_option ~depth:(depth-1) delta_depth f) l in
-       Some (`Seq (d + delta_depth, i_opt, ly))
+       let dy = d + delta_depth in
+       assert (dy >= 0);
+       Some (`Seq (dy, i_opt, ly))
     | _ -> f x
 
 let rec map_result ?(depth = -1) (delta_depth : int) (f : 'a -> 'b result) (x : 'a t) : 'b t result =
@@ -94,7 +100,9 @@ let rec map_result ?(depth = -1) (delta_depth : int) (f : 'a -> 'b result) (x : 
     match x with
     | `Seq (d,i_opt,l) ->
        let| ly = list_map_result (map_result ~depth:(depth-1) delta_depth f) l in
-       Result.Ok (`Seq (d + delta_depth, i_opt, ly))
+       let dy = d + delta_depth in
+       assert (dy >= 0);
+       Result.Ok (`Seq (dy, i_opt, ly))
     | _ -> f x
 
 let rec map_myseq ?(depth = -1) (delta_depth : int) (f : 'a -> 'b Myseq.t) (x : 'a t) : 'b t Myseq.t =
@@ -106,7 +114,9 @@ let rec map_myseq ?(depth = -1) (delta_depth : int) (f : 'a -> 'b Myseq.t) (x : 
        let* ly =
          Myseq.product_fair
            (List.map (map_myseq ~depth:(depth-1) delta_depth f) l) in
-       Myseq.return (`Seq (d + delta_depth, i_opt, ly))
+       let dy = d + delta_depth in
+       assert (dy >= 0);
+       Myseq.return (`Seq (dy, i_opt, ly))
     | _ -> f x
 
 let rec map2 ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c) (x1 : 'a t) (x2 : 'b t) : 'c t =
@@ -117,7 +127,10 @@ let rec map2 ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c) (x1 : 'a t) 
     match x1, x2 with
     | `Seq (d1,i1_opt,l1), `Seq (d2,i2_opt,l2) ->
        if i1_opt = i2_opt && List.length l1 = List.length l2
-       then `Seq (d1 + delta_depth, i1_opt, List.map2 (map2 ~depth:(depth-1) delta_depth f) l1 l2)
+       then
+         let dy = d1 + delta_depth in
+         assert (dy >= 0);
+         `Seq (dy, i1_opt, List.map2 (map2 ~depth:(depth-1) delta_depth f) l1 l2)
        else invalid_arg "Ndseq.map2: inconsistent lengths"
     | _ -> f x1 x2
 
@@ -138,11 +151,14 @@ let rec map2_result ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c result
              (fun (x1,x2) ->
                map2_result ~depth:(depth-1) delta_depth f x1 x2)
              l in
-         Result.Ok (`Seq (d1 + delta_depth, i1_opt, ly))
+         let dy = d1 + delta_depth in
+         assert (dy >= 0);
+         Result.Ok (`Seq (dy, i1_opt, ly))
        else invalid_arg "Utilities.XSeq.map2: inconsistent structure"
     | _ -> f x1 x2
 
 let mapn_n ?(name = "?") ~(depth : int) (res_depth : int array) (f : int list -> 'a t array -> 'b t array) (args : 'a t array) : 'b t array =
+  (* res_depth is relative to depth: result depth = depth + res_depth, not relative to arg depth *)
   assert (args <> [||]);
   let m = Array.length res_depth in
   let res_nil = Array.make m [] in
@@ -193,7 +209,10 @@ let mapn_n ?(name = "?") ~(depth : int) (res_depth : int array) (f : int list ->
           let res_l = aux2 pos_init args_l in
           let res =
             Array.mapi
-              (fun i l -> `Seq (depth - 1 + res_depth.(i), i_opt, l))
+              (fun i l ->
+                let d = depth - 1 + res_depth.(i) in
+                assert (d >= 0);
+                `Seq (d, i_opt, l))
               res_l in
           res)
   in
@@ -292,7 +311,9 @@ let mapn_n_myseq ?(name = "?") ~(depth : int) (res_depth : int array) (f : int l
                     (fun res ->
                       res.(j))
                     res_l in
-                `Seq (depth - 1 + res_depth.(j), i_opt, l)) in
+                let d = depth - 1 + res_depth.(j) in
+                assert (d >= 0);
+                `Seq (d, i_opt, l)) in
           Myseq.return res)
   in
   aux [] depth args
@@ -370,6 +391,7 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> 'c Myseq.t) (x1 : 'a t)
          n1 * k, List.concat (List.init k (fun _ -> l1)) in
      let l1 = if n1 = n2 then l1 else Common.sub_list l1 0 n2 in
      let d = d2 + delta_depth in
+     assert (d >= 0);
      let* ly = Myseq.product_fair (List.map2 (match_myseq delta_depth f) l1 l2) in
      Myseq.return (`Seq (d, None, ly))
   | `Seq (_,i1_opt,[]), `Seq (d2,Some i2,[z2]) ->
@@ -379,15 +401,18 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> 'c Myseq.t) (x1 : 'a t)
      assert (i1_opt = None);
      let n1 = List.length l1 in
      let d = d2 + delta_depth in
+     assert (d >= 0);
      let z1 = List.nth l1 (i2 mod n1) in (* assuming periodic sequence from l1 *)
      let* y = match_myseq delta_depth f z1 z2 in
      Myseq.return (`Seq (d, Some i2, [y]))
   | _, `Seq (d2,None,l2) -> (* broadcast x1 *)
      let d = d2 + delta_depth in
+     assert (d >= 0);
      let* ly = Myseq.product_fair (List.map (match_myseq delta_depth f x1) l2) in
      Myseq.return (`Seq (d, None, ly))
   | _, `Seq (d2, Some i2, [z2]) -> (* broadcast x1 *)
      let d = d2 + delta_depth in
+     assert (d >= 0);
      let* y = match_myseq delta_depth f x1 z2 in
      Myseq.return (`Seq (d, Some i2, [y]))
   | `Seq _, _ | _, `Seq _ -> Myseq.empty
@@ -559,7 +584,9 @@ let index_list (x : 'a t) (is : int option list) : 'a t option =
        aux (delta_depth+1) is1 x1
     | None::is1, `Seq (d,pos_opt,l) ->
        let@ l' = list_mapi_option (fun _ x1 -> aux delta_depth is1 x1) l in
-       Some (`Seq (d + delta_depth, pos_opt, l'))
+       let d' = d + delta_depth in
+       assert (d' >= 0);
+       Some (`Seq (d', pos_opt, l'))
     | _ -> invalid_arg "Ndseq.index: is is too long"
   in
   let delta_depth =
