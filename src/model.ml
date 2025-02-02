@@ -190,11 +190,11 @@ let xp_path
 
 (* ASD *)
 
-class virtual ['typ,'asd_typ,'constr,'func] asd =
+class virtual ['typ,'asd_typ] asd =
   object (self)
     method virtual abstract : 'typ -> 'asd_typ
-    method virtual pats : 'asd_typ -> ('constr * 'asd_typ array * 'asd_typ array) list (* omit derived arguments *)
-    method virtual funcs : 'asd_typ -> ('func * 'asd_typ array) list (* omit constant args (relative to make_index), repeat functions for different const-related modes *)
+    method virtual pats : 'asd_typ -> (string * 'asd_typ array * 'asd_typ array) list (* omit derived arguments *)
+    method virtual funcs : 'asd_typ -> (string * 'asd_typ array) list (* omit constant args (relative to make_index), repeat functions for different const-related modes *)
     
     method virtual expr_opt : 'typ -> bool (* allow expressions on this type? *)
     method virtual alt_opt : 'typ -> bool (* allow alternatives on this type? *)
@@ -400,7 +400,7 @@ let size_any = 1
 let size_alt = 1
   
 let size_model_ast (* for DL computing, QUICK *)
-      ~(asd : ('typ,'asd_typ,'constr,'func) asd)
+      ~(asd : ('typ,'asd_typ) asd)
     (m : ('typ,'value,'var,'constr,'func) model) : int =
   let rec aux = function
     | Def (x,m1) -> aux m1 (* definitions are ignore in DL, assumed determined by model AST *)
@@ -427,7 +427,7 @@ let size_model_ast (* for DL computing, QUICK *)
 
 let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
       ~(typ_bool : 'typ)
-      ~(asd : ('typ,'asd_typ,'constr,'func) asd)
+      ~(asd : ('typ,'asd_typ) asd)
       ~(nb_expr_ast : 'asd_typ -> int -> float) =
   let tab : ('asd_typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let reset () = Hashtbl.clear tab in
@@ -453,7 +453,7 @@ let nb_model_ast (* for DL computing, must be consistent with size_model_ast *)
        let nb = (* counting Pat (c,args) *)
          let constr_args = asd#pats k in
          List.fold_left
-           (fun nb (c,k_src,k_args) ->
+           (fun nb (label_c,k_src,k_args) ->
              let len_src = Array.length k_src in
              let len_args = Array.length k_args in
              let len = len_src + len_args in

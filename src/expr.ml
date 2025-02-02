@@ -700,7 +700,7 @@ class ['typ,'value,'var,'func] index_union =
 (* expr encoding *)
 
 let nb_expr_ast (* for DL computing *)
-      ~(funcs : 'asd_typ -> ('func * 'asd_typ array) list)
+      ~(funcs : 'asd_typ -> (string * 'asd_typ array) list)
     : ('asd_typ -> int -> float) * (unit -> unit) =
   let tab : ('typ * int, float) Hashtbl.t = Hashtbl.create 1013 in
   let reset () = Hashtbl.clear tab in
@@ -714,7 +714,7 @@ let nb_expr_ast (* for DL computing *)
          else 0. in
        let nb = (* counting Apply-s *)
          List.fold_left
-           (fun nb (f,k_args) ->
+           (fun nb (label_f,k_args) ->
              let len = Array.length k_args in
              if len = 0 (* leaf node *)
              then if size = 1 then nb +. 1. else nb

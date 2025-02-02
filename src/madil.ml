@@ -28,7 +28,7 @@ module type BASIC_TYPES =
     type func
     val xp_func : func html_xp
 
-    val asd : (typ,typ,constr,func) Model.asd
+    val asd : (typ,typ) Model.asd
 
     type encoding
               
@@ -60,7 +60,7 @@ module type TYPES =
     type model = (typ,value,var,constr,func) Model.model
     val xp_model : model html_xp
 
-    type asd = (typ,typ,constr,func) Model.asd
+    type asd = (typ,typ) Model.asd
 
     type task_model = (typ,value,var,constr,func) Task_model.task_model
     val xp_task_model : task_model html_xp
@@ -121,7 +121,7 @@ module Defined_types (T : BASIC_TYPES) =
     type model = (typ,value,var,constr,func) Model.model
     let xp_model : model html_xp = Model.xp_model ~xp_value ~xp_var ~xp_any ~xp_pat ~xp_func
 
-    type asd = (typ,typ,constr,func) Model.asd
+    type asd = (typ,typ) Model.asd
 
     type task_model = (typ,value,var,constr,func) Task_model.task_model
     let xp_task_model : task_model html_xp = Task_model.xp_task_model ~xp_model
@@ -151,8 +151,8 @@ module Defined_types (T : BASIC_TYPES) =
         method parseur_pat : typ -> value array -> parseur array -> parseur
         method encoding_pat : value array -> encoding array -> encoding
         method dl_params : typ -> dl
-        method refinements_pat : env_vars:binding_vars -> typ -> model array -> varseq -> value -> (model * varseq) list
-        method prunings_pat : env_vars:binding_vars -> typ -> model array -> varseq -> value -> (model * varseq) list
+        method refinements_pat : typ -> model array -> varseq -> value -> (model * varseq) list
+        method prunings_pat : typ -> model array -> varseq -> value -> (model * varseq) list
       end
 
     class type cfunc = (* class definition of a func *)
