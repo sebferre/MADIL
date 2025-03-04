@@ -39,10 +39,10 @@ let xp_data
     match d with
     | DAny (v,r) ->
        xp_html_elt "span" ~classe:"data-any" ~html print
-         (fun () ->
-           xp_value ~html print v;
+         (fun () -> xp_value ~html print v)
+(*           xp_value ~html print v;
            print#string " ~ ";
-           xp_distrib ~html print r)
+           xp_distrib ~html print r) *)
     | DPat (v,r,c,src,args) ->
        let xp_src =
          Array.map
