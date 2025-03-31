@@ -418,8 +418,8 @@ let select_refinements ~refine_degree ~refinement_branching ~data_of_model state
   (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
   refs
   |> myseq_find_map_k refine_degree
-       (fun (r1,m1_res) ->
-         let@ m1 = Result.to_option m1_res in
+       (fun (r1,m_dl1_res) ->
+         let@ m1, dl1 = Result.to_option m_dl1_res in
          match data_of_model ~pruning:false r1 m1 with
          | None -> None (* failure to parse with model m1 *)
          | Some state1 ->
@@ -684,10 +684,10 @@ let learn
           include_output:bool ->
           'task_model -> 'pairs_reads ->
           (('typ,'value,'distrib,'constr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
-          ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * 'task_model result) Myseq.t)
+          ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * ('task_model * dl) result) Myseq.t)
       ~(task_prunings :
           'task_model -> 'reads ->
-          ('refinement * 'task_model result) Myseq.t)
+          ('refinement * ('task_model * dl) result) Myseq.t)
       ~(log_reading :
           'refinement -> 'task_model ->
           status:[ `Success of ('pairs_reads * 'reads * 'reads * dl_split * dl)
@@ -760,8 +760,8 @@ let learn
     log_refining state.r state.m state.prs state.ldescr state.lpred;
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
       myseq_find_map_k refine_degree
-        (fun (r1,m1_res) ->
-          let@ m1 = Result.to_option m1_res in
+        (fun (r1, m_dl1_res) ->
+          let@ m1, dl1 = Result.to_option m_dl1_res in
           match data_of_model ~pruning:true r1 m1 with
           | None -> None (* failure to parse with model m1 *)
           | Some state1 ->

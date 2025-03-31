@@ -136,12 +136,12 @@ object
            print_endline (Printexc.to_string exn);
            Myseq.empty)
         |> Myseq.fold_left
-             (fun (quota_compressive,refinements, errors as res) (r,m_res) ->
+             (fun (quota_compressive,refinements, errors as res) (r,m_dl_res) ->
                if quota_compressive <= 0
                then res (* TODO: stop generating sequence *)
                else
-                 match m_res with
-                 | Result.Ok m ->
+                 match m_dl_res with
+                 | Result.Ok (m,dl) ->
                     (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r m focus.r_i focus.r_o with
                      | Result.Ok state ->
                         let compressive =
@@ -168,6 +168,7 @@ object
              (fun (compr1,s1) (compr2,s2) ->
                (*let sup1, sup2 =
                  match focus.stage with
+                 
                  | Build -> s2.refinement_support, s1.refinement_support
                  | Prune -> s1.refinement_support, s2.refinement_support in*)
                Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
