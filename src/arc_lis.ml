@@ -34,7 +34,7 @@ let all_include_refs =
 type arc_state =
   { name : string; (* task name *)
     task : task; (* task *)
-    norm_dl_model_data : pairs_reads -> Task_model.dl_split;
+    norm_dl_model_data : pairs_reads -> Task_model.dl_split * Task_model.dl_split;
     stage : learning_stage;
     include_refs : include_refs;
     refinement : refinement; (* previous refinement *)
@@ -45,6 +45,7 @@ type arc_state =
     prs : pairs_reads; (* pair reads *)
     dsri : reads; (* input reads *)
     dsro : reads; (* output reads *)
+    estimate_dl : dl; (* estimate DL when computed refinement, expected equal to dls.ldescr *)
     dls : Task_model.dl_split; (* DL components *)
     norm_dls : Task_model.dl_split; (* normalized DL components *)
     norm_ldescr : Mdl.bits; (* description-oriented DL *)
@@ -63,7 +64,7 @@ type arc_focus = arc_state
                
 type arc_extent = arc_state
 
-let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (model : task_model) (r_i : distrib) (r_o : distrib) : (arc_state, exn) Result.t =
+let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (model : task_model) (estimate_dl : dl) (r_i : distrib) (r_o : distrib) : (arc_state, exn) Result.t =
   try
   let| prs = read_pairs model task.train r_i r_o in
   let| () = (* checking that the input model can parse the test inputs *)
@@ -76,7 +77,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
     else Result.Error Model.Parse_failure in
   let dsri, dsro = Task_model.split_pairs_read prs in
   let dls = Task_model.dl_model_data ~alpha:(!alpha) prs in
-  let norm_dls : Task_model.dl_split = norm_dl_model_data prs in
+  let norm_dls : Task_model.dl_split = snd (norm_dl_model_data prs) in
   Result.Ok
     { name; task;
       norm_dl_model_data;
@@ -86,6 +87,7 @@ let rec state_of_model (name : string) (task : task) norm_dl_model_data (stage :
       refinement_support = Task_model.refinement_support refinement;
       model; r_i; r_o;
       prs; dsri; dsro;
+      estimate_dl;
       dls;
       norm_dls;
       norm_ldescr =
@@ -109,7 +111,7 @@ let initial_focus (name : string) (task : task) : arc_focus =
   let init_task_model = make_task_model varseq input_model output_model in
   match state_of_model name task
           norm_dl_model_data Build init_include_refs
-          Task_model.RInit init_task_model r_i r_o with
+          Task_model.RInit init_task_model infinity r_i r_o with
   | Result.Ok s -> s
   | Result.Error exn -> raise exn
 
@@ -142,7 +144,10 @@ object
                else
                  match m_dl_res with
                  | Result.Ok (m,dl) ->
-                    (match state_of_model focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs r m focus.r_i focus.r_o with
+                    (match state_of_model
+                             focus.name focus.task focus.norm_dl_model_data focus.stage focus.include_refs
+                             r m dl
+                             focus.r_i focus.r_o with
                      | Result.Ok state ->
                         let compressive =
                           state.norm_ldescr < focus.norm_ldescr
@@ -172,8 +177,8 @@ object
                  | Build -> s2.refinement_support, s1.refinement_support
                  | Prune -> s1.refinement_support, s2.refinement_support in*)
                Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
-                 (compr2, (*sup1,*) s1.norm_ldescr, s1.refinement)
-                 (compr1, (*sup2,*) s2.norm_ldescr, s2.refinement)) in
+                 (compr2, (*sup1,*) s1.estimate_dl (* s1.norm_ldescr *), s1.refinement)
+                 (compr1, (*sup2,*) s2.estimate_dl (* s2.norm_ldescr *), s2.refinement)) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask
@@ -189,7 +194,7 @@ object
              | Prune -> Build in
            match state_of_model focus.name focus.task focus.norm_dl_model_data
                    new_stage focus.include_refs Task_model.RInit
-                   focus.model focus.r_i focus.r_o with
+                   focus.model focus.estimate_dl focus.r_i focus.r_o with
            | Result.Ok s -> [ChangeStage s]
            | Result.Error exn -> print_endline (Printexc.to_string exn); [])
         @ (List.fold_left
@@ -198,7 +203,7 @@ object
                then
                  match state_of_model focus.name focus.task focus.norm_dl_model_data
                          focus.stage new_include_refs Task_model.RInit
-                         focus.model focus.r_i focus.r_o with
+                         focus.model focus.estimate_dl focus.r_i focus.r_o with
                  | Result.Ok s -> ChangeIncludeRefs s :: suggs
                  | Result.Error exn -> print_endline (Printexc.to_string exn); suggs
                else suggs)
@@ -307,7 +312,12 @@ let html_of_suggestion ~input_dico = function
      Jsutils.escapeHTML label
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
-       (Printf.sprintf "(%.3f / %.3f)  " s.norm_ldescr s.norm_lpred
+       (Printf.sprintf "(%.3f / %.3f) " s.norm_ldescr s.norm_lpred
+        ^ (let sep =
+             if floor s.estimate_dl = floor s.dls.descr
+             then "="
+             else "~" in
+           Printf.sprintf "(%.1f %s %.1f) " s.estimate_dl sep s.dls.descr) (* TEST *)
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
   | FailedRefinement (r,err) ->
      Html.span ~classe:"failed-refinement"

@@ -443,6 +443,7 @@ module Make (Domain : DOMAIN) =
 
     let task_refinements =
       Refining.task_refinements
+        ~alpha:(!alpha)
         ~binding_vars
         ~input_refinements:refinements
         ~output_refinements:refinements
