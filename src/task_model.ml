@@ -156,7 +156,7 @@ let dl_model_data
 
 let make_norm_dl_model_data
       ~(alpha : float)
-      () : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads -> dl_split =
+      () : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads -> dl_split * dl_split=
   let lmdi0 = ref (-1.) in
   let lmdo0 = ref (-1.) in
   fun psr ->
@@ -166,14 +166,17 @@ let make_norm_dl_model_data
     then ( lmdi0 := l.md.i; lmdo0 := l.md.o ) in
   let nlmi, nlri, nldi, nlmdi =
     l.m.i /. !lmdi0, l.r.i /. !lmdi0, l.d.i /. !lmdi0, l.md.i /. !lmdi0 in
-  let nlmo, nlro, nldo, nlmdo = l.m.o /. !lmdo0, l.r.o /. !lmdo0, l.d.o /. !lmdo0, l.md.o /. !lmdo0 in
-  { m = {i=nlmi; o=nlmo; io=nlmi +. nlmo};
-    r = {i=nlri; o=nlro; io=nlri +. nlro};
-    d = {i=nldi; o=nldo; io=nldi +. nldo};
-    md = {i=nlmdi; o=nlmdo; io=nlmdi +. nlmdo};
-    descr = nlmdi +. nlmdo;
-    pred = nlri +. nlro +. nldo;
-  }
+  let nlmo, nlro, nldo, nlmdo =
+    l.m.o /. !lmdo0, l.r.o /. !lmdo0, l.d.o /. !lmdo0, l.md.o /. !lmdo0 in
+  let l_norm =
+    { m = {i=nlmi; o=nlmo; io=nlmi +. nlmo};
+      r = {i=nlri; o=nlro; io=nlri +. nlro};
+      d = {i=nldi; o=nldo; io=nldi +. nldo};
+      md = {i=nlmdi; o=nlmdo; io=nlmdi +. nlmdo};
+      descr = nlmdi +. nlmdo;
+      pred = nlri +. nlro +. nldo;
+    } in
+  l, l_norm
 
 
 (* applying a task model to an input *)
@@ -233,11 +236,11 @@ let apply
 
 type ('typ,'value,'var,'constr,'func) refinement =
   | RInit
-  | RStep of [`Input|`Output] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *) * dl result (* estimated result DL or error *) * ('typ,'value,'var,'constr,'func) model (* new model *)
+  | RStep of [`Input|`Output] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *) * ('typ,'value,'var,'constr,'func) model (* new model *)
 
 let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
-  | RStep (_,_,_,supp,_,_) -> supp
+  | RStep (_,_,_,supp,_) -> supp
 
 let xp_refinement
       ~(xp_path : ('var,'constr) path html_xp)
@@ -245,17 +248,13 @@ let xp_refinement
     : ('typ,'value,'var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
-    | RStep (side,p,ri,supp,dl'_res,m') ->
+    | RStep (side,p,ri,supp,m') ->
        let in_out, i_o =
          match side with
          | `Input -> " In", "i"
          | `Output -> " Out", "o" in
-       aux2 ~html print in_out p ri supp dl'_res i_o
-  and aux2 ~html print in_out p r supp dl'_res i_o =
-    (* (match dl'_res with
-     | Result.Ok dl' when dl' <> 0. (* undefined value *) -> (* showing DL estimate *)
-        print#string (Printf.sprintf " (~%.1f) " dl')
-     | _ -> ()); *)
+       aux2 ~html print in_out p ri supp i_o
+  and aux2 ~html print in_out p r supp i_o =
     if supp <> 0 (* undefined value *) then
       aux_support ~html print supp;
     print#string in_out;
