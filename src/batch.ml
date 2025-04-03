@@ -23,11 +23,11 @@ let print_dl_md psr = (* model+data DL *)
   let l : Task_model.dl_split = Task_model.dl_model_data ~alpha:(!alpha) psr in
   Printf.printf "DL input  with Mi: L = %.1f + %.1f = %.1f\n" l.m.i l.d.i l.md.i;
   Printf.printf "DL output with Mo: L = %.1f + %.1f = %.1f\n" l.m.o l.d.o l.md.o;
-  Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" l.m.io l.d.io l.md.io;
-  l.r.i +. l.d.o
+  Printf.printf "DL input+output M: L = %.1f + %.1f = %.1f\n" (l.m.i +. l.m.o) (l.d.i +. l.d.o) (l.md.i +. l.md.o);
+  l.r.i +. l.d.o (* not normalized *)
 
-let print_dl_task_model ~r_i ~r_o name task model =
-  read_pairs model task.Task.train r_i r_o
+let print_dl_task_model ~r_i ~r_o ~dl0 name task model =
+  read_pairs model task.Task.train r_i r_o dl0
   |> Result.fold
        ~ok:(fun psr -> ignore (print_dl_md psr))
        ~error:(fun exn -> raise exn)
@@ -75,18 +75,18 @@ let print_measures name list_ms =
         sum_ms;
       print_newline ())
 
-let apply_model m v_i r_i r_o =
+let apply_model m v_i r_i r_o dl0 =
   try
     let res_opt =
       Common.do_timeout_gc (float !timeout_predict) (fun () ->
-          apply m v_i r_i r_o) in
+          apply m v_i r_i r_o dl0) in
     match res_opt with
     | Some res -> res
     | None -> Result.Error (Failure "The model could not be applied in the allocated timeout.")
   with exn -> Result.Error exn
   
 let score_learned_model
-      ~r_i ~r_o (* generation output info *)      
+      ~r_i ~r_o ~dl0 (* generation output info *)      
       name
       (m : task_model)
       (train_test : [ `TRAIN of pairs_reads
@@ -141,7 +141,7 @@ let score_learned_model
           ));
         print_endline "\n> Output prediction from input (up to 3 trials):";
         let score, rank, label, _failed_derived_grids =
-	  match apply_model m input r_i r_o with
+	  match apply_model m input r_i r_o dl0 with
 	  | Result.Ok gdi_gdo_s ->
              List.fold_left
                (fun (score,rank,label,failed_derived_grids) (gdi, gdo, dl) ->
@@ -201,7 +201,7 @@ let score_learned_model
   micro, macro, mrr
        
 let print_learned_model
-      ~init_task_model ~r_i ~r_o
+      ~init_task_model ~r_i ~r_o ~dl0
       (name : string) (task : task)
     : measures =
   let pp_task_model = Xprint.to_stdout (xp_task_model ~html:false) in
@@ -257,12 +257,12 @@ let print_learned_model
      print_endline "\n# train input/output grids";
      let micro_train, macro_train, mrr_train =
        score_learned_model
-         ~r_i ~r_o
+         ~r_i ~r_o ~dl0
          name learned_task_model (`TRAIN res.result_pruning.pairs_reads) task.train in
      print_endline "\n# Test input/output grids";
      let micro_test, macro_test, mrr_test =
        score_learned_model
-         ~r_i ~r_o
+         ~r_i ~r_o ~dl0
          name learned_task_model (`TEST) task.test in
      print_endline "\n# Performance measures on task";
      let ms =
@@ -295,12 +295,13 @@ let process_task
   let {varseq; input_model; output_model;
        input_distrib=r_i; output_distrib=r_o} = get_init_config name task in
   let init_task_model = make_task_model varseq input_model output_model in
+  let dl0 = dl_init task.Task.train r_i r_o in
   print_endline "\n# evaluating init_task_model";
-  print_dl_task_model ~r_i ~r_o name task init_task_model;
+  print_dl_task_model ~r_i ~r_o ~dl0 name task init_task_model;
   print_endline "\n# learning a model for train pairs";
   let ms =
     print_learned_model
-      ~r_i ~r_o
+      ~r_i ~r_o ~dl0
       ~init_task_model name task in
   list_ms := ms :: !list_ms
 

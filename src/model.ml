@@ -520,6 +520,7 @@ let dl
     ~(nb_env_vars : int)
     (m : 'model) -> (* QUICK *)
   let size = size_model_ast m in
+  assert (size > 0);
   let t = typ m in
   let nb = nb_model_ast t size in
   if not (nb > 0.) then ( (* as [m] has this size, the nb of AST of this size must not be zero *)
@@ -527,12 +528,16 @@ let dl
     pp xp_typ t;
     print_string "\tmodel="; pp_endline xp_model m;
     assert false);
-  Mdl.Code.universal_int_star size (* encoding model AST size *)
+  Mdl.Code.universal_int_plus size (* encoding model AST size *)
   +. Mdl.log2 nb (* encoding choice of model AST for that size *)
   +. dl_model_params
        ~dl_var:(dl_var ~nb_env_vars)
        m
-       
+
+let dl0 = (* DL for model Any *)
+  Mdl.Code.universal_int_plus 1 (* assuming single size-1 model *)
+
+
 (* reading *)
 
 type ('typ,'value,'distrib,'constr,'var,'func) read =

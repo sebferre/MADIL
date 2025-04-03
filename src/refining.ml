@@ -690,45 +690,50 @@ let task_refinements
       (dsro : ('typ,'value,'distrib,'constr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * ('task_model * dl) result) Myseq.t = (* QUICK Myseq.next *)
   let l = Task_model.dl_model_data ~alpha prs in
-  let dli, dlo = l.md.i, l.md.o in
+  let dl0 = prs.dl0 in
+  let dl = l.md in
   Myseq.interleave (* TODO: rather order by estimated dl *)
     [ (if include_input
        then
          let* p, ri, suppi, dli'_res, mi', varseq =
-           input_refinements ~include_expr:false ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:prs.dl_mi
+           input_refinements ~include_expr:false ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:prs.dl_m.i
              m.input_model m.varseq dsri.reads in
-         let m_dl'_res =
+         let m_ndl'_res =
            let| dli' = dli'_res in
-           let dl' = dli' +. dlo in (* output not changed *)
-           Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model, dl') in
-         Myseq.return (Task_model.RStep (`Input,p,ri,suppi,mi'), m_dl'_res)
+           let ndl' = dli' /. dl0.i +. dl.o /. dl0.o in (* output not changed, DL normalized *)
+           Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model, ndl') in
+         Myseq.return (Task_model.RStep (`Input,p,ri,suppi,mi'), m_ndl'_res)
        else Myseq.empty);
 
       (if include_output
        then
          let* p, ro, suppo, dlo'_res, mo', varseq =
-           output_refinements ~include_expr ~nb_env_vars:m.nb_env_vars ~env_vars:m.env_vars ~dl_M:prs.dl_mo
+           output_refinements ~include_expr ~nb_env_vars:m.nb_env_vars ~env_vars:m.env_vars ~dl_M:prs.dl_m.o
              m.output_model m.varseq dsro.reads in
-         let m_dl'_res =
-           match dlo'_res with
-           | Result.Ok dlo' ->
-              let dl' = dli +. dlo' in (* input not changed *)
-              Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo', dl')
-           | Result.Error err -> Result.Error err in
-         Myseq.return (Task_model.RStep (`Output,p,ro,suppo,mo'), m_dl'_res)
+         let m_ndl'_res =
+           let| dlo' = dlo'_res in
+           let ndl' = dl.i /. dl0.i +. dlo' /. dl0.o in (* input not changed, normalized DL *)
+           Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo', ndl') in
+         Myseq.return (Task_model.RStep (`Output,p,ro,suppo,mo'), m_ndl'_res)
        else Myseq.empty) ]
 
 let task_prunings
+      ~(alpha : float)
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
       ~(input_prunings : ('typ,'value,'distrib,'var,'constr,'func) refiner)
 
       (m : (('typ,'value,'var,'constr,'func) Task_model.task_model as 'task_model))
+      (prs : ('typ,'value,'distrib,'constr,'var,'func) Task_model.pairs_reads)
       (dsri : ('typ,'value,'distrib,'constr,'var,'func) Task_model.reads)
     : (('typ,'value,'var,'constr,'func) Task_model.refinement * ('task_model * dl) result) Myseq.t = (* QUICK Myseq.next *)
+  let l = Task_model.dl_model_data ~alpha prs in
+  let dl0 = prs.dl0 in
+  let dl = l.md in
   let* pi, ri, suppi, dli'_res, mi', varseq =
     input_prunings ~include_expr:false ~nb_env_vars:0 ~env_vars:Expr.binding_vars0 ~dl_M:dsri.dl_m
       m.input_model m.varseq dsri.reads in
-  let m_dl'_res =
+  let m_ndl'_res =
     let| dli' = dli'_res in
-    Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model, dli') in
-  Myseq.return (Task_model.RStep (`Input,pi,ri,suppi,mi'), m_dl'_res)
+    let ndl' = dli' /. dl0.i +. dl.o /. dl0.o in (* output not changed, normalized DL *)
+    Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model, ndl') in
+  Myseq.return (Task_model.RStep (`Input,pi,ri,suppi,mi'), m_ndl'_res)

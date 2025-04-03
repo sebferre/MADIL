@@ -24,8 +24,8 @@ type ('typ,'value,'distrib,'var,'constr,'func) state_done =
     prs : ('typ,'value,'distrib,'constr,'var,'func) Task_model.pairs_reads; (* pairs reads *)
     drsi : ('typ,'value,'distrib,'constr,'var,'func) Task_model.reads; (* input reads *)
     drso : ('typ,'value,'distrib,'constr,'var,'func) Task_model.reads; (* output reads *)
-    dl_split : dl_split; (* all DLs, not normalized *)
-    ldescr : dl; (* whole DL, without ldi in pruning mode *)
+    dl_split : dl_split; (* all DLs *)
+    ldescr : dl; (* whole DL, depending on refining/pruning mode *)
     lpred : dl; (* input rank + output rank + output data DL *)
   }
 
@@ -35,14 +35,6 @@ type ('typ,'value,'distrib,'var,'constr,'func) state =
         m : ('typ,'value,'var,'constr,'func) Task_model.task_model; (* current task model *)
         dl : dl } (* estimate DL *)
   | StateDone of ('typ,'value,'distrib,'var,'constr,'func) state_done
-
-let state_m = function
-  | StateTodo {m} -> m
-  | StateDone {m} -> m [@@inline]
-
-let state_dl = function
-  | StateTodo _ -> assert false
-  | StateDone {dl_split} -> dl_split.descr [@@inline]
 
 let state_ldescr_lpred = function
   | StateTodo _ -> assert false
@@ -358,26 +350,27 @@ class ['state] search
             List.mapi
               (fun rank state1 -> new ostate ~from:(ostate,rank) state1)
               lstate1 in
-          match lostate1 with
-          | [] ->  (* no compressive refinement *)
-             (* adding jump_ostates as continuations *)
-             conts#push ostate jump_ostates;
-             ostate
-          | ostate1::others ->
-             if ostate1#eval state_eval
-             then (
-               conts#goto ostate1;
-               nsteps <- nsteps + 1;
-               let () = (* showing point of choice *)
-                 if others <> [] then (
-                   print_string "CHOICE AT";
-                   ostate#print_jumps;
-                   print_newline ()
-                 ) in
-               aux ostate1 (List.rev_append others jump_ostates) )
-             else (
+          let rec aux2 lostate1 = (* searching for first refinements that evaluates correctly *)
+            match lostate1 with
+            | [] ->  (* no compressive refinement *)
+               (* adding jump_ostates as continuations *)
                conts#push ostate jump_ostates;
-               ostate )
+               ostate
+            | ostate1::others ->
+               if ostate1#eval state_eval
+               then (
+                 conts#goto ostate1;
+                 nsteps <- nsteps + 1;
+                 let () = (* showing point of choice *)
+                   if others <> [] then (
+                     print_string "CHOICE AT";
+                     ostate#print_jumps;
+                     print_newline ()
+                   ) in
+                 aux ostate1 (List.rev_append others jump_ostates) )
+               else aux2 others
+          in
+          aux2 lostate1
       in
       aux ostate []
 
@@ -423,9 +416,8 @@ class ['state] search
         memed_out = (res_opt = None) }
   end
 
-let sort_filter_refinements ~refinement_branching lrefs =
-  (* sort refinements, and keep the most compressive and alternative refinements for search *)
-  let lrefs = List.sort Stdlib.compare lrefs in
+let filter_refinements ~refinement_branching lrefs =
+  (* keep the most compressive and alternative refinements for search *)
   match lrefs with
   | [] -> []
   | (dl1,r1,m1)::others ->
@@ -440,7 +432,7 @@ let sort_filter_refinements ~refinement_branching lrefs =
                 | RStep (side1,p1,sm1,_,_),
                   RStep (side2,p2,sm2,_,_) ->
                    side1 = side2 && p1 = p2 (* same side and path *)
-                | _ -> false )in
+                | _ -> false) in
            if ok
            then
              let state2 = StateTodo {r=r2; m=m2; dl=dl2} in
@@ -449,22 +441,23 @@ let sort_filter_refinements ~refinement_branching lrefs =
          (1, []) others in
      state1 :: List.rev rev_states2
 
-let select_refinements ~refine_degree ~refinement_branching ~data_of_model state refs =
+let select_refinements ~refine_degree ~refinement_branching ~check_test_inputs state refs =
   (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
-  let dl = state_dl state in
+  let ldescr, _ = state_ldescr_lpred state in
   refs
   |> myseq_find_map_k refine_degree
-       (fun (r1,m_dl1_res) ->
-         let@ m1, dl1 = Result.to_option m_dl1_res in
-         if dl1 < dl
-         then Some (dl1,r1,m1)
+       (fun (r1,m_ndl1_res) ->
+         let@ m1, ndl1 = Result.to_option m_ndl1_res in
+         if ndl1 < ldescr && check_test_inputs m1
+         then Some (ndl1,r1,m1)
          else None)
-  |> sort_filter_refinements ~refinement_branching
+  |> List.sort Stdlib.compare
+  |> filter_refinements ~refinement_branching
 
 let refining0
       ~refine_degree ~refinement_branching ~input_branching ~solution_pool
       ~timeout_refine ~memout
-      ~data_of_model ~task_refinements ~log_refining
+      ~data_of_model ~task_refinements ~check_test_inputs ~log_refining
       state0 =
   let refining =
     new search
@@ -473,13 +466,14 @@ let refining0
         | StateTodo {r; m; dl} ->
            let@ statedone = data_of_model ~pruning:false r m in
            Some (StateDone statedone)
-        | StateDone _ -> assert false)
+        | StateDone _ ->
+           assert false)
       ~refinements:(fun state ->
         match state with
         | StateTodo _ -> assert false
         | StateDone {m; prs; drsi; drso} ->
-        Common.prof "Learning.task_refinements" (fun () ->
-            select_refinements ~refine_degree ~refinement_branching ~data_of_model state
+           Common.prof "Learning.task_refinements" (fun () ->
+            select_refinements ~refine_degree ~refinement_branching ~check_test_inputs state
               (task_refinements
                  ~include_expr:true
                  ~include_input:true
@@ -724,12 +718,14 @@ let learn
       ~(alpha : float)
       ~(read_pairs :
           (('t,'value,'var,'constr,'func) Task_model.task_model as 'task_model) ->
-          'value Task.pair list -> 'distrib -> 'distrib ->
+          'value Task.pair list -> 'distrib -> 'distrib -> dl_io ->
           (('typ,'value,'distrib,'constr,'var,'func) Task_model.pairs_reads as 'pairs_reads) result)
       ~(does_parse_value :
           ('t,'value,'var,'constr,'func) Model.model ->
           ('var,'typ,'value) Expr.bindings ->
           'value -> 'distrib -> bool)
+      ~(dl_init :
+          'value Task.pair list -> 'distrib -> 'distrib -> dl_io)
       ~(task_refinements :
           include_expr:bool ->
           include_input:bool ->
@@ -738,7 +734,7 @@ let learn
           (('typ,'value,'distrib,'constr,'var,'func) Task_model.reads as 'reads) -> 'reads ->
           ((('typ,'value,'var,'constr,'func) Task_model.refinement as 'refinement) * ('task_model * dl) result) Myseq.t)
       ~(task_prunings :
-          'task_model -> 'reads ->
+          'task_model -> 'pairs_reads -> 'reads ->
           ('refinement * ('task_model * dl) result) Myseq.t)
       ~(log_reading :
           'refinement -> 'task_model ->
@@ -759,29 +755,26 @@ let learn
       (distrib_o : 'distrib)
     : ('typ,'value,'distrib,'var,'constr,'func) results
   = Common.prof "Learning.learn" (fun () ->
-  let norm_dl_model_data = make_norm_dl_model_data ~alpha () in
+  let dl0 = dl_init train_pairs distrib_i distrib_o in
   let data_of_model ~pruning r m =
     try
       let state_opt =
-        let@ prs = Result.to_option (read_pairs m train_pairs distrib_i distrib_o) in
-        if (* checking that the input model can parse the test inputs *)
-          let mi = m.Task_model.input_model in
-          List.for_all
-            (fun vi -> does_parse_value mi Expr.bindings0 vi distrib_i)
-            test_inputs
-        then
-          let l_raw, l_norm = norm_dl_model_data prs in
-          let drsi, drso = split_pairs_read prs in
-          Some {r; m; prs; drsi; drso; dl_split=l_raw;
-                ldescr = (if pruning then l_norm.m.io +. l_norm.pred else l_norm.descr);
-                lpred = l_norm.pred }
-        else None in
-      let status =
+        match read_pairs m train_pairs distrib_i distrib_o dl0 with
+        | Result.Ok prs ->
+           let dl_split = dl_model_data ~alpha prs in
+           let drsi, drso = split_pairs_read prs in
+           Some {r; m; prs; drsi; drso; dl_split;
+                 ldescr = (if pruning then dl_split.descr_prune else dl_split.descr_refine);
+                 lpred = dl_split.pred }
+        | Result.Error exn -> None in
+      let () =
         match state_opt with
         | Some {prs; drsi; drso; dl_split; ldescr} ->
-           `Success (prs, drsi, drso, dl_split, ldescr)
-        | None -> `Failure in
-      log_reading r m ~status;
+           let _status = `Success (prs, drsi, drso, dl_split, ldescr) in
+           ()
+        | None ->
+           let status = `Failure in
+           log_reading r m ~status in
       state_opt
     with
     | exn ->
@@ -790,7 +783,12 @@ let learn
          | Common.Timeout -> `Timeout
          | _ -> `Error exn in
        log_reading r m ~status;
-       raise exn
+       raise exn in
+  let check_test_inputs m =
+    let mi = m.Task_model.input_model in
+    List.for_all
+      (fun vi -> does_parse_value mi Expr.bindings0 vi distrib_i)
+      test_inputs
   in
   (* initialization *)
   let r0, m0 = RInit, init_task_model in
@@ -804,16 +802,16 @@ let learn
     refining0
       ~refine_degree ~refinement_branching ~input_branching ~solution_pool
       ~timeout_refine ~memout
-      ~data_of_model ~task_refinements ~log_refining
+      ~data_of_model ~task_refinements ~check_test_inputs ~log_refining
       (StateDone state0) in
   (* pruning phase *) (* TODO: use search to define it *)
   let state_prune_ref = ref state_refine in
   let nsteps_prune_ref = ref 0 in
   let rec loop_prune state =
-    let m, drsi, ldescr, lpred =
+    let m, prs, drsi, ldescr, lpred =
       let {r; m; prs; drsi; ldescr; lpred} = state in
       log_refining r m prs ldescr lpred;
-      m, drsi, ldescr, lpred in
+      m, prs, drsi, ldescr, lpred in
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
       myseq_find_map_k refine_degree
         (fun (r1, m_dl1_res) ->
@@ -826,7 +824,7 @@ let learn
              then Some (ldescr1, state1)
              else None)
         (Common.prof "Learning.task_prunings" (fun () ->
-             task_prunings m drsi)) in
+             task_prunings m prs drsi)) in
     let lstate1 = List.sort Stdlib.compare lstate1 in
     match lstate1 with
     | [] -> ()

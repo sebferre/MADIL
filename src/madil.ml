@@ -420,11 +420,15 @@ module Make (Domain : DOMAIN) =
     let size_task_model (m : task_model) : int =
       Task_model.size_task_model_ast ~asd m
     
-    let dl_task_model (m : task_model) : dl * dl =
-      dl_model ~nb_env_vars:0
-        m.input_model,
-      dl_model ~nb_env_vars:m.nb_env_vars
-        m.output_model
+    let dl_task_model (m : task_model) : Task_model.dl_io =
+      { i = dl_model ~nb_env_vars:0 m.input_model;
+        o = dl_model ~nb_env_vars:m.nb_env_vars m.output_model }
+    
+    let dl_init =
+      Task_model.dl_init
+        ~alpha:(!alpha)
+        ~encoding_dany
+        ~dl_of_encoding
     
     let read_pairs =
       Task_model.read_pairs
@@ -450,6 +454,7 @@ module Make (Domain : DOMAIN) =
 
     let task_prunings =
       Refining.task_prunings
+        ~alpha:(!alpha)
         ~binding_vars
         ~input_prunings:prunings
     
@@ -458,6 +463,7 @@ module Make (Domain : DOMAIN) =
         ~alpha:(!alpha)
         ~read_pairs
         ~does_parse_value
+        ~dl_init
         ~task_refinements
         ~task_prunings
         ~log_reading

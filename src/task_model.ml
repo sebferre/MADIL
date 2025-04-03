@@ -3,6 +3,13 @@ open Madil_common
 open Data
 open Model
 
+(* pair encoding *)
+
+type dl_io =
+  { i : dl; (* input *)
+    o : dl; (* output *)
+  }
+
 (* task models *)
    
 type ('typ,'value,'var,'constr,'func) task_model =
@@ -45,15 +52,15 @@ let size_task_model_ast
   
 type ('typ,'value,'distrib,'constr,'var,'func) pairs_reads =
   (* result of reading a list of pairs of grids *)
-  { dl_mi : dl; (* input model DL *)
-    dl_mo : dl; (* output model DL *)
+  { dl0 : dl_io; (* initial DLs *)
+    dl_m : dl_io; (* model DLs *)
     inputs_reads : (('typ,'value,'distrib,'constr,'var,'func) read as 'read) list list; (* outer list over example inputs, inner list over parses *)
     reads : ('read * 'read * dl) list list; (* outer list over examples, inner list over parses, sorted in increasing DL *)
   }
 
 let read_pairs
       ~(max_nb_reads : int)
-      ~(dl_task_model : (('typ,'value,'var,'constr,'func) task_model as 'task_model) -> dl * dl)
+      ~(dl_task_model : (('typ,'value,'var,'constr,'func) task_model as 'task_model) -> dl_io)
       ~(read : bindings:(('var,'typ,'value) Expr.bindings as 'bindings) ->
                (('typ,'value,'var,'constr,'func) model as 'model) -> 'value -> 'distrib -> 'read Myseq.t (*list result*))
       ~(get_bindings : 'model -> 'data -> 'bindings)
@@ -62,9 +69,10 @@ let read_pairs
       (pairs : 'value Task.pair list)
       (distrib_i : 'distrib)
       (distrib_o : 'distrib)
+      (dl0 : dl_io)
     : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads result =
   Common.prof "Task_model.read_pairs" (fun () ->
-  let dl_mi, dl_mo = Common.prof "Task_model.read_pairs/dl_task_model" (fun () -> dl_task_model m) in
+  let dl_m = Common.prof "Task_model.read_pairs/dl_task_model" (fun () -> dl_task_model m) in
   let| inputs_reads_reads =
     pairs
     |> list_map_result
@@ -81,20 +89,22 @@ let read_pairs
                    read
                      ~bindings
                      m.output_model output distrib_o in
-                 Myseq.return (ri, ro, ri.dl +. ro.dl)) in
+                 let ndl = ri.dl /. dl0.i +. ro.dl /. dl0.o in (* normalized DL *)
+                 Myseq.return (ri, ro, ndl)) in
            if input_reads = [] (* implies pair_reads = [] *)
            then Result.Error Model.Parse_failure (* TODO: distinguish source *)
            else
              let pair_reads =
                List.stable_sort
-                 (fun (_,_,dl1) (_,_,dl2) -> dl_compare dl1 dl2)
+                 (fun (_,_,ndl1) (_,_,ndl2) -> dl_compare ndl1 ndl2) (* on normalized DLs *)
                  pair_reads in
              Result.Ok (input_reads, pair_reads)) in
   let inputs_reads, reads = List.split inputs_reads_reads in
-  Result.Ok {dl_mi; dl_mo; inputs_reads; reads})
+  Result.Ok {dl0; dl_m; inputs_reads; reads})
 
 type ('typ,'value,'distrib,'constr,'var,'func) reads =
-  { dl_m : dl; (* DL of the model *)
+  { dl0 : dl; (* initial DL *)
+    dl_m : dl; (* DL of the model *)
     reads : ('typ,'value,'distrib,'constr,'var,'func) read list list; (* outer list over docs, inner list over parses, sorted in increasing DL *)
   }
   
@@ -108,75 +118,73 @@ let split_pairs_read
       prs.reads in
   let inputs_reads = project_reads (fun (dri,_,_) -> dri) in
   let outputs_reads = project_reads (fun (_,dro,_) -> dro) in
-  let dsri = { dl_m = prs.dl_mi; reads = inputs_reads } in
-  let dsro = { dl_m = prs.dl_mo; reads = outputs_reads } in
+  let dsri = { dl0 = prs.dl0.i; dl_m = prs.dl_m.i; reads = inputs_reads } in
+  let dsro = { dl0 = prs.dl0.o; dl_m = prs.dl_m.o; reads = outputs_reads } in
   dsri, dsro
 
   
 (* pair encoding *)
 
-type dl_io =
-  { i : dl; (* input *)
-    o : dl; (* output *)
-    io : dl; (* input+output *)
-  }
 type dl_split =
   { m : dl_io; (* model *)
     r : dl_io; (* rank *)
     d : dl_io; (* data, including rank *)
     md : dl_io; (* model+data *)
-    descr : dl; (* for description *)
-    pred : dl; (* for prediction *)
+    descr_refine : dl; (* for refining, normalized *)
+    descr_prune : dl; (* for pruning, normalized *)
+    pred : dl; (* for prediction, normalized *)
   }
+
+(* make sure to normalize when adding input and output DLs *)
+
+let dl_init (* initial input/output DLs, used for normalization *)
+      ~(alpha : float)
+      ~(encoding_dany : 'value -> 'distrib -> 'encoding)
+      ~(dl_of_encoding : 'encoding -> dl)
+
+      (pairs : 'value Task.pair list)
+      (distrib_i : 'distrib)
+      (distrib_o : 'distrib)
+    : dl_io =
+  let lm0 = Model.dl0 in
+  (* rank 0 *)
+  let sum_ldi, sum_ldo =
+    List.fold_left
+      (fun (sum_ldi, sum_ldo) {Task.input; output} ->
+        let ldi = dl_of_encoding (encoding_dany input distrib_i) in
+        let ldo = dl_of_encoding (encoding_dany output distrib_o) in
+        sum_ldi +. ldi, sum_ldo +. ldo)
+      (0., 0.) pairs in
+  let i = lm0 +. alpha *. sum_ldi in
+  let o = lm0 +. alpha *. sum_ldo in
+  assert (i > 0. && o > 0.);
+  {i; o}
 
 let dl_model_data
       ~(alpha : float)
       (psr : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads) : dl_split = (* QUICK *)
-  let lmi = psr.dl_mi in
-  let lmo = psr.dl_mo in
+  let l0 = psr.dl0 in
+  let lm = psr.dl_m in
   let lri, lro, ldi, ldo =
     List.fold_left
-      (fun (lri, lro, ldi,ldo) ->
+      (fun (lri, lro, ldi, ldo) ->
         function
-        | (ri,ro,dl)::_ -> (lri +. ri.dl_rank, lro +. ro.dl_rank,
-                            ldi +. ri.dl, ldo +. ro.dl)
+        | (ri,ro,ndl)::_ -> (lri +. ri.dl_rank, lro +. ro.dl_rank,
+                             ldi +. ri.dl, ldo +. ro.dl)
         | _ -> assert false)
       (0.,0.,0.,0.) psr.reads in
   let lri, lro = alpha *. lri, alpha *. lro in
   let ldi, ldo = alpha *. ldi, alpha *. ldo in
-  let lmdi = lmi +. ldi in
-  let lmdo = lmo +. ldo in
-  { m = {i=lmi; o=lmo; io=lmi +. lmo};
-    r = {i=lri; o=lro; io=lri +. lro};
-    d = {i=ldi; o=ldo; io=ldi +. ldo};
-    md = {i=lmdi; o=lmdo; io=lmdi +. lmdo};
-    descr = lmdi +. lmdo;
-    pred = lri +. lro +. ldo;
+  let lmdi = lm.i +. ldi in
+  let lmdo = lm.o +. ldo in
+  { m = lm;
+    r = {i=lri; o=lro};
+    d = {i=ldi; o=ldo};
+    md = {i=lmdi; o=lmdo};
+    descr_refine = lmdi /. l0.i +. lmdo /. l0.o;
+    descr_prune = (lm.i +. lri) /. l0.i +. lmdo /. l0.o;
+    pred = lri /. l0.i +. ldo /. l0.o;
   }
-
-let make_norm_dl_model_data
-      ~(alpha : float)
-      () : ('typ,'value,'distrib,'constr,'var,'func) pairs_reads -> dl_split * dl_split=
-  let lmdi0 = ref (-1.) in
-  let lmdo0 = ref (-1.) in
-  fun psr ->
-  let l = dl_model_data ~alpha psr in
-  let () = (* setting initial DLs *)
-    if !lmdi0 < 0.
-    then ( lmdi0 := l.md.i; lmdo0 := l.md.o ) in
-  let nlmi, nlri, nldi, nlmdi =
-    l.m.i /. !lmdi0, l.r.i /. !lmdi0, l.d.i /. !lmdi0, l.md.i /. !lmdi0 in
-  let nlmo, nlro, nldo, nlmdo =
-    l.m.o /. !lmdo0, l.r.o /. !lmdo0, l.d.o /. !lmdo0, l.md.o /. !lmdo0 in
-  let l_norm =
-    { m = {i=nlmi; o=nlmo; io=nlmi +. nlmo};
-      r = {i=nlri; o=nlro; io=nlri +. nlro};
-      d = {i=nldi; o=nldo; io=nldi +. nldo};
-      md = {i=nlmdi; o=nlmdo; io=nlmdi +. nlmdo};
-      descr = nlmdi +. nlmdo;
-      pred = nlri +. nlro +. nldo;
-    } in
-  l, l_norm
 
 
 (* applying a task model to an input *)
@@ -195,9 +203,10 @@ let apply
       (v_i : 'value)
       (r_i : 'distrib)
       (r_o : 'distrib)
+      (dl0 : dl_io)
     : ('data * 'data * dl) list result =
   Common.prof "Task_model.apply" (fun () ->
-  let some_parse, _lri, l_di_do_dl =
+  let some_parse, _lri, l_di_do_ndl =
     myseq_bind_sample_fair
       ~size1:max_nb_reads ~size2:max_nb_writes
       (read
@@ -210,26 +219,26 @@ let apply
           write
             ~bindings
             m.output_model r_o in
-        let dl = read_i.dl +. dl_o in
-        Myseq.return (data_i, data_o, dl)) in
-  if l_di_do_dl = []
+        let ndl = read_i.dl /. dl0.i +. dl_o /. dl0.o in (* normalized DL *)
+        Myseq.return (data_i, data_o, ndl)) in
+  if l_di_do_ndl = []
   then Result.Error (if some_parse
                      then Model.Generate_failure
                      else Model.Parse_failure)
   else
-    let l_di_do_dl =
+    let l_di_do_ndl =
       List.stable_sort
-        (fun (_,_,dl1) (_,_,dl2) -> dl_compare dl1 dl2)
-        l_di_do_dl in
-    let _, rev_l_di_do_dl = (* removing duplicate generated values *)
+        (fun (_,_,ndl1) (_,_,ndl2) -> dl_compare ndl1 ndl2)
+        l_di_do_ndl in
+    let _, rev_l_di_do_ndl = (* removing duplicate generated values *)
       List.fold_left
-        (fun (seen,res) (di,do_,dl as x) ->
+        (fun (seen,res) (di,do_,ndl as x) ->
           let vo = Data.value do_ in
           if List.mem vo seen
           then (seen, res)
           else (vo::seen, x::res))
-        ([],[]) l_di_do_dl in
-    Result.Ok (List.rev rev_l_di_do_dl))
+        ([],[]) l_di_do_ndl in
+    Result.Ok (List.rev rev_l_di_do_ndl))
 
 
 (* refinements *)
