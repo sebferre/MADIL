@@ -19,7 +19,8 @@ module type BASIC_TYPES =
     
     type var
     val xp_var : var html_xp
-
+    val var0 : var
+    
     type constr
     val xp_any : typ -> unit html_xp
     val xp_pat : constr -> unit html_xp array -> unit html_xp array -> unit html_xp
@@ -151,8 +152,8 @@ module Defined_types (T : BASIC_TYPES) =
         method parseur_pat : typ -> value array -> parseur array -> parseur
         method encoding_pat : value array -> encoding array -> encoding
         method dl_params : typ -> dl
-        method refinements_pat : typ -> model array -> varseq -> value -> (model * varseq) list
-        method prunings_pat : typ -> model array -> varseq -> value -> (model * varseq) list
+        method refinements_pat : typ -> model array -> value -> model list
+        method prunings_pat : typ -> model array -> value -> model list
       end
 
     class type cfunc = (* class definition of a func *)
@@ -199,7 +200,7 @@ module type DOMAIN =
 
     val bool_of_value : value -> bool result
     val value_of_bool : bool -> value
-
+    
     (* bindings and evaluation *)
 
     val eval_func : func -> value array -> value result
@@ -235,16 +236,16 @@ module type DOMAIN =
 
     (* refining *)
 
-    (* DEPR val decompositions : typ -> varseq -> value list list -> (model * varseq) list *)
+    (* DEPR val decompositions : typ -> value list list -> model list *)
 
-    val refinements_any : typ -> varseq -> value -> (model * varseq) list
-    val refinements_pat : typ -> constr -> model array -> varseq -> value -> (model * varseq) list
-    val refinements_pat_expr : env_vars:binding_vars -> typ -> varseq -> value -> (model * varseq) list
+    val refinements_any : typ -> value -> model list
+    val refinements_pat : typ -> constr -> model array -> value -> model list
+    val refinements_pat_expr : env_vars:binding_vars -> typ -> value -> model list
     val refinements_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
-    val prunings_value : typ -> value -> varseq -> (model * varseq) list
-    val prunings_any : typ -> varseq -> value -> (model * varseq) list
-    val prunings_pat : typ -> constr -> model array -> varseq -> value -> (model * varseq) list
+    val prunings_value : typ -> value -> model list
+    val prunings_any : typ -> value -> model list
+    val prunings_pat : typ -> constr -> model array -> value -> model list
     val prunings_postprocessing : typ -> model -> model -> supp:int -> nb:int -> alt:bool -> best_reads -> (model * best_reads) Myseq.t
 
     (* learning *)
@@ -369,12 +370,13 @@ module Make (Domain : DOMAIN) =
         ~asd
         ~typ_bool
         ~value_of_bool
+        ~var0
         ~dl_model
         ~dl_data
         ~parse_bests
         ~make_index
         (* DEPR ~decompositions *)
-        ~refinements_value:(fun t v varseq -> []) (* TODO: is a custom definition useful? *)
+        ~refinements_value:(fun t v -> []) (* TODO: is a custom definition useful? *)
         ~refinements_any
         ~refinements_pat
         ~refinements_pat_expr
@@ -394,15 +396,16 @@ module Make (Domain : DOMAIN) =
         ~asd
         ~typ_bool
         ~value_of_bool
+        ~var0
         ~dl_model
         ~dl_data
         ~parse_bests
         ~make_index
-        (* DEPR ~decompositions:(fun t varseq value -> []) *)
+        (* DEPR ~decompositions:(fun t value -> []) *)
         ~refinements_value:prunings_value
         ~refinements_any:prunings_any
         ~refinements_pat:prunings_pat
-        ~refinements_pat_expr:(fun ~env_vars t varseq value -> [])
+        ~refinements_pat_expr:(fun ~env_vars t value -> [])
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
         ~max_expr_size:(!max_expr_size)

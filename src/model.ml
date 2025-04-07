@@ -645,27 +645,57 @@ let write
 
   
 (* paths and model refinement *)
-  
-let refine (* replace submodel of [m] at [p] by [r] *) 
-    : ('var,'constr) path -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model =
-  let rec aux p r m =
+
+let new_var (varseq : 'var Myseq.t) : 'var * 'var Myseq.t =
+  match varseq () with
+  | Myseq.Cons (x,varseq') -> x, varseq'
+  | Myseq.Nil -> failwith "No more fresh variable (should be an infinite sequence"
+
+let refine (* replace submodel of [m] at [p] by [r] *)
+    : ('var,'constr) path -> ('typ,'value,'var,'constr,'func) model -> ('typ,'value,'var,'constr,'func) model -> 'var Myseq.t -> ('typ,'value,'var,'constr,'func) model * 'var Myseq.t =
+  let rec aux p r m varseq =
     match p, m with
     | Alias (x,p0) :: p1, _ ->
-       aux (List.rev_append p0 p1) r m
+       aux (List.rev_append p0 p1) r m varseq
     | _, Def (x,m1) ->
-       let new_m1 = aux p r m1 in
-       Def (x,new_m1)
+       let new_m1, varseq = aux p r m1 varseq in
+       Def (x,new_m1), varseq
     | Field (c,i) :: p1, Pat (t,c',src,args) when c = c' && i < Array.length args ->
        let new_args = Array.copy args in
-       new_args.(i) <- aux p1 r args.(i);
-       Pat (t, c, src, new_args)
+       let new_mi, varseq = aux p1 r args.(i) varseq in
+       new_args.(i) <- new_mi;
+       Pat (t, c, src, new_args), varseq
     | Branch true :: p1, Alt (xc,c,m1,m2) ->
-       let new_m1 = aux p1 r m1 in
-       Alt (xc,c,new_m1,m2)
+       let new_m1, varseq = aux p1 r m1 varseq in
+       Alt (xc,c,new_m1,m2), varseq
     | Branch false :: p1, Alt (xc,c,m1,m2) ->
-       let new_m2 = aux p1 r m2 in
-       Alt (xc,c,m1,new_m2)
-    | [], _ -> r
+       let new_m2, varseq = aux p1 r m2 varseq in
+       Alt (xc,c,m1,new_m2), varseq
+    | [], _ -> aux_vars r varseq
     | _ -> assert false
+  and aux_vars r varseq =
+    match r with
+    | Def (x0,r1) ->
+       let x, varseq = new_var varseq in
+       let r1, varseq = aux_vars r1 varseq in
+       Def (x,r1), varseq
+    | Any _ -> r, varseq
+    | Pat (t,c,src,args) ->
+       let new_args = Array.copy args in
+       let new_varseq = ref varseq in
+       Array.iteri
+         (fun i ri ->
+           let ri, varseq = aux_vars ri !new_varseq in
+           new_args.(i) <- ri;
+           new_varseq := varseq)
+         args;
+       Pat (t,c,src, new_args), !new_varseq
+    | Alt (xc0,c,r1,r2) ->
+       let xc, varseq = new_var varseq in
+       let r1, varseq = aux_vars r1 varseq in
+       let r2, varseq = aux_vars r2 varseq in
+       Alt (xc, c, r1, r2), varseq
+    | Expr _ -> r, varseq
+    | Derived _ -> r, varseq
   in
   aux
