@@ -188,7 +188,7 @@ module type DOMAIN =
     val max_expr_size : int ref
     val max_expr_refinements_per_read : int ref
     val max_expr_refinements_per_var : int ref
-    val max_refinement_steps : int ref
+    (* DEPR val max_refinement_steps : int ref *)
     val max_refinements : int ref
     val refinement_branching : int ref
     val input_branching : int ref
@@ -235,7 +235,7 @@ module type DOMAIN =
 
     (* refining *)
 
-    val decompositions : typ -> varseq -> value list list -> (model * varseq) list
+    (* DEPR val decompositions : typ -> varseq -> value list list -> (model * varseq) list *)
 
     val refinements_any : typ -> varseq -> value -> (model * varseq) list
     val refinements_pat : typ -> constr -> model array -> varseq -> value -> (model * varseq) list
@@ -251,7 +251,7 @@ module type DOMAIN =
       
     val get_init_config : string (* task name *) -> task -> init_config
     val log_reading : refinement -> task_model -> status:status -> unit
-    val log_refining : refinement -> task_model -> pairs_reads -> dl (* lmd *)  -> dl (* lrido *) -> unit
+    val log_refining : refinement -> task_model -> pairs_reads -> dl (* lmd *)  -> dl (* lrido *) -> dl (* lema *) -> unit
 
     val default_name_task : string * task
 
@@ -373,7 +373,7 @@ module Make (Domain : DOMAIN) =
         ~dl_data
         ~parse_bests
         ~make_index
-        ~decompositions
+        (* DEPR ~decompositions *)
         ~refinements_value:(fun t v varseq -> []) (* TODO: is a custom definition useful? *)
         ~refinements_any
         ~refinements_pat
@@ -383,7 +383,7 @@ module Make (Domain : DOMAIN) =
         ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
-        ~max_steps:(!max_refinement_steps)
+        (* DEPR ~max_steps:(!max_refinement_steps) *)
         ~max_refinements:(!max_refinements)
 
     let prunings =
@@ -398,7 +398,7 @@ module Make (Domain : DOMAIN) =
         ~dl_data
         ~parse_bests
         ~make_index
-        ~decompositions:(fun t varseq value -> [])
+        (* DEPR ~decompositions:(fun t varseq value -> []) *)
         ~refinements_value:prunings_value
         ~refinements_any:prunings_any
         ~refinements_pat:prunings_pat
@@ -408,7 +408,7 @@ module Make (Domain : DOMAIN) =
         ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
-        ~max_steps:(!max_refinement_steps)
+        (* DEPR ~max_steps:(!max_refinement_steps) *)
         ~max_refinements:(!max_refinements)
 
     (* task models *)

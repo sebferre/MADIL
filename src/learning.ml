@@ -27,6 +27,7 @@ type ('typ,'value,'distrib,'var,'constr,'func) state_done =
     dl_split : dl_split; (* all DLs *)
     ldescr : dl; (* whole DL, depending on refining/pruning mode *)
     lpred : dl; (* input rank + output rank + output data DL *)
+    lema : dl; (* DL exponential moving average *)
   }
 
 type ('typ,'value,'distrib,'var,'constr,'func) state =
@@ -39,6 +40,9 @@ type ('typ,'value,'distrib,'var,'constr,'func) state =
 let state_ldescr_lpred = function
   | StateTodo _ -> assert false
   | StateDone {ldescr; lpred} -> ldescr, lpred [@@inline]
+let state_lema = function
+  | StateTodo _ -> assert false
+  | StateDone {lema} -> lema [@@inline]
 
 (* encapsulation of state and search path information *)
 (* using an object to hide some mysterious functional value inside state that is a problem with Bintree *)
@@ -62,8 +66,12 @@ class ['state] ostate ?(from : ('state ostate * int (* rank *)) option) (state :
       | None -> 0
       | Some (p,rank) -> rank
 
-    method eval (f : 'state -> 'state option) : bool =
-      match f state with
+    method eval (f : ?parent:'state -> 'state -> 'state option) : bool =
+      let parent_state_opt =
+        match self#parent_opt with
+        | None -> None
+        | Some oparent -> Some oparent#state in
+      match f ?parent:parent_state_opt state with
       | Some state' -> state <- state'; true
       | None -> false
     method nsteps_sol = nsteps_sol
@@ -313,7 +321,7 @@ type resource_out =
 
 class ['state] search
         ~(make_conts : 'state ostate -> 'state conts)
-        ~(state_eval : 'state (* Todo *) -> 'state (* Done *) option)
+        ~(state_eval : ?parent:'state (* parent, Done *) -> 'state (* Todo *) -> 'state (* Done *) option)
         ~(refinements : 'state (* Done *) -> 'state (* Todo *) list) (* must be sorted and filtered for exploration *)
         ~(k_state : 'state (* Done *) -> unit)
         (state0 : _ state as 'state (* Done *)) =
@@ -338,7 +346,7 @@ class ['state] search
         let ldescr, lpred = state_ldescr_lpred state in
         let best_ldescr, best_lpred = state_ldescr_lpred best_state in
         if lpred < best_lpred
-           || lpred = best_lpred && ldescr < best_ldescr then
+           || lpred = best_lpred && ldescr < best_ldescr then (* TODO: rather prefer smaller model? *)
           best_ostate <- ostate;
         k_state state;
         if lpred <= 0. then ( (* no further compression needed *)
@@ -444,11 +452,12 @@ let filter_refinements ~refinement_branching lrefs =
 let select_refinements ~refine_degree ~refinement_branching ~check_test_inputs state refs =
   (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
   let ldescr, _ = state_ldescr_lpred state in
+  let lema = state_lema state in
   refs
   |> myseq_find_map_k refine_degree
        (fun (r1,m_ndl1_res) ->
          let@ m1, ndl1 = Result.to_option m_ndl1_res in
-         if ndl1 < ldescr && check_test_inputs m1
+         if ldescr -. ndl1 > 0.01 (* lema.tau *) -. lema && check_test_inputs m1 (* TODO: maybe allow DL increase only for refinment of Any ? or forbid expr refinements ? *)
          then Some (ndl1,r1,m1)
          else None)
   |> List.sort Stdlib.compare
@@ -462,9 +471,10 @@ let refining0
   let refining =
     new search
       ~make_conts:(new conts_mcts ~c:(sqrt 2.))
-      ~state_eval:(function
+      ~state_eval:(fun ?parent ->
+        function
         | StateTodo {r; m; dl} ->
-           let@ statedone = data_of_model ~pruning:false r m in
+           let@ statedone = data_of_model ?parent ~pruning:false r m in
            Some (StateDone statedone)
         | StateDone _ ->
            assert false)
@@ -481,8 +491,8 @@ let refining0
                  m prs drsi drso)))
       ~k_state:(function
         | StateTodo _ -> assert false
-        | StateDone {r; m; prs; ldescr; lpred} ->
-           log_refining r m prs ldescr lpred)
+        | StateDone {r; m; prs; ldescr; lpred; lema} ->
+           log_refining r m prs ldescr lpred lema)
       state0 in
   let res_out =
     let cpt = ref solution_pool in
@@ -742,7 +752,7 @@ let learn
                  | `Failure
                  | `Timeout
                  | `Error of exn] -> unit)
-      ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> dl -> unit)
+      ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> dl -> dl -> unit)
 
       ~memout ~timeout_refine ~timeout_prune
       ~(refinement_branching : int) ~(input_branching : int)
@@ -756,16 +766,25 @@ let learn
     : ('typ,'value,'distrib,'var,'constr,'func) results
   = Common.prof "Learning.learn" (fun () ->
   let dl0 = dl_init train_pairs distrib_i distrib_o in
-  let data_of_model ~pruning r m =
+  let data_of_model ?parent ~pruning r m =
     try
       let state_opt =
         match read_pairs m train_pairs distrib_i distrib_o dl0 with
         | Result.Ok prs ->
            let dl_split = dl_model_data ~alpha prs in
            let drsi, drso = split_pairs_read prs in
-           Some {r; m; prs; drsi; drso; dl_split;
-                 ldescr = (if pruning then dl_split.descr_prune else dl_split.descr_refine);
-                 lpred = dl_split.pred }
+           let ldescr = if pruning then dl_split.descr_prune else dl_split.descr_refine in
+           let lpred = dl_split.pred in
+           let lema =
+             match parent with
+             | None -> 1. (* initial speed *)
+             | Some parent ->
+                let parent_ldescr, _ = state_ldescr_lpred parent in
+                let parent_lema = state_lema parent in
+                let delta_ldescr = parent_ldescr -. ldescr in
+                0.2 (* lema.alpha *) *. delta_ldescr +. 0.8 *. parent_lema (* exponential average *) (* TODO: define parameter *)
+           in
+           Some {r; m; prs; drsi; drso; dl_split; ldescr; lpred; lema }
         | Result.Error exn -> None in
       let () =
         match state_opt with
@@ -809,8 +828,8 @@ let learn
   let nsteps_prune_ref = ref 0 in
   let rec loop_prune state =
     let m, prs, drsi, ldescr, lpred =
-      let {r; m; prs; drsi; ldescr; lpred} = state in
-      log_refining r m prs ldescr lpred;
+      let {r; m; prs; drsi; ldescr; lpred; lema} = state in
+      log_refining r m prs ldescr lpred lema;
       m, prs, drsi, ldescr, lpred in
     let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
       myseq_find_map_k refine_degree
