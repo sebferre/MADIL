@@ -245,11 +245,11 @@ let apply
 
 type ('typ,'value,'var,'constr,'func) refinement =
   | RInit
-  | RStep of [`Input|`Output] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *) * ('typ,'value,'var,'constr,'func) model (* new model *)
+  | RStep of [`Input|`Output] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *)
 
 let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
-  | RStep (_,_,_,supp,_) -> supp
+  | RStep (_,_,_,supp) -> supp
 
 let xp_refinement
       ~(xp_path : ('var,'constr) path html_xp)
@@ -257,7 +257,7 @@ let xp_refinement
     : ('typ,'value,'var,'constr,'func) refinement html_xp =
   let rec aux ~html print = function
     | RInit -> print#string "init"
-    | RStep (side,p,ri,supp,m') ->
+    | RStep (side,p,ri,supp) ->
        let in_out, i_o =
          match side with
          | `Input -> " In", "i"

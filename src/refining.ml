@@ -704,7 +704,7 @@ let task_refinements
            let| dli' = dli'_res in
            let ndl' = dli' /. dl0.i +. dl.o /. dl0.o in (* output not changed, DL normalized *)
            Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model, ndl') in
-         Myseq.return (Task_model.RStep (`Input,p,ri,suppi,mi'), m_ndl'_res)
+         Myseq.return (Task_model.RStep (`Input,p,ri,suppi), m_ndl'_res)
        else Myseq.empty);
 
       (if include_output
@@ -716,7 +716,7 @@ let task_refinements
            let| dlo' = dlo'_res in
            let ndl' = dl.i /. dl0.i +. dlo' /. dl0.o in (* input not changed, normalized DL *)
            Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo', ndl') in
-         Myseq.return (Task_model.RStep (`Output,p,ro,suppo,mo'), m_ndl'_res)
+         Myseq.return (Task_model.RStep (`Output,p,ro,suppo), m_ndl'_res)
        else Myseq.empty) ]
 
 let task_prunings
@@ -738,4 +738,4 @@ let task_prunings
     let| dli' = dli'_res in
     let ndl' = dli' /. dl0.i +. dl.o /. dl0.o in (* output not changed, normalized DL *)
     Result.Ok (Task_model.make ~binding_vars varseq mi' m.output_model, ndl') in
-  Myseq.return (Task_model.RStep (`Input,pi,ri,suppi,mi'), m_ndl'_res)
+  Myseq.return (Task_model.RStep (`Input,pi,ri,suppi), m_ndl'_res)

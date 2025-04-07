@@ -21,6 +21,7 @@ and ('typ,'value,'distrib,'var,'constr,'func) results_phase =
 type ('typ,'value,'distrib,'var,'constr,'func) state_done =
   { r : ('typ,'value,'var,'constr,'func) Task_model.refinement; (* last refinement *)
     m : ('typ,'value,'var,'constr,'func) Task_model.task_model; (* current task model *)
+    taburefs : ('typ,'value,'var,'constr,'func) refinement list; (* list of tabu refs *)
     prs : ('typ,'value,'distrib,'constr,'var,'func) Task_model.pairs_reads; (* pairs reads *)
     drsi : ('typ,'value,'distrib,'constr,'var,'func) Task_model.reads; (* input reads *)
     drso : ('typ,'value,'distrib,'constr,'var,'func) Task_model.reads; (* output reads *)
@@ -34,7 +35,9 @@ type ('typ,'value,'distrib,'var,'constr,'func) state =
   | StateTodo of
       { r : ('typ,'value,'var,'constr,'func) Task_model.refinement; (* last refinement *)
         m : ('typ,'value,'var,'constr,'func) Task_model.task_model; (* current task model *)
-        dl : dl } (* estimate DL *)
+        dl : dl; (* estimate DL *)
+        taburefs : ('typ,'value,'var,'constr,'func) refinement list; (* list of tabu refs *)
+      }
   | StateDone of ('typ,'value,'distrib,'var,'constr,'func) state_done
 
 let state_ldescr_lpred = function
@@ -43,6 +46,9 @@ let state_ldescr_lpred = function
 let state_lema = function
   | StateTodo _ -> assert false
   | StateDone {lema} -> lema [@@inline]
+let state_taburefs = function
+  | StateTodo _ -> assert false
+  | StateDone {taburefs} -> taburefs [@@inline]
 
 (* encapsulation of state and search path information *)
 (* using an object to hide some mysterious functional value inside state that is a problem with Bintree *)
@@ -424,7 +430,7 @@ class ['state] search
         memed_out = (res_opt = None) }
   end
 
-let filter_refinements ~refinement_branching lrefs =
+(* XX let filter_refinements ~refinement_branching lrefs =
   (* keep the most compressive and alternative refinements for search *)
   match lrefs with
   | [] -> []
@@ -437,8 +443,8 @@ let filter_refinements ~refinement_branching lrefs =
              rank < refinement_branching &&
                (match r1, r2 with
                 | RInit, RInit -> true
-                | RStep (side1,p1,sm1,_,_),
-                  RStep (side2,p2,sm2,_,_) ->
+                | RStep (side1,p1,sm1,_),
+                  RStep (side2,p2,sm2,_) ->
                    side1 = side2 && p1 = p2 (* same side and path *)
                 | _ -> false) in
            if ok
@@ -447,21 +453,33 @@ let filter_refinements ~refinement_branching lrefs =
              rank+1, state2::res
            else rank, res)
          (1, []) others in
-     state1 :: List.rev rev_states2
+     state1 :: List.rev rev_states2 *)
+
+let rec states_of_refinements ~taburefs refs =
+  match refs with
+  | [] -> []
+  | (dl1,r1,m1)::others ->
+     let state1 = StateTodo {r=r1; m=m1; dl=dl1; taburefs} in
+     state1 :: states_of_refinements ~taburefs:(r1::taburefs) others (* r1 is tabu for the search space starting from others *)
 
 let select_refinements ~refine_degree ~refinement_branching ~check_test_inputs state refs =
   (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
   let ldescr, _ = state_ldescr_lpred state in
   let lema = state_lema state in
+  let taburefs = state_taburefs state in (* parent taburefs, to be inherited *)
   refs
   |> myseq_find_map_k refine_degree
        (fun (r1,m_ndl1_res) ->
-         let@ m1, ndl1 = Result.to_option m_ndl1_res in
-         if ldescr -. ndl1 > 0.01 (* lema.tau *) -. lema && check_test_inputs m1 (* TODO: maybe allow DL increase only for refinment of Any ? or forbid expr refinements ? *)
-         then Some (ndl1,r1,m1)
-         else None)
+         if List.mem r1 taburefs
+         then None
+         else
+           let@ m1, ndl1 = Result.to_option m_ndl1_res in
+           if ldescr -. ndl1 > 0.01 (* lema.tau *) -. lema && check_test_inputs m1 (* TODO: maybe allow DL increase only for refinment of Any ? or forbid expr refinements ? *)
+           then Some (ndl1,r1,m1)
+           else None)
   |> List.sort Stdlib.compare
-  |> filter_refinements ~refinement_branching
+  |> states_of_refinements ~taburefs
+(* XX  |> filter_refinements ~refinement_branching *)
 
 let refining0
       ~refine_degree ~refinement_branching ~input_branching ~solution_pool
@@ -473,8 +491,8 @@ let refining0
       ~make_conts:(new conts_mcts ~c:(sqrt 2.))
       ~state_eval:(fun ?parent ->
         function
-        | StateTodo {r; m; dl} ->
-           let@ statedone = data_of_model ?parent ~pruning:false r m in
+        | StateTodo {r; m; dl; taburefs} ->
+           let@ statedone = data_of_model ?parent ~pruning:false r m taburefs in
            Some (StateDone statedone)
         | StateDone _ ->
            assert false)
@@ -766,7 +784,7 @@ let learn
     : ('typ,'value,'distrib,'var,'constr,'func) results
   = Common.prof "Learning.learn" (fun () ->
   let dl0 = dl_init train_pairs distrib_i distrib_o in
-  let data_of_model ?parent ~pruning r m =
+  let data_of_model ?parent ~pruning r m taburefs =
     try
       let state_opt =
         match read_pairs m train_pairs distrib_i distrib_o dl0 with
@@ -784,7 +802,7 @@ let learn
                 let delta_ldescr = parent_ldescr -. ldescr in
                 0.2 (* lema.alpha *) *. delta_ldescr +. 0.8 *. parent_lema (* exponential average *) (* TODO: define parameter *)
            in
-           Some {r; m; prs; drsi; drso; dl_split; ldescr; lpred; lema }
+           Some {r; m; taburefs; prs; drsi; drso; dl_split; ldescr; lpred; lema }
         | Result.Error exn -> None in
       let () =
         match state_opt with
@@ -811,8 +829,9 @@ let learn
   in
   (* initialization *)
   let r0, m0 = RInit, init_task_model in
+  let taburefs0 = [] in
   let state0 =
-    match data_of_model ~pruning:false r0 m0 with
+    match data_of_model ~pruning:false r0 m0 taburefs0 with
     | Some state0 -> state0
     | None -> failwith "Learning.learn: invalid initial task model" in
 
@@ -835,7 +854,7 @@ let learn
       myseq_find_map_k refine_degree
         (fun (r1, m_dl1_res) ->
           let@ m1, dl1 = Result.to_option m_dl1_res in
-          match data_of_model ~pruning:true r1 m1 with
+          match data_of_model ~pruning:true r1 m1 [] with
           | None -> None (* failure to parse with model m1 *)
           | Some state1 ->
              let ldescr1, lpred1 = state1.ldescr, state1.lpred in
@@ -861,7 +880,7 @@ let learn
             (fun () ->
               let () =
                 let m_refine = state_refine.m in
-                match data_of_model ~pruning:true RInit m_refine with
+                match data_of_model ~pruning:true RInit m_refine [] with
                 | Some state0prune ->
                    state_prune_ref := state0prune
                 | None -> assert false in
