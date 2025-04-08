@@ -478,6 +478,7 @@ let select_refinements ~refine_degree ~refinement_branching ~check_test_inputs s
            then Some (ndl1,r1,m1)
            else None)
   |> List.sort Stdlib.compare
+  |> list_take refinement_branching
   |> states_of_refinements ~taburefs
 (* XX  |> filter_refinements ~refinement_branching *)
 
