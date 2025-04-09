@@ -205,7 +205,6 @@ let refinements
       ~(xp_value : 'value html_xp)
       ~(xp_model : 'model html_xp)
       ~(alpha : float)
-      ~(max_expr_size : int)
       ~(max_expr_refinements_per_read : int)
       ~(max_expr_refinements_per_var : int)
       (* DEPR ~(max_steps : int) *)
@@ -531,12 +530,9 @@ let refinements
        aux_gen ctx m selected_reads
          (fun (read, data : _ read) -> Common.prof "Refining.refinements/aux_expr/get_rs" (fun () ->
            let v, r = Data.value_distrib data in
-           let s_expr = (* index expressions evaluating to v *)
-             let index = Model.force_index ~make_index read in
-             let es = index#lookup (t,v) in
-             Expr.Exprset.to_seq ~max_expr_size es in
+           let index = Model.force_index ~make_index read in
            Common.prof "Refining.refinements/aux_expr/get_rs/enum" (fun () ->
-           s_expr
+           index#lookup_to_seq (t,v) (* index expressions evaluating to v *)
            |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
            |> Myseq.fold_left
                 (fun refs e ->
@@ -626,11 +622,12 @@ let refinements
         | Data.DAlt (_prob, b, d12) ->
            let vc = value_of_bool b in
            let index = Model.force_index ~make_index read in
-           let es : _ Expr.Exprset.t = index#lookup (typ_bool, vc) in
            let new_data = Data.DAlt (1.,b,d12) in
-           Myseq.fold_left
-             (fun rs e -> (e, Result.Ok new_data) :: rs)
-             [] (Expr.Exprset.to_seq ~max_expr_size es)
+           index#lookup_to_seq (typ_bool, vc)
+           |> Myseq.slice ~offset:0 ~limit:max_expr_refinements_per_read
+           |> Myseq.fold_left
+                (fun rs e -> (e, Result.Ok new_data) :: rs)
+                []
         | _ -> assert false)
       (fun e ->
         let c_new = Model.BoolExpr e in

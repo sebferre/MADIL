@@ -110,7 +110,8 @@ module type EXPRSET =
   sig
     type ('typ,'value,'var,'func) t
     val xp : xp_value:'value html_xp -> xp_var:'var html_xp -> xp_func:'func html_xp -> ('typ,'value,'var,'func) t html_xp
-    val to_seq : max_expr_size:int -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) expr Myseq.t
+    val to_seq : ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) expr Myseq.t
+    val to_seq_max_size : max_expr_size:int -> ('typ,'value,'var,'func) t -> ('typ,'value,'var,'func) expr Myseq.t
     val mem : ('typ,'value,'var,'func) expr -> ('typ,'value,'var,'func) t -> bool
     val empty : 'typ -> ('typ,'value,'var,'func) t
     val value : 'typ -> 'value -> ('typ,'value,'var,'func) t
@@ -224,9 +225,7 @@ module Exprset_new : EXPRSET =
         args : bool;
         funs : ('typ,'value,'var,'func) t option }
       
-    let rec to_seq ~(max_expr_size : int) es : ('typ,'value,'var,'func) expr Myseq.t =
-      if max_expr_size <= 0 then Myseq.empty
-      else
+    let rec to_seq es : ('typ,'value,'var,'func) expr Myseq.t =
       let t = es.typ in
       Myseq.concat
         [ (let* v = Myseq.from_bintree es.consts in
@@ -237,23 +236,18 @@ module Exprset_new : EXPRSET =
 
           (if es.args then Myseq.return (Arg t)
            else Myseq.empty);
-          
-          (Myseq.interleave
-             (List.map
-                (fun (f, es_args_set) ->
-                  let* es_args = Myseq.from_bintree es_args_set in
-                  let k = Array.length es_args in
-                  let seq_args = Array.map (to_seq ~max_expr_size:(max_expr_size - k)) es_args in
-                  let* l_args = Myseq.product_fair (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
-                  let args = Array.of_list l_args in
-                  Myseq.return (Apply (t,f,args)))
-                (Mymap.bindings es.applies)));
+
+          (let* f, es_args_set = Myseq.from_list (Mymap.bindings es.applies) in
+           let* es_args = Myseq.from_bintree es_args_set in
+           let seq_args = Array.map to_seq es_args in
+           let* l_args = Myseq.product_fair (Array.to_list seq_args) in (* TODO: extend Myseq for arrays *)
+           let args = Array.of_list l_args in
+           Myseq.return (Apply (t,f,args)))
           
           (* let* es1 = Myseq.from_option es.funs in
            let* e = to_seq es1 in
            Myseq.return (Fun (t_arg,e) *) (* needs to decompose t as (t_arg -> es1.typ) *) 
         ]
-      |> Myseq.filter (fun e -> size_expr_ast e <= max_expr_size)
 
     let rec to_seq_for_size es n =
       assert (n >= 0);
@@ -280,7 +274,7 @@ module Exprset_new : EXPRSET =
                Myseq.return (Apply (t,f,args)))
              (Mymap.bindings es.applies))
     
-    let to_seq ~(max_expr_size : int) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
+    let to_seq_max_size ~(max_expr_size : int) (es : ('typ,'value,'var,'func) t) : ('typ,'value,'var,'func) expr Myseq.t =
       (* enumerate expressions in increasing ast size *)
       let* n = Myseq.range 1 max_expr_size in
       to_seq_for_size es n
@@ -365,7 +359,7 @@ module Exprset_new : EXPRSET =
              | Some es_args_set -> Some (Bintree.add es_args es_args_set))
             es.applies }
 
-    let rec union es1 es2 = (* not used, not tested *)
+    let rec union es1 es2 =
       Common.prof "Expr.Exprset.union" (fun () ->
       assert (es1.typ = es2.typ);
       { typ = es1.typ;
@@ -485,59 +479,87 @@ and ('typ,'value,'func) arg_spec =
   | `Val of 'typ * 'value
   | `Apply of 'typ * 'func * ('typ,'value,'func) arg_spec array ]
 
-let rec eval_arg_spec ~eval_func k v_args_k es_args_k =
+let rec eval_arg_spec ~eval_func k v_args_k size_args_k es_args_k =
   (* arity, arg values, arg exprsets *)
   function
   | `Pos i ->
      if i>=0 && i < k
-     then Result.Ok (v_args_k.(i), es_args_k.(i))
+     then Result.Ok (v_args_k.(i), (size_args_k.(i), es_args_k.(i)))
      else failwith "Expr.index_apply_functions: invalid position in args_spec"
   | `Val (t,v) ->
-     Result.Ok (v, Exprset.value t v)
+     Result.Ok (v, (1, Exprset.value t v))
   | `Apply (t,f,arg_spec_ar) ->
-     let| v_ar, es_ar = eval_arg_spec_ar ~eval_func k v_args_k es_args_k arg_spec_ar in
+     let| v_ar, size_ar, es_ar = eval_arg_spec_ar ~eval_func k v_args_k size_args_k es_args_k arg_spec_ar in
      let| v = eval_func f v_ar in
+     let size = Array.fold_left (+) 1 size_ar in
      let es = Exprset.add_apply f es_ar (Exprset.empty t) in
-     Result.Ok (v,es)
-and eval_arg_spec_ar ~eval_func k v_args_k es_args_k arg_spec_ar =
-  let| ar = array_map_result (eval_arg_spec ~eval_func k v_args_k es_args_k) arg_spec_ar in
-  Result.Ok (Array.split ar)
+     Result.Ok (v, (size, es))
+and eval_arg_spec_ar ~eval_func k v_args_k size_args_k es_args_k arg_spec_ar =
+  let| ar = array_map_result
+              (eval_arg_spec ~eval_func k v_args_k size_args_k es_args_k)
+              arg_spec_ar in
+  let v_ar, size_es_ar = Array.split ar in
+  let size_ar, es_ar = Array.split size_es_ar in
+  Result.Ok (v_ar, size_ar, es_ar)
 
 
 (* indexes : idea inspired from FlashMeta *)
 
+module Intmap = Intmap.M
+
 class virtual ['typ,'value,'var,'func] index =
-  object
+  object (self)
     method virtual xp : xp_typ:'typ html_xp ->
                         xp_value:'value html_xp ->
                         xp_var:'var html_xp ->
                         xp_func:'func html_xp ->
                         ?on_typ:('typ -> bool) ->
                         unit html_xp
-    method virtual lookup : 'typ * 'value -> ('typ,'value,'var,'func) Exprset.t    
+
+    method virtual lookup : 'typ * 'value -> ('typ,'value,'var,'func) Exprset.t Intmap.t
+    method virtual lookup_to_seq : 'typ * 'value -> ('typ,'value,'var,'func) expr Myseq.t (* in increasing size *)
   end
 
 class ['typ,'value,'var,'func] index_bind =
   object
     inherit ['typ,'value,'var,'func] index
     
-    val mutable index : ('typ * 'value, ('typ,'value,'var,'func) Exprset.t) Mymap.t = Mymap.empty
+    val mutable index : ('typ * 'value, ('typ,'value,'var,'func) Exprset.t Intmap.t) Mymap.t = Mymap.empty
     (* Hashtbl less efficient and unsafe (iter + updates) *)
 
     method bind_ref tv x =
+      let size = 1 in
       index <-
         Mymap.update tv
-          (function
-           | None -> Some (Exprset.add_ref x (Exprset.empty (fst tv)))
-           | Some es -> Some (Exprset.add_ref x es))
+          (fun m_es_opt ->
+            let m_es =
+              match m_es_opt with
+              | None -> Intmap.empty
+              | Some m_es -> m_es in
+            let es =
+              if Intmap.mem size m_es
+              then Intmap.get size m_es
+              else Exprset.empty (fst tv) in
+            let es = Exprset.add_ref x es in
+            let m_es = Intmap.set size es m_es in
+            Some m_es)
           index
       
-    method bind_apply tv f es_args = (* QUICK *)
+    method bind_apply tv f size es_args = (* QUICK *)
       index <-
         Mymap.update tv
-          (function
-           | None -> Some (Exprset.add_apply f es_args (Exprset.empty (fst tv)))
-           | Some es -> Some (Exprset.add_apply f es_args es))
+          (fun m_es_opt ->
+            let m_es =
+              match m_es_opt with
+              | None -> Intmap.empty
+              | Some m_es -> m_es in
+            let es =
+              if Intmap.mem size m_es
+              then Intmap.get size m_es
+              else Exprset.empty (fst tv) in
+            let es = Exprset.add_apply f es_args es in
+            let m_es = Intmap.set size es m_es in
+            Some m_es)
           index
       
     method xp ~xp_typ ~xp_value ~xp_var ~xp_func =
@@ -547,27 +569,52 @@ class ['typ,'value,'var,'func] index_bind =
       print#string "INDEX";
       xp_newline ~html print ();
       Mymap.iter
-        (fun (t,v) es ->
-          if on_typ t then (
-            xp_typ ~html print t;
-            print#string " ";
-            xp_value ~html print v;
-            print#string " = ";
-            xp_exprset ~html print es;
-            xp_newline ~html print ()
-        ))
+        (fun (t,v) m_es ->
+          Intmap.iter
+            (fun size es ->
+              if on_typ t then (
+                xp_typ ~html print t;
+                print#string " ";
+                xp_value ~html print v;
+                print#string " #";
+                print#int size;
+                print#string " = ";
+                xp_exprset ~html print es;
+                xp_newline ~html print ()
+            ))
+            m_es)
         index
 
-    method lookup tv = (* QUICK *)
+    method lookup tv =
       match Mymap.find_opt tv index with
-      | None -> Exprset.empty (fst tv)
-      | Some exprs -> exprs
+      | None -> Intmap.empty
+      | Some m_es -> m_es
+    
+    method lookup_to_seq tv : ('typ,'value,'var,'func) expr Myseq.t = (* in increasing size *)
+      match Mymap.find_opt tv index with
+      | None -> Myseq.empty
+      | Some m_es ->
+         Intmap.fold
+           (fun seq size es ->
+             Myseq.append seq (Exprset.to_seq es))
+           Myseq.empty m_es
 
-    method fold : 'acc. ('tv -> 'es -> 'acc -> 'acc) -> 'acc -> 'acc =
+    method fold : 'acc. ('tv -> int (* size *) -> 'es -> 'acc -> 'acc) -> 'acc -> 'acc =
       fun f acc ->
-      Mymap.fold f index acc
+      Mymap.fold
+        (fun tv m_es acc ->
+          Intmap.fold
+            (fun acc size es -> f tv size es acc)
+            acc m_es)
+        index acc
 
-    method iter (f : 'tv -> 'es -> unit) = Mymap.iter f index
+    method iter (f : 'tv -> int -> 'es -> unit) =
+      Mymap.iter
+        (fun tv m_es ->
+          Intmap.iter
+            (fun size es -> f tv size es)
+            m_es)
+        index
 
   end
 
@@ -576,95 +623,110 @@ let index_add_bindings index (bindings : ('var,'typ,'value) bindings) : unit =
     (fun x tv -> index#bind_ref tv x)
     bindings
 
+exception Oversized_expr
+let get_size ~max_expr_size size_args =
+  let size = Array.fold_left (+) 1 size_args in
+  if size <= max_expr_size
+  then Result.Ok size
+  else Result.Error Oversized_expr [@@inline]
+
 let index_apply_functions_1
+      ~(max_expr_size : int)
       ~(eval_func : 'func -> 'value array -> 'value result)
-      index
+      (index : ('typ,'value,'var,'func) index_bind)
       (get_functions : 'typ -> 'value -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
     : unit = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   index#iter
-    (fun (t1,v1) es1 ->
+    (fun (t1,v1) size1 es1 ->
       get_functions t1 v1
       |> List.iter
            (fun (t,f,args_spec) ->
              let vfes_res =
-               let| v_args, es_args =
+               let| v_args, size_args, es_args =
                  match args_spec with
-                 | `Default -> Result.Ok ([|v1|], [|es1|])
-                 | `Custom ar -> eval_arg_spec_ar ~eval_func 1 [|v1|] [|es1|] ar in
-               let| v = eval_func f v_args in
-               Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
+                 | `Default -> Result.Ok ([|v1|], [|size1|], [|es1|])
+                 | `Custom ar -> eval_arg_spec_ar ~eval_func 1 [|v1|] [|size1|] [|es1|] ar in
+               let| size = get_size ~max_expr_size size_args in
+               let| v = eval_func f v_args in (* v is the result of applying f to es_args *)
+               Result.Ok (v, f, size, es_args) in
              match vfes_res with
-             | Result.Ok (v,f,es_args) -> index#bind_apply (t,v) f es_args
+             | Result.Ok (v,f,size,es_args) -> index#bind_apply (t,v) f size es_args
              | Result.Error _ -> ())
     )
 
 let index_apply_functions_2
+      ~(max_expr_size : int)
       ~(eval_func : 'func -> 'value array -> 'value result)
-      index
+      (index : ('typ,'value,'var,'func) index_bind)
       (filter_1 : 'typ * 'value -> bool)
       (get_functions : 'typ -> 'value -> 'typ -> 'value -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
     : unit = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   index#iter
-    (fun (t1,v1 as tv1) es1 ->
+    (fun (t1,v1 as tv1) size1 es1 ->
       if filter_1 tv1
       then
         index#iter
-          (fun (t2,v2) es2 ->
+          (fun (t2,v2) size2 es2 ->
             get_functions t1 v1 t2 v2
             |> List.iter
                  (fun (t,f,args_spec) ->
                    let vfes_res =
-                     let| v_args, es_args =
+                     let| v_args, size_args, es_args =
                        match args_spec with
-                       | `Default -> Result.Ok ([|v1;v2|], [|es1;es2|])
-                       | `Custom ar -> eval_arg_spec_ar ~eval_func 2 [|v1;v2|] [|es1;es2|] ar in
+                       | `Default -> Result.Ok ([|v1;v2|], [|size1; size2|], [|es1;es2|])
+                       | `Custom ar -> eval_arg_spec_ar ~eval_func 2 [|v1;v2|] [|size1; size2|] [|es1;es2|] ar in
+                     let| size = get_size ~max_expr_size size_args in
                      let| v = eval_func f v_args in
-                     Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
+                     Result.Ok (v, f, size, es_args) in (* v is the result of applying f to es_args *)
                    match vfes_res with
-                   | Result.Ok (v,f,es_args) -> index#bind_apply (t,v) f es_args
+                   | Result.Ok (v,f,size,es_args) -> index#bind_apply (t,v) f size es_args
                    | Result.Error _ -> ())
           )
       else ())
 
 let index_apply_functions
+      ~(max_expr_size : int)
       ~(eval_func : 'func -> 'value array -> 'value result)
-      index
+      (index : ('typ,'value,'var,'func) index_bind)
       (max_arity : int)
       (get_functions : 'typ array * 'value array -> ('typ * 'func * ('typ,'value,'func) args_spec) list)
     : unit = (* COSTLY in itself, apart from get_functions, eval, and bind_apply *)
   let args_k =
     Array.init (max_arity+1) (* for each arity k in 0..max_arity *)
-      (fun k -> (* three undefined arrays for types, values, and exprsets *)
+      (fun k -> (* three undefined arrays for types, values, sizes, and exprsets *)
         Array.make k (Obj.magic () : 'typ),
         Array.make k (Obj.magic () : 'value),
+        Array.make k (Obj.magic () : int),
         Array.make k (Obj.magic () : ('typ,'value,'var,'func) Exprset.t)) in
   let rec aux k =
     let () = (* generating and applying functions for arity k *)
-      let t_args_k, v_args_k, es_args_k = args_k.(k) in
+      let t_args_k, v_args_k, size_args_k, es_args_k = args_k.(k) in
       let es_args_k = Array.copy es_args_k in (* because it is inserted into the index *)
       get_functions (t_args_k, v_args_k)
       |> List.iter
            (fun (t,f,args_spec) ->
              let vfes_res =
-               let| v_args, es_args =
+               let| v_args, size_args, es_args =
                  match args_spec with
-                 | `Default -> Result.Ok (v_args_k, es_args_k)
-                 | `Custom ar -> eval_arg_spec_ar ~eval_func k v_args_k es_args_k ar in
+                 | `Default -> Result.Ok (v_args_k, size_args_k, es_args_k)
+                 | `Custom ar -> eval_arg_spec_ar ~eval_func k v_args_k size_args_k es_args_k ar in
+               let| size = get_size ~max_expr_size size_args in
                let| v = eval_func f v_args in
-               Result.Ok (v, f, es_args) in (* v is the result of applying f to es_args *)
+               Result.Ok (v, f, size, es_args) in (* v is the result of applying f to es_args *)
              match vfes_res with
-             | Result.Ok (v,f,es_args) -> index#bind_apply (t,v) f es_args
+             | Result.Ok (v,f,size,es_args) -> index#bind_apply (t,v) f size es_args
              | Result.Error _ -> ())
     in
     if k >= max_arity
     then ()
     else
       index#iter
-        (fun (t,v) es ->
+        (fun (t,v) size es ->
           for l = k+1 to max_arity do (* completing the arrays at position k *)
-            let ts, vs, ess = args_k.(l) in
+            let ts, vs, sizes, ess = args_k.(l) in
             ts.(k) <- t;
             vs.(k) <- v;
+            sizes.(k) <- size;
             ess.(k) <- es
           done;
           aux (k+1))
@@ -690,9 +752,39 @@ class ['typ,'value,'var,'func] index_union =
         indexes
 
     method lookup tv =
+      Common.prof "Expr.index_union#lookup" (fun () ->
       List.fold_left
-        (fun res index -> Exprset.union res (index#lookup tv))
-        (Exprset.empty (fst tv)) indexes
+        (fun res index ->
+          Intmap.map_union
+            (fun size es1_opt es2_opt ->
+              match es1_opt, es2_opt with
+              | Some es1, Some es2 -> Some (Exprset.union es1 es2)
+              | Some _, None -> es1_opt
+              | None, Some _ -> es2_opt
+              | None, None -> None)
+            res (index#lookup tv))
+        Intmap.empty indexes)
+
+    method lookup_to_seq tv : ('typ,'value,'var,'func) expr Myseq.t = (* in increasing size *)
+      let m_l_es =
+        List.fold_left
+          (fun res index ->
+            Intmap.map_union
+              (fun size l_es_opt es_opt ->
+                match l_es_opt, es_opt with
+                | Some l_es, Some es -> Some (es::l_es)
+                | Some l_es, None -> Some l_es
+                | None, Some es -> Some [es]
+                | None, None -> None)
+              res (index#lookup tv))
+          Intmap.empty indexes in
+      Intmap.fold
+        (fun seq size l_es ->
+          (* assuming the individual es in l_es are disjoint *)
+          Myseq.append seq
+            (Myseq.concat
+               (seq :: List.map Exprset.to_seq l_es)))
+        Myseq.empty m_l_es
 
   end
 

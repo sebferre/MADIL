@@ -382,7 +382,6 @@ module Make (Domain : DOMAIN) =
         ~refinements_pat_expr
         ~postprocessing:refinements_postprocessing
         ~alpha:(!alpha)
-        ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
         (* DEPR ~max_steps:(!max_refinement_steps) *)
@@ -408,7 +407,6 @@ module Make (Domain : DOMAIN) =
         ~refinements_pat_expr:(fun ~env_vars t value -> [])
         ~postprocessing:prunings_postprocessing
         ~alpha:(!alpha)
-        ~max_expr_size:(!max_expr_size)
         ~max_expr_refinements_per_read:(!max_expr_refinements_per_read)
         ~max_expr_refinements_per_var:(!max_expr_refinements_per_var)
         (* DEPR ~max_steps:(!max_refinement_steps) *)
