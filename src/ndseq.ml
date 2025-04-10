@@ -28,6 +28,7 @@ let rec depth : 'a t -> int = function
      assert (List.for_all (fun x -> depth x = d) l);
      1 + d
   | _ -> 0
+let ndim = depth
 
 let seq (d : int) (items : 'a list) : 'a t =
   assert (d >= 0);
@@ -158,7 +159,7 @@ let rec map2_result ?(depth = -1) (delta_depth : int) (f : 'a -> 'b -> 'c result
     | _ -> f x1 x2
 
 let mapn_n ?(name = "?") ~(depth : int) (res_depth : int array) (f : int list -> 'a t array -> 'b t array) (args : 'a t array) : 'b t array =
-  (* res_depth is relative to depth: result depth = depth + res_depth, not relative to arg depth *)
+  (* res_depth is relative to depth: result ndim = depth + res_depth, not relative to arg ndim *)
   assert (args <> [||]);
   let m = Array.length res_depth in
   let res_nil = Array.make m [] in
@@ -532,9 +533,11 @@ let tail ~(depth : int) (x : 'a t) : 'a t option =
     x
 
 let head_tail ~(depth : int) (x : 'a t) : ('a * 'a t) Myseq.t =
-  map_tup_myseq ~depth (-1,0)
+  let ndim = ndim x in
+  map_tup_myseq ~depth (ndim - depth - 1, ndim - depth)
     (function
      | `Seq (d,i_opt,l) ->
+        assert (d = ndim - depth - 1);
         (match i_opt, l with
          | None, x0::l1 -> Myseq.return (x0, `Seq (d,None,l1))
          | _ -> Myseq.empty)
