@@ -214,7 +214,6 @@ module type DOMAIN =
     val generator_pat : typ -> constr -> value array -> generator array -> generator
 
     val parseur_value : value -> parseur
-    val parseur_any : typ -> parseur
     val parseur_pat : typ -> constr -> value array -> parseur array -> parseur
 
     (* description lengths *)
@@ -298,7 +297,6 @@ module Make (Domain : DOMAIN) =
         ~eval_expr
         ~bool_of_value
         ~parseur_value
-        ~parseur_any
         ~parseur_pat
 
     (* description lengths *)

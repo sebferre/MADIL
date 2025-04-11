@@ -321,7 +321,6 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(bool_of_value : 'value -> bool result)
       ~(parseur_value : 'value -> 'parse)
-      ~(parseur_any : 'typ -> 'parse)
       ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'parse array -> 'parse)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('distrib,'var,'typ,'value,'constr) parseur as 'parse) =
   fun m bindings v r ->
@@ -330,7 +329,7 @@ let parseur (* on evaluated models: no expr, no def *)
     | Def (x,m1) ->
        parse m1 v r
     | Any t ->
-       parseur_any t v r
+       Myseq.return (Data.make_dany v r)
     | Pat (t,c,src,args) ->
        let* vsrc =  Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
        let parse_args = Array.map parse args in
