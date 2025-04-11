@@ -214,7 +214,7 @@ module type DOMAIN =
     val generator_pat : typ -> constr -> value array -> generator array -> generator
 
     val parseur_value : value -> value -> bool
-    val parseur_pat : typ -> constr -> value array -> parseur array -> parseur
+    val parseur_pat : typ -> constr -> value array -> value -> distrib -> (value * (value * distrib) array) Myseq.t
 
     (* description lengths *)
 

@@ -320,8 +320,8 @@ type ('distrib,'var,'typ,'value,'constr) parseur = 'value -> 'distrib -> ('value
 let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(bool_of_value : 'value -> bool result)
-      ~(parseur_value : 'value -> 'value -> bool)
-      ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'parse array -> 'parse)
+      ~(parseur_value : 'value -> 'value -> bool) (* checks that second value (data) matches the first value (model) *)
+      ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'value -> 'distrib -> ('value * ('value * 'distrib) array) Myseq.t) (* returning possible decompositions of v, along with updated v if needed *)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('distrib,'var,'typ,'value,'constr) parseur as 'parse) =
   fun m bindings v r ->
   let rec parse m v r =
@@ -331,9 +331,18 @@ let parseur (* on evaluated models: no expr, no def *)
     | Any t ->
        Myseq.return (Data.make_dany v r)
     | Pat (t,c,src,args) ->
-       let* vsrc =  Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
-       let parse_args = Array.map parse args in
-       parseur_pat t c vsrc parse_args v r
+       let k = Array.length args in
+       let* src =  Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
+       let* v, args_v_r = parseur_pat t c src v r in
+       if not (Array.length args_v_r = k) then
+         failwith "Wrong number of parts for some constructor, in parseur_pat";
+       let* dargs =
+         Myseq.product (* _fair *)
+           (Array.to_list
+              (Array.map2
+                 (fun mi (vi,ri) -> parse mi vi ri)
+                 args args_v_r)) in
+       Myseq.return (Data.make_dpat v r c ~src (Array.of_list dargs))
     | Alt (xc,c,m1,m2) -> (* if-then-else *)
        let seq1 prob =
          let* d1 = parse m1 v r in
