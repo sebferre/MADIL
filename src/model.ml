@@ -361,7 +361,8 @@ let parseur (* on evaluated models: no expr, no def *)
        let* ve = Myseq.from_result (eval_expr e bindings) in
        parseur_value ve v r
     | Derived t ->
-       failwith "Derived arguments must not be parsed but computed" 
+       Myseq.return (Data.make_dexpr v r) (* value defined by pattern-based decomposition (implicit expression) *)
+
   in
   parse m v r
 
