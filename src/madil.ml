@@ -213,7 +213,7 @@ module type DOMAIN =
     val generator_any : typ -> generator
     val generator_pat : typ -> constr -> value array -> generator array -> generator
 
-    val parseur_value : value -> parseur
+    val parseur_value : value -> value -> bool
     val parseur_pat : typ -> constr -> value array -> parseur array -> parseur
 
     (* description lengths *)

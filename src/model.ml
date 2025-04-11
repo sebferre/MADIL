@@ -320,7 +320,7 @@ type ('distrib,'var,'typ,'value,'constr) parseur = 'value -> 'distrib -> ('value
 let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(bool_of_value : 'value -> bool result)
-      ~(parseur_value : 'value -> 'parse)
+      ~(parseur_value : 'value -> 'value -> bool)
       ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'parse array -> 'parse)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('distrib,'var,'typ,'value,'constr) parseur as 'parse) =
   fun m bindings v r ->
@@ -358,7 +358,9 @@ let parseur (* on evaluated models: no expr, no def *)
            else seq2 1.)                
     | Expr e ->
        let* ve = Myseq.from_result (eval_expr e bindings) in
-       parseur_value ve v r
+       if parseur_value ve v
+       then Myseq.return (Data.make_dexpr v r)
+       else Myseq.empty
     | Derived t ->
        Myseq.return (Data.make_dexpr v r) (* value defined by pattern-based decomposition (implicit expression) *)
 

@@ -419,6 +419,47 @@ let rec match_myseq (delta_depth : int) (f : 'a -> 'b -> 'c Myseq.t) (x1 : 'a t)
   | `Seq _, _ | _, `Seq _ -> Myseq.empty
   | _ -> f x1 x2
 
+let rec matches (delta_depth : int) (f : 'a -> 'b -> bool) (x1 : 'a t) (x2 : 'b t) : bool =
+  (* delta_depth = depth(c or d) - dpeth(b) *)
+  match x1, x2 with
+  | `Seq (_,i1_opt,[]), `Seq (d2,None,l2) ->
+     assert (i1_opt = None);
+     l2 = []
+  | `Seq (_,i1_opt,l1), `Seq (d2,None,l2) ->
+     assert (i1_opt = None);
+     let n1 = List.length l1 in
+     let n2 = List.length l2 in
+     let n1, l1 =
+       if n1 >= n2
+       then n1, l1
+       else (* assuming periodic sequence from l1 *)
+         let k = (n2 - 1) / n1 + 1 in
+         n1 * k, List.concat (List.init k (fun _ -> l1)) in
+     let l1 = if n1 = n2 then l1 else Common.sub_list l1 0 n2 in
+     let d = d2 + delta_depth in
+     assert (d >= 0);
+     List.for_all2 (matches delta_depth f) l1 l2
+  | `Seq (_,i1_opt,[]), `Seq (d2,Some i2,[z2]) ->
+     assert (i1_opt = None);
+     false
+  | `Seq (_,i1_opt,l1), `Seq (d2,Some i2,[z2]) ->
+     assert (i1_opt = None);
+     let n1 = List.length l1 in
+     let d = d2 + delta_depth in
+     assert (d >= 0);
+     let z1 = List.nth l1 (i2 mod n1) in (* assuming periodic sequence from l1 *)
+     matches delta_depth f z1 z2
+  | _, `Seq (d2,None,l2) -> (* broadcast x1 *)
+     let d = d2 + delta_depth in
+     assert (d >= 0);
+     List.for_all (matches delta_depth f x1) l2
+  | _, `Seq (d2, Some i2, [z2]) -> (* broadcast x1 *)
+     let d = d2 + delta_depth in
+     assert (d >= 0);
+     matches delta_depth f x1 z2
+  | `Seq _, _ | _, `Seq _ -> false
+  | _ -> f x1 x2
+
 let rec for_all ?(depth = -1) (f : 'a -> bool) (x : 'a t) : bool =
   if depth = 0
   then f x
