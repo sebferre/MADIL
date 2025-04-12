@@ -73,6 +73,7 @@ module type TYPES =
     type reads = (typ,value,distrib,constr,var,func) Task_model.reads
     type pairs_reads = (typ,value,distrib,constr,var,func) Task_model.pairs_reads
 
+    type generator_pat = (distrib,value) Model.generator_pat
     type generator = (distrib,var,typ,value,constr) Model.generator
     type parseur = (distrib,var,typ,value,constr) Model.parseur
 
@@ -133,7 +134,8 @@ module Defined_types (T : BASIC_TYPES) =
     type read = (typ,value,distrib,constr,var,func) Model.read
     type reads = (typ,value,distrib,constr,var,func) Task_model.reads
     type pairs_reads = (typ,value,distrib,constr,var,func) Task_model.pairs_reads
-                     
+
+    type generator_pat = (distrib,value) Model.generator_pat
     type generator = (distrib,var,typ,value,constr) Model.generator
     type parseur = (distrib,var,typ,value,constr) Model.parseur
 
@@ -211,10 +213,10 @@ module type DOMAIN =
 
     val generator_value : value -> generator
     val generator_any : typ -> generator
-    val generator_pat : typ -> constr -> value array -> generator array -> generator
+    val generator_pat : typ -> constr -> value array -> int (* arity *) -> distrib -> generator_pat Myseq.t
 
     val parseur_value : value -> value -> bool
-    val parseur_pat : typ -> constr -> value array -> value -> distrib -> (value * (value * distrib) array) Myseq.t
+    val parseur_pat : typ -> constr -> value array -> int (* arity *) -> value -> distrib -> (value * (value * distrib) array) Myseq.t
 
     (* description lengths *)
 

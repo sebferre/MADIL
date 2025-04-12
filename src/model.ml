@@ -263,12 +263,19 @@ let get_bindings  (* QUICK *)
 
 type ('distrib,'var,'typ,'value,'constr) generator = 'distrib -> ('value,'distrib,'constr) data Myseq.t
 
+type ('distrib,'value) generator_pat =
+  [ `NextArg of (int * 'distrib) * ('value -> ('distrib,'value) generator_pat Myseq.t)
+  | `NextArg2 of (int * 'distrib) * (int * 'distrib) * ('value * 'value -> ('distrib,'value) generator_pat Myseq.t)
+  | `NextArgs of (int * 'distrib) list * ('value list -> ('distrib,'value) generator_pat Myseq.t)
+  | `NextDerived of (int * 'value * 'distrib) * (unit -> ('distrib,'value) generator_pat Myseq.t)
+  | `ResVal of 'value ]
+
 let generator (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(bool_of_value : 'value -> bool result)
       ~(generator_value : 'value -> 'gen)
       ~(generator_any : 'typ -> 'gen)
-      ~(generator_pat : 'typ -> 'constr -> 'value array -> (('distrib,'var,'typ,'value,'constr) generator as 'gen) array -> 'gen)
+      ~(generator_pat : 'typ -> 'constr -> 'value array -> int (* arity *) -> 'distrib -> ('distrib,'value) generator_pat Myseq.t)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> 'gen =
   fun m bindings r ->
   let rec gen m r =
@@ -278,9 +285,11 @@ let generator (* on evaluated models: no expr, no def *)
     | Any t ->
        generator_any t r
     | Pat (t,c,src,args) ->
-       let* vsrc = Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
-       let gen_args = Array.map gen args in
-       generator_pat t c vsrc gen_args r
+       let k = Array.length args in
+       let* src = Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
+       let* gp = generator_pat t c src k r in
+       let* v, ds = gen_pat k args [] gp in
+       Myseq.return (Data.make_dpat v r c ~src ds)
     | Alt (xc,c,m1,m2) ->
        let gen_b_d1 prob =
          let* d1 = gen m1 r in
@@ -310,6 +319,44 @@ let generator (* on evaluated models: no expr, no def *)
        generator_value v r
     | Derived t ->
        failwith "Derived arguments must not be generated but computed" (* must be computed, not generated *)
+  and gen_pat k args rev_ids = function
+    | `NextArg ((i,ri),cont) ->
+       if i >= k then failwith "Wrong constr arg index in generator_pat (`NextArg)";
+       let* di = gen args.(i) ri in
+       let vi = Data.value di in
+       let* gp = cont vi in
+       gen_pat k args ((i,di)::rev_ids) gp
+    | `NextArg2 ((i,ri),(j,rj),cont) ->
+       if i >= k || j >= k then failwith "Wrong constr arg index in generator_pat (`NextArg2)";
+       let* di, dj =
+         Myseq.product_fair2 (gen args.(i) ri,
+                              gen args.(j) rj) in
+       let vi = Data.value di in
+       let vj = Data.value dj in
+       let* gp = cont (vi, vj) in
+       gen_pat k args ((j,dj)::(i,di)::rev_ids) gp
+    | `NextArgs (irs,cont) ->
+       let* ids =
+         Myseq.product_fair
+           (List.map
+              (fun (i,ri) ->
+                if i >= k then failwith "Wrong constr arg index in generator_pat (`NextArgs)";
+                let* di = gen args.(i) ri in
+                Myseq.return (i,di))
+              irs) in
+       let vs = List.map (fun (i,di) -> Data.value di) ids in
+       let* gp = cont vs in
+       gen_pat k args (List.rev_append ids rev_ids) gp
+    | `NextDerived ((i,vi,ri),cont) ->
+       if i >= k then failwith "Wrong constr arg index in generator_pat (`NextDerived)";
+       let di = Data.make_dexpr vi ri in
+       let* gp = cont () in
+       gen_pat k args ((i,di)::rev_ids) gp
+    | `ResVal v ->
+       if List.length rev_ids <> k then failwith "Wrong constr arity in generator_pat (`ResVal)";
+       let ds = Array.make k (Obj.magic 0 : ('value,'distrib,'constr) data) in
+       List.iter (fun (i,di) -> ds.(i) <- di) rev_ids;
+       Myseq.return (v, ds)
   in
   gen m r
 
@@ -321,7 +368,7 @@ let parseur (* on evaluated models: no expr, no def *)
       ~(eval_expr : ('typ,'value,'var,'func) Expr.expr -> ('var,'typ,'value) Expr.bindings -> 'value result)
       ~(bool_of_value : 'value -> bool result)
       ~(parseur_value : 'value -> 'value -> bool) (* checks that second value (data) matches the first value (model) *)
-      ~(parseur_pat : 'typ -> 'constr -> 'value array -> 'value -> 'distrib -> ('value * ('value * 'distrib) array) Myseq.t) (* returning possible decompositions of v, along with updated v if needed *)
+      ~(parseur_pat : 'typ -> 'constr -> 'value array -> int -> 'value -> 'distrib -> ('value * ('value * 'distrib) array) Myseq.t) (* returning possible decompositions of v, along with updated v if needed *)
     : ('typ,'value,'var,'constr,'func) model -> ('var,'typ,'value) Expr.bindings -> (('distrib,'var,'typ,'value,'constr) parseur as 'parse) =
   fun m bindings v r ->
   let rec parse m v r =
@@ -333,7 +380,7 @@ let parseur (* on evaluated models: no expr, no def *)
     | Pat (t,c,src,args) ->
        let k = Array.length args in
        let* src =  Myseq.from_result (array_map_result (fun e -> eval_expr e bindings) src) in
-       let* v, args_v_r = parseur_pat t c src v r in
+       let* v, args_v_r = parseur_pat t c src k v r in
        if not (Array.length args_v_r = k) then
          failwith "Wrong number of parts for some constructor, in parseur_pat";
        let* dargs =
