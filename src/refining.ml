@@ -384,8 +384,8 @@ let refinements
            (fun m' -> m')
            (fun m' ~supp ~nb ~alt best_reads ->
              Myseq.return (m', Result.Ok best_reads))
-       else (*Myseq.empty*)
-         (* generalizing constant into variable expression *)
+       else (* Myseq.empty *)
+         (* generalizing constant into variable expression. TODO => pruning *)
          aux_expr ctx m selected_reads
          |> Myseq.filter
               (fun (p,m',supp,dl') ->
@@ -668,7 +668,6 @@ let refinements
   let m', varseq' = Model.refine p r m0 varseq0 in
   Myseq.return (p, r, supp, dl'_res, m', varseq'))
 
-
 let task_refinements
       ~(alpha : float)
       ~(binding_vars : ('typ,'value,'var,'constr,'func) Model.model -> ('var,'typ) Expr.binding_vars)
@@ -686,7 +685,8 @@ let task_refinements
   let l = Task_model.dl_model_data ~alpha prs in
   let dl0 = prs.dl0 in
   let dl = l.md in
-  Myseq.interleave (* TODO: rather order by estimated dl *)
+  let _ndl = dl.i /. dl0.i +. dl.o /. dl0.o in
+  Myseq.interleave
     [ (if include_input
        then
          let* p, ri, suppi, dli'_res, mi', varseq =
@@ -704,12 +704,35 @@ let task_refinements
          let* p, ro, suppo, dlo'_res, mo', varseq =
            output_refinements ~include_expr ~nb_env_vars:m.nb_env_vars ~env_vars:m.env_vars ~dl_M:prs.dl_m.o
              m.output_model m.varseq dsro.reads in
+         let rk =
+           match ro with
+           | Model.Expr (Expr.Const _) -> `Output
+           | Model.Expr _ -> `Expr
+           | _ -> `Output in
          let m_ndl'_res =
            let| dlo' = dlo'_res in
            let ndl' = dl.i /. dl0.i +. dlo' /. dl0.o in (* input not changed, normalized DL *)
            Result.Ok (Task_model.make ~binding_vars varseq m.input_model mo', ndl') in
-         Myseq.return (Task_model.RStep (`Output,p,ro,suppo), m_ndl'_res)
+         Myseq.return (Task_model.RStep (rk,p,ro,suppo), m_ndl'_res)
        else Myseq.empty) ]
+  |> Myseq.sort (* TODO: use sorted merge *)
+       (fun (r1,m1_ndl1_res) (r2,m2_ndl2_res) ->
+         match m1_ndl1_res, m2_ndl2_res with
+         | Result.Ok (_,ndl1), Result.Ok (_,ndl2) ->
+            (* ALT if ndl1 < ndl && ndl2 >= ndl then -1 (* prefering compressive over non-compressive *)
+            else if ndl2 < ndl && ndl1 >= ndl then +1
+        
+            else if rk1 = `Output && rk2 <> `Output then -1 (* prefering output over input and expr *)
+            else if rk2 = `Output && rk1 <> `Output then +1
+        
+            else *)
+            let c = dl_compare ndl1 ndl2 in (* prefering more compressive *)
+            if c = 0
+            then Stdlib.compare r1 r2 (* determinising order *)
+            else c
+         | Result.Ok _, _ -> -1
+         | _, Result.Ok _ -> +1
+         | _ -> Stdlib.compare r1 r2)
 
 let task_prunings
       ~(alpha : float)

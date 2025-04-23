@@ -245,7 +245,7 @@ let apply
 
 type ('typ,'value,'var,'constr,'func) refinement =
   | RInit
-  | RStep of [`Input|`Output] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *)
+  | RStep of [`Input|`Output|`Expr] * ('var,'constr) path * ('typ,'value,'var,'constr,'func) model (* new submodel *) * int (* support *)
 
 let refinement_support : ('typ,'value,'var,'constr,'func) refinement -> int = function
   | RInit -> (-1)
@@ -261,7 +261,8 @@ let xp_refinement
        let in_out, i_o =
          match side with
          | `Input -> " In", "i"
-         | `Output -> " Out", "o" in
+         | `Output -> " Out", "o"
+         | `Expr -> " Expr", "e" in
        aux2 ~html print in_out p ri supp i_o
   and aux2 ~html print in_out p r supp i_o =
     if supp <> 0 (* undefined value *) then

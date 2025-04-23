@@ -430,31 +430,6 @@ class ['state] search
         memed_out = (res_opt = None) }
   end
 
-(* XX let filter_refinements ~refinement_branching lrefs =
-  (* keep the most compressive and alternative refinements for search *)
-  match lrefs with
-  | [] -> []
-  | (dl1,r1,m1)::others ->
-     let state1 = StateTodo {r=r1; m=m1; dl=dl1} in
-     let _, rev_states2 = (* retaining only other refinements on same side and path *)
-       List.fold_left
-         (fun (rank,res) (dl2,r2,m2) ->
-           let ok =
-             rank < refinement_branching &&
-               (match r1, r2 with
-                | RInit, RInit -> true
-                | RStep (side1,p1,sm1,_),
-                  RStep (side2,p2,sm2,_) ->
-                   side1 = side2 && p1 = p2 (* same side and path *)
-                | _ -> false) in
-           if ok
-           then
-             let state2 = StateTodo {r=r2; m=m2; dl=dl2} in
-             rank+1, state2::res
-           else rank, res)
-         (1, []) others in
-     state1 :: List.rev rev_states2 *)
-
 let rec states_of_refinements ~taburefs refs =
   match refs with
   | [] -> []
@@ -462,13 +437,13 @@ let rec states_of_refinements ~taburefs refs =
      let state1 = StateTodo {r=r1; m=m1; dl=dl1; taburefs} in
      state1 :: states_of_refinements ~taburefs:(r1::taburefs) others (* r1 is tabu for the search space starting from others *)
 
-let select_refinements ~refine_degree ~refinement_branching ~check_test_inputs state refs =
-  (* select [refine_degree] compressive refinements from sequence [refs], sort them, and filter alternative refinements *)
+let select_refinements ~refinement_branching ~check_test_inputs state refs =
+  (* select at most [refinement_branching] compressive refinements from sequence [refs] *)
   let ldescr, _ = state_ldescr_lpred state in
   let lema = state_lema state in
   let taburefs = state_taburefs state in (* parent taburefs, to be inherited *)
-  refs
-  |> myseq_find_map_k refine_degree
+  refs (* already sorted, keep ordering *)
+  |> myseq_find_map_k refinement_branching
        (fun (r1,m_ndl1_res) ->
          if List.mem r1 taburefs
          then None
@@ -477,13 +452,10 @@ let select_refinements ~refine_degree ~refinement_branching ~check_test_inputs s
            if ldescr -. ndl1 > 0.01 (* lema.tau *) -. lema && check_test_inputs m1 (* TODO: maybe allow DL increase only for refinment of Any ? or forbid expr refinements ? *)
            then Some (ndl1,r1,m1)
            else None)
-  |> List.sort Stdlib.compare
-  |> list_take refinement_branching
   |> states_of_refinements ~taburefs
-(* XX  |> filter_refinements ~refinement_branching *)
 
 let refining0
-      ~refine_degree ~refinement_branching ~input_branching ~solution_pool
+      ~refinement_branching ~input_branching ~solution_pool
       ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~check_test_inputs ~log_refining
       state0 =
@@ -502,7 +474,7 @@ let refining0
         | StateTodo _ -> assert false
         | StateDone {m; prs; drsi; drso} ->
            Common.prof "Learning.task_refinements" (fun () ->
-            select_refinements ~refine_degree ~refinement_branching ~check_test_inputs state
+            select_refinements ~refinement_branching ~check_test_inputs state
               (task_refinements
                  ~include_expr:true
                  ~include_input:true
@@ -774,8 +746,9 @@ let learn
       ~(log_refining : 'refinement -> 'task_model -> 'pairs_reads -> dl -> dl -> dl -> unit)
 
       ~memout ~timeout_refine ~timeout_prune
-      ~(refinement_branching : int) ~(input_branching : int)
-      ~(refine_degree : int) ~(solution_pool : int)
+      ~(refinement_branching : int)
+      ~(input_branching : int)
+      ~(solution_pool : int)
       ~(search_temperature : float)
       ~init_task_model
       (train_pairs : 'value Task.pair list)
@@ -839,7 +812,7 @@ let learn
   print_endline "REFINING PHASE";
   let state_refine, result_refining =
     refining0
-      ~refine_degree ~refinement_branching ~input_branching ~solution_pool
+      ~refinement_branching ~input_branching ~solution_pool
       ~timeout_refine ~memout
       ~data_of_model ~task_refinements ~check_test_inputs ~log_refining
       (StateDone state0) in
@@ -851,8 +824,11 @@ let learn
       let {r; m; prs; drsi; ldescr; lpred; lema} = state in
       log_refining r m prs ldescr lpred lema;
       m, prs, drsi, ldescr, lpred in
-    let lstate1 = (* computing the [refine_degree] most compressive valid refinements *)
-      myseq_find_map_k refine_degree
+    let refs =
+      Common.prof "Learning.task_prunings" (fun () ->
+      Myseq.to_rev_list (task_prunings m prs drsi)) in
+    let lstate1 =
+      List.filter_map
         (fun (r1, m_dl1_res) ->
           let@ m1, dl1 = Result.to_option m_dl1_res in
           match data_of_model ~pruning:true r1 m1 [] with
@@ -862,8 +838,7 @@ let learn
              if ldescr1 < ldescr && lpred1 <= lpred (* must not degrade parse ranks and output data *)
              then Some (ldescr1, state1)
              else None)
-        (Common.prof "Learning.task_prunings" (fun () ->
-             task_prunings m prs drsi)) in
+        refs in
     let lstate1 = List.sort Stdlib.compare lstate1 in
     match lstate1 with
     | [] -> ()

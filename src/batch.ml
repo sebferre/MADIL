@@ -214,7 +214,6 @@ let print_learned_model
           ~timeout_prune:(!timeout_prune)
           ~refinement_branching:(!refinement_branching)
           ~input_branching:(!input_branching)
-          ~refine_degree:(!max_refinements)
           ~solution_pool:(!solution_pool)
           ~search_temperature:(!search_temperature)
           ~init_task_model

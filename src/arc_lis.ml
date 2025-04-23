@@ -120,7 +120,7 @@ object
     let> _ = k_extent focus in
     if focus.suggestions = [] then (
       Jsutils.firebug "Computing suggestions...";
-      let _, refinements, errors = (* selecting up to [refine_degree] compressive refinements, keeping other for information *)
+      let compr_refinements, non_compr_refinements, errors =
         (try
            match focus.stage with
            | Build -> task_refinements
@@ -134,13 +134,10 @@ object
            print_endline (Printexc.to_string exn);
            Myseq.empty)
         |> Myseq.fold_left
-             (fun (quota_compressive,refinements, errors as res) (r,m_dl_res) ->
-               if quota_compressive <= 0
-               then res (* TODO: stop generating sequence *)
-               else
+             (fun (compressive_refinements, non_compressive_refinements, errors) (r,m_dl_res) ->
                  match m_dl_res with
                  | Result.Ok (m,dl) ->
-                    (match state_of_model
+                    (match state_of_model (* TODO: delay this to when refinement selected *)
                              focus.name focus.task focus.stage focus.include_refs
                              r m dl
                              focus.r_i focus.r_o focus.dl0 with
@@ -151,37 +148,32 @@ object
                               then (* in pruning stage, L(input rank + output data|M) must not increase *)
                                 state.lpred <= focus.lpred
                               else true) in
-                        (if compressive then quota_compressive - 1 else quota_compressive),
-                        (compressive,state)::refinements,
-                        errors
+                        if compressive
+                        then state :: compressive_refinements,
+                             non_compressive_refinements,
+                             errors
+                        else compressive_refinements,
+                             state :: non_compressive_refinements,
+                             errors
                      | Result.Error err ->
-                        quota_compressive,
-                        refinements,
+                        compressive_refinements,
+                        non_compressive_refinements,
                         (r,err)::errors)
                  | Result.Error err ->
-                    quota_compressive,
-                    refinements,
+                    compressive_refinements,
+                    non_compressive_refinements,
                     (r,err)::errors)
-             (!max_refinements, [], []) in
-      let refinements =
-        refinements
-        |> List.sort (* sorting by decreasing support, then increasing DL *)
-             (fun (compr1,s1) (compr2,s2) ->
-               (*let sup1, sup2 =
-                 match focus.stage with
-                 
-                 | Build -> s2.refinement_support, s1.refinement_support
-                 | Prune -> s1.refinement_support, s2.refinement_support in*)
-               Stdlib.compare (* compressive first, then higher support first, then lower DL first *)
-                 (compr2, (*sup1,*) s1.estimate_dl, s1.refinement)
-                 (compr1, (*sup2,*) s2.estimate_dl, s2.refinement)) in
+             ([], [], []) in
       let suggestions =
         InputTask (new Focus.input default_name_task)
         :: ResetTask
-        :: List.map (fun (compressive,s) ->
-               RefinedState ((s :> arc_state), compressive))
-             refinements
-        @ List.map (fun (r,err) ->
+        :: List.rev_map (fun s ->
+               RefinedState ((s :> arc_state), true))
+             compr_refinements
+        @ List.rev_map (fun s ->
+               RefinedState ((s :> arc_state), false))
+             non_compr_refinements
+        @ List.rev_map (fun (r,err) ->
               FailedRefinement (r,err))
             errors
         @ (let new_stage =
