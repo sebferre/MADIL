@@ -387,9 +387,9 @@ let w_results : (col, unit, cell) Widget_table.widget =
 
 
 let render_place place k =
-  let get_pred ~test m vi vo =
+  let get_pred ~input_pred ~test m vi vo =
     let focus = place#focus in
-    if true (* focus.dls.d.o <= 0. *)
+    if Js.to_bool input_pred##.checked
     then
       try
         match apply m vi focus.r_i focus.r_o focus.dl0 with
@@ -398,8 +398,9 @@ let render_place place k =
         | Result.Error exn -> Error (Printexc.to_string exn)
       with exn ->
         Error ("Unexpected error: " ^ Printexc.to_string exn)
-    else Error "Not yet definite"
+    else Error "Prediction not active"
   in
+ Jsutils.jquery_input "#checkbox-prediction" (fun input_pred ->
  Jsutils.jquery "#lis-suggestions" (fun elt_lis ->
   let> _ = Jsutils.toggle_class elt_lis "computing" in (* turn on *)
   Jsutils.firebug "Displaying the new model...";   
@@ -412,7 +413,7 @@ let render_place place k =
         List.map
           (fun pair ->
             let {Task.input=vi; output=vo} = pair in
-            let pred = get_pred ~test:true ext.model vi vo in
+            let pred = get_pred ~input_pred ~test:true ext.model vi vo in
             [ ColExample, Example (vi,vo);
               ColPred, pred ])
           ext.task.test in
@@ -421,7 +422,7 @@ let render_place place k =
           (fun pair reads l_bindings ->
             let {Task.input=vi; output=vo} = pair in
             let descr = Descr reads in
-            let pred = get_pred ~test:false ext.model vi vo in
+            let pred = get_pred ~input_pred ~test:false ext.model vi vo in
             let row =
               [ ColExample, Example (vi,vo);
                 ColDescr, descr;
@@ -440,7 +441,7 @@ let render_place place k =
       w_suggestions#on_suggestion_selection suggestion_handler;
       Jsutils.firebug "DONE";
       let _on = Jsutils.toggle_class elt_lis "computing" in (* turn off *)
-      ()))
+      ())))
 
 
 let handle_document_keydown ev place k =
