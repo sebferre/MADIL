@@ -31,6 +31,15 @@ let all_include_refs =
     { inc_input = false; inc_output = true; inc_expr = false };
     { inc_input = false; inc_output = true; inc_expr = true } ]
 
+type arc_state_reads =
+  { prs : pairs_reads; (* pair reads *)
+    dsri : reads; (* input reads *)
+    dsro : reads; (* output reads *)
+    dl_split : Task_model.dl_split; (* DL components *)
+    ldescr : dl; (* description-oriented DL *)
+    lpred : dl; (* prediction-oriented DL *)
+  }
+
 type arc_state =
   { name : string; (* task name *)
     task : task; (* task *)
@@ -42,13 +51,9 @@ type arc_state =
     r_i : distrib; (* input distrib *)
     r_o : distrib; (* output distrib *)
     dl0 : Task_model.dl_io; (* initial DLs *)
-    prs : pairs_reads; (* pair reads *)
-    dsri : reads; (* input reads *)
-    dsro : reads; (* output reads *)
     estimate_dl : dl; (* estimate DL when computed refinement, expected equal to dls.ldescr *)
-    dl_split : Task_model.dl_split; (* DL components *)
-    ldescr : dl; (* description-oriented DL *)
-    lpred : dl; (* prediction-oriented DL *)
+    reads : arc_state_reads result Lazy.t;
+    
     mutable suggestions : arc_suggestion list;
   }
 and arc_suggestion =
@@ -64,18 +69,34 @@ type arc_focus = arc_state
 type arc_extent = arc_state
 
 let rec state_of_model (name : string) (task : task) (stage : learning_stage) (include_refs : include_refs) (refinement : refinement) (model : task_model) (estimate_dl : dl) (r_i : distrib) (r_o : distrib) (dl0 : Task_model.dl_io) : (arc_state, exn) Result.t =
-  try
-  let| prs = read_pairs model task.train r_i r_o dl0 in
-  let| () = (* checking that the input model can parse the test inputs *)
-    let mi = model.Task_model.input_model in
-    if
-      List.for_all
-        (fun vi -> does_parse_value mi Expr.bindings0 vi r_i)
-        (List.map (fun pair -> pair.Task.input) task.test)
-    then Result.Ok ()
-    else Result.Error Model.Parse_failure in
-  let dsri, dsro = Task_model.split_pairs_read prs in
-  let dl_split = Task_model.dl_model_data ~alpha:(!alpha) prs in
+  let reads =
+    lazy
+      (try
+         let| prs = read_pairs model task.train r_i r_o dl0 in
+         let| () = (* checking that the input model can parse the test inputs *)
+           let mi = model.Task_model.input_model in
+           if
+             List.for_all
+               (fun vi -> does_parse_value mi Expr.bindings0 vi r_i)
+               (List.map (fun pair -> pair.Task.input) task.test)
+           then Result.Ok ()
+           else Result.Error Model.Parse_failure in
+         let dsri, dsro = Task_model.split_pairs_read prs in
+         let dl_split = Task_model.dl_model_data ~alpha:(!alpha) prs in
+         Result.Ok
+           { prs; dsri; dsro;
+             dl_split;
+             ldescr =
+               (match stage with
+                | Build -> dl_split.descr_refine
+                | Prune -> dl_split.descr_prune);
+             lpred = dl_split.pred }
+       with exn ->
+         print_endline "FAILURE to compute new state for some refinement";
+         print_endline (Printexc.to_string exn);
+         print_string "refinement: "; pp_endline xp_refinement refinement;
+         print_string "model: "; pp_endline xp_task_model model;
+         Result.Error exn) in
   Result.Ok
     { name; task;
       stage;
@@ -83,21 +104,9 @@ let rec state_of_model (name : string) (task : task) (stage : learning_stage) (i
       refinement;
       refinement_support = Task_model.refinement_support refinement;
       model; r_i; r_o; dl0;
-      prs; dsri; dsro;
       estimate_dl;
-      dl_split;
-      ldescr =
-        (match stage with
-         | Build -> dl_split.descr_refine
-         | Prune -> dl_split.descr_prune);
-      lpred = dl_split.pred;
+      reads;
       suggestions = [] }
-  with exn ->
-    print_endline "FAILURE to compute new state for some refinement";
-    print_endline (Printexc.to_string exn);
-    print_string "refinement: "; pp_endline xp_refinement refinement;
-    print_string "model: "; pp_endline xp_task_model model;
-    Result.Error exn
                
 let initial_focus (name : string) (task : task) : arc_focus =
   let {varseq; input_model; output_model;
@@ -122,13 +131,17 @@ object
       Jsutils.firebug "Computing suggestions...";
       let compr_refinements, non_compr_refinements, errors =
         (try
+           let focus_reads =
+             match Lazy.force focus.reads with
+             | Result.Ok reads -> reads
+             | _ -> assert false in
            match focus.stage with
            | Build -> task_refinements
                         ~include_expr:focus.include_refs.inc_expr
                         ~include_input:focus.include_refs.inc_input
                         ~include_output:focus.include_refs.inc_output
-                        focus.model focus.prs focus.dsri focus.dsro
-           | Prune -> task_prunings focus.model focus.prs focus.dsri
+                        focus.model focus_reads.prs focus_reads.dsri focus_reads.dsro
+           | Prune -> task_prunings focus.model focus_reads.prs focus_reads.dsri
          with exn ->
            print_endline "FAILURE to compute refinements";
            print_endline (Printexc.to_string exn);
@@ -143,11 +156,12 @@ object
                              focus.r_i focus.r_o focus.dl0 with
                      | Result.Ok state ->
                         let compressive =
-                          state.ldescr < focus.ldescr
-                          && (if focus.stage = Prune && state.stage = Prune
+                          state.stage = Prune
+                          || state.estimate_dl < focus.estimate_dl in
+                          (* XX && (if focus.stage = Prune && state.stage = Prune
                               then (* in pruning stage, L(input rank + output data|M) must not increase *)
                                 state.lpred <= focus.lpred
-                              else true) in
+                              else true) in *)
                         if compressive
                         then state :: compressive_refinements,
                              non_compressive_refinements,
@@ -204,21 +218,30 @@ object
       |> List.map (fun sugg -> `Sugg sugg) in
     k_suggestions [suggestions]
 
-  method activate = function
+  method activate =
+    let check_and_activate_state s = (* checking that the new state parses training examples *)
+      match Lazy.force s.reads with
+      | Result.Ok _ -> Some (new arc_place lis s)
+      | Result.Error _ -> Jsutils.alert "Failure to parse all examples with this model"; None
+    in
+    function
     | InputTask i ->
        reset_memoization ();
        let name, task = i#get in
        let state = initial_focus name task in
-       Some (new arc_place lis state)
+       check_and_activate_state state
     | ResetTask ->
-       Some (new arc_place lis (initial_focus focus.name focus.task))
+       let s = initial_focus focus.name focus.task in
+       check_and_activate_state s
     | ChangeStage s ->
-       Some (new arc_place lis s)
+       check_and_activate_state s
     | ChangeIncludeRefs s ->
-       Some (new arc_place lis s)
+       check_and_activate_state s
     | RefinedState (s,_) ->
-       Some (new arc_place lis s)
-    | FailedRefinement _ -> None
+       check_and_activate_state s
+    | FailedRefinement _ ->
+       Jsutils.alert "This refinement is not valid";
+       None
 
   method abort = ()
 
@@ -254,14 +277,18 @@ let html_dl dl =
   Printf.sprintf "%.3f" dl
    
 let xml_of_focus focus =
-  let l = focus.dl_split in
+  let focus_reads =
+    match Lazy.force focus.reads with
+    | Result.Ok reads -> reads
+    | _ -> assert false in
+  let l = focus_reads.dl_split in
   [Syntax.Block
      [[Syntax.Kwd (Printf.sprintf "Task %s [%s]"
                      focus.name
                      (match focus.stage with
                       | Build -> "building stage"
                       | Prune -> "pruning stage"))];
-      [Syntax.Kwd (Printf.sprintf "DL = %f / %frido" focus.ldescr focus.lpred)];
+      [Syntax.Kwd (Printf.sprintf "DL = %f / %frido" focus_reads.ldescr focus_reads.lpred)];
       [Syntax.Kwd (Printf.sprintf "DL = %.3f = %.3fm + %.3fd = (%.3fmi + %.3fmo) + (%.3fdi / %.3fri + %.3fdo / %.3fro) = %.3fi + %.3fo" (l.md.i +. l.md.o) (l.m.i +. l.m.o) (l.d.i +. l.d.o) l.m.i l.m.o l.d.i l.r.i l.d.o l.r.o l.md.i l.md.o)];
       [Syntax.Kwd (Xprint.to_string (xp_model ~html) (*~ctx:ctx0*) focus.model.input_model)];
       [Syntax.Kwd " ⬇ "];
@@ -289,7 +316,8 @@ let html_of_suggestion ~input_dico = function
      "reset current task"
   | ChangeStage s ->
      Jsutils.escapeHTML
-       (Printf.sprintf "(%.3f / %.3frido) switch to %s stage " s.ldescr s.lpred
+       (* (Printf.sprintf "(%.3f / %.3frido) switch to %s stage " s.ldescr s.lpred *)
+       (Printf.sprintf "(%.3f) switch to %s stage " s.estimate_dl
           (match s.stage with Build -> "building" | Prune -> "pruning"))
   | ChangeIncludeRefs s ->
      let inc = s.include_refs in
@@ -300,11 +328,12 @@ let html_of_suggestion ~input_dico = function
      Jsutils.escapeHTML label
   | RefinedState (s,compressive) ->
      Html.span ~classe:(if compressive then "compressive" else "non-compressive")
-       (let sep =
+       ((* let sep =
           if floor (s.estimate_dl *. 1000.) = floor (s.dl_split.descr_refine *. 1000.)
           then "="
-          else "~" in
-        Printf.sprintf "(%.3f %s %.3f / %.3f) " s.estimate_dl sep s.ldescr s.lpred
+          else "~" in *)
+        (* Printf.sprintf "(%.3f %s %.3f / %.3f) " s.estimate_dl sep s.ldescr s.lpred *)
+        Printf.sprintf "(%.3f) " s.estimate_dl
         ^ Xprint.to_string (xp_refinement ~html) s.refinement)
   | FailedRefinement (r,err) ->
      Html.span ~classe:"failed-refinement"
@@ -407,28 +436,32 @@ let render_place place k =
   let xml = xml_of_focus place#focus in
   let> _ = w_focus#set_syntax xml in
   place#eval
-    (fun ext ->
+    (fun focus ->
+      let focus_reads =
+        match Lazy.force focus.reads with
+        | Result.Ok reads -> reads
+        | _ -> assert false in
       Jsutils.firebug "Displaying the examples...";
       let l_bindings =
         List.map
           (fun pair ->
             let {Task.input=vi; output=vo} = pair in
-            let pred = get_pred ~input_pred ~test:true ext.model vi vo in
+            let pred = get_pred ~input_pred ~test:true focus.model vi vo in
             [ ColExample, Example (vi,vo);
               ColPred, pred ])
-          ext.task.test in
+          focus.task.test in
       let l_bindings =
         List.fold_right2
           (fun pair reads l_bindings ->
             let {Task.input=vi; output=vo} = pair in
             let descr = Descr reads in
-            let pred = get_pred ~input_pred ~test:false ext.model vi vo in
+            let pred = get_pred ~input_pred ~test:false focus.model vi vo in
             let row =
               [ ColExample, Example (vi,vo);
                 ColDescr, descr;
                 ColPred, pred ] in
             row::l_bindings)
-          ext.task.train ext.prs.reads l_bindings in
+          focus.task.train focus_reads.prs.reads l_bindings in
       w_results#set_contents cols l_bindings)
     (fun suggestions ->
       Jsutils.firebug "Displaying the refinements...";
@@ -437,7 +470,7 @@ let render_place place k =
         (fun sugg ->
           match place#activate sugg with
           | Some p -> k ~push_in_history:true p
-          | None -> Jsutils.alert "This suggestion cannot be activated") in
+          | None -> ()) in
       w_suggestions#on_suggestion_selection suggestion_handler;
       Jsutils.firebug "DONE";
       let _on = Jsutils.toggle_class elt_lis "computing" in (* turn off *)
