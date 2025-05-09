@@ -155,19 +155,25 @@ object
                              r m dl
                              focus.r_i focus.r_o focus.dl0 with
                      | Result.Ok state ->
-                        let compressive =
-                          state.stage = Prune
-                          || state.estimate_dl < focus.estimate_dl in
-                          (* XX && (if focus.stage = Prune && state.stage = Prune
-                              then (* in pruning stage, L(input rank + output data|M) must not increase *)
-                                state.lpred <= focus.lpred
-                              else true) in *)
-                        if compressive
-                        then state :: compressive_refinements,
-                             non_compressive_refinements,
-                             errors
+                        let keep, compressive =
+                          match state.stage with
+                          | Build -> true, state.estimate_dl < focus.estimate_dl
+                          | Prune ->
+                             (match Lazy.force state.reads, Lazy.force focus.reads with
+                              | Result.Ok state_reads, Result.Ok focus_reads ->
+                                 true, state_reads.lpred <= focus_reads.lpred
+                              | _ -> false, false) in
+                        if keep
+                        then
+                          if compressive
+                          then state :: compressive_refinements,
+                               non_compressive_refinements,
+                               errors
+                          else compressive_refinements,
+                               state :: non_compressive_refinements,
+                               errors
                         else compressive_refinements,
-                             state :: non_compressive_refinements,
+                             non_compressive_refinements,
                              errors
                      | Result.Error err ->
                         compressive_refinements,
