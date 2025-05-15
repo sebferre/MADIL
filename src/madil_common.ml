@@ -126,6 +126,18 @@ let array_rotate (ar : 'a array) (shift : int) : 'a array =
 
 let ( let@ ) = Option.bind
 
+let array_map_option (f : 'a -> 'b option) (xs : 'a array) : 'b array option =
+  try
+    Some
+      (Array.map
+         (fun x ->
+           match f x with
+           | Some y -> y
+           | None -> raise Not_found)
+         xs)
+  with Not_found ->
+    None
+
 (* result *)
         
 type 'a result = ('a,exn) Result.t
