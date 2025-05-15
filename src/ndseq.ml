@@ -34,6 +34,13 @@ let as_seq (x : 'a t) : (int * 'a list) option = (* item depth and items *)
   | `Seq (d,l) -> Some (d,l)
   | _ -> None
 
+let choose (x : 'a t) : 'a option =
+  let rec aux = function
+    | `Seq (d,l) -> List.find_map aux l
+    | x -> Some x
+  in
+  aux x
+
 let fold_left (f : 'b -> 'a -> 'b) (init : 'b) (x : 'a t) : 'b =
   let rec aux acc = function
     | `Seq (_, l) -> List.fold_left aux acc l
