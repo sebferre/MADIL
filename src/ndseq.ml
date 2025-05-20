@@ -16,17 +16,16 @@ type 'a t = [> 'a seq] as 'a
 
 exception Invalid_depth (* undefined depth in structure *)
 
-let rec depth : 'a t -> int = function
+let rec ndim : 'a t -> int = function
   | `Seq (d, l) ->
      assert (d >= 0);
-     assert (List.for_all (fun x -> depth x = d) l);
+     assert (List.for_all (fun x -> ndim x = d) l);
      1 + d
   | _ -> 0
-let ndim = depth
 
 let seq (d : int) (items : 'a list) : 'a t =
   assert (d >= 0);
-  assert (List.for_all (fun item -> depth item = d) items);
+  assert (List.for_all (fun item -> ndim item = d) items);
   `Seq (d, items)
 
 let as_seq (x : 'a t) : (int * 'a list) option = (* item depth and items *)
@@ -624,7 +623,7 @@ let all_same_size_or_one (xs : 'a t array) : int option =
 let broadcastable (xs : 'a t array) : bool =
   (* when broadcast_result is well-defined *)
   let rec aux xs =
-    if Array.for_all (fun x -> depth x = 0) xs (* all scalars *)
+    if Array.for_all (fun x -> ndim x = 0) xs (* all scalars *)
     then true
     else
       match all_same_size_or_one xs with
@@ -684,7 +683,7 @@ let broadcast_result (f : 'a array -> 'b result) (xs : 'a t array) : 'b t result
   | _ ->
      let d =
        Array.fold_left
-         (fun res x -> max res (depth x))
+         (fun res x -> max res (ndim x))
          0 xs in
      aux d xs (* the real broadcasting case *)
 
