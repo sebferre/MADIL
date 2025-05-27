@@ -580,21 +580,18 @@ let transpose (x : 'a t) : 'a t option =
 let flatten_by_rows ?(snake = false) (x : 'a t) : 'a t option =
   match x with
   | `Seq (d0,l0) ->
-     (match l0 with
-      | [] -> Some x (* empty ndseq *)
-      | `Seq (d1,l1) :: _ ->
-         let@ ll1 =
-           list_mapi_option
-             (fun j -> function
-               | `Seq (_, l1') ->
-                  if snake && j mod 2 <> 0
-                  then Some (List.rev l1')
-                  else Some l1'
-               | _ -> None)
-             l0 in
-         let l01 = List.concat ll1 in
-         Some (`Seq (d1, l01))
-      | _ -> None)
+     let@ ll1 =
+       list_mapi_option
+         (fun j -> function
+           | `Seq (_, l1') ->
+              if snake && j mod 2 <> 0
+              then Some (List.rev l1')
+              else Some l1'
+           | _ -> None)
+         l0 in
+     let d1 = d0 - 1 in
+     let l01 = List.concat ll1 in
+     Some (`Seq (d1, l01))
   | _ -> None
 
 let flatten_by_cols ?(snake = false) (x : 'a t) : 'a t option =
