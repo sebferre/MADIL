@@ -1,6 +1,5 @@
 
 open Madil_common
-open Data
 
 type ('typ,'value,'var,'func) expr =
   | Const of 'typ * 'value

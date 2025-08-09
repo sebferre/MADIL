@@ -1,6 +1,5 @@
 
 open Madil_common
-open Data
 open Model
 
 (* pair encoding *)
